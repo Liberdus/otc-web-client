@@ -82,7 +82,7 @@
             <label for="buyAmount">Buy Amount:</label>
             <input type="text" id="buyAmount" placeholder="Enter amount (e.g., 10)">
         </div>
-        <button onclick="createOrder()">Create Order</button>
+        <button onclick="window.createOrder()">Create Order</button>
         <div id="status"></div>
     </div>
 
@@ -93,8 +93,31 @@
             "function approve(address spender, uint256 amount) external returns (bool)"
         ];
 
-        async function createOrder() {
+        window.createOrder = async function() {
             try {
+                console.log('Starting order creation...');
+                
+                // Get form values FIRST
+                const partner = document.getElementById('partner').value || ethers.constants.AddressZero;
+                const sellToken = document.getElementById('sellToken').value;
+                const buyToken = document.getElementById('buyToken').value;
+                const sellAmountInput = document.getElementById('sellAmount').value;
+                const buyAmountInput = document.getElementById('buyAmount').value;
+
+                // Then do validation
+                if (!ethers.utils.isAddress(sellToken)) {
+                    throw new Error('Invalid sell token address');
+                }
+                if (!ethers.utils.isAddress(buyToken)) {
+                    throw new Error('Invalid buy token address');
+                }
+                if (isNaN(sellAmountInput) || sellAmountInput <= 0) {
+                    throw new Error('Invalid sell amount');
+                }
+                if (isNaN(buyAmountInput) || buyAmountInput <= 0) {
+                    throw new Error('Invalid buy amount');
+                }
+                
                 // Connect to MetaMask
                 if (typeof window.ethereum === 'undefined') {
                     alert('Please install MetaMask!');
@@ -105,18 +128,30 @@
                 const provider = new ethers.providers.Web3Provider(window.ethereum);
                 const signer = provider.getSigner();
 
-                // Get form values
-                const partner = document.getElementById('partner').value || ethers.constants.AddressZero;
-                const sellToken = document.getElementById('sellToken').value;
-                const sellAmount = ethers.utils.parseUnits(document.getElementById('sellAmount').value, 18);
-                const buyToken = document.getElementById('buyToken').value;
-                const buyAmount = ethers.utils.parseUnits(document.getElementById('buyAmount').value, 18);
+                console.log('Connected to wallet, getting form values...');
 
-                // First approve the contract to spend tokens
-                const tokenContract = new ethers.Contract(sellToken, ['function approve(address spender, uint256 amount) external returns (bool)'], signer);
+                
+                // Get token decimals first
+                const tokenContract = new ethers.Contract(sellToken, [
+                    'function decimals() view returns (uint8)',
+                    'function approve(address spender, uint256 amount) external returns (bool)'
+                ], signer);
+                const decimals = await tokenContract.decimals();
+                
+                // Use correct decimals
+                const sellAmount = ethers.utils.parseUnits(document.getElementById('sellAmount').value, decimals);
+                const buyAmount = ethers.utils.parseUnits(document.getElementById('buyAmount').value, decimals);
+
+                console.log('Approving token spend...', {
+                    sellToken,
+                    sellAmount: sellAmount.toString(),
+                    contractAddress
+                });
+                // Reuse the existing tokenContract instance for approval
                 const approveTx = await tokenContract.approve(contractAddress, sellAmount);
                 await approveTx.wait();
 
+                console.log('Creating order...');
                 // Create the order
                 const contract = new ethers.Contract(contractAddress, contractABI, signer);
                 const tx = await contract.createOrder(partner, sellToken, sellAmount, buyToken, buyAmount);
@@ -126,7 +161,11 @@
                 const receipt = await tx.wait();
                 document.getElementById('status').innerHTML = `Order created successfully! Transaction: ${receipt.transactionHash}`;
             } catch (error) {
+                console.error('Detailed error:', error);
                 document.getElementById('status').innerHTML = `Error: ${error.message}`;
+                if (error.data) {
+                    console.error('Error data:', error.data);
+                }
             }
         }
     </script>
