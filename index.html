@@ -93,6 +93,17 @@
             "function approve(address spender, uint256 amount) external returns (bool)"
         ];
 
+        async function checkAllowance(tokenContract, owner, spender) {
+            try {
+                const allowance = await tokenContract.allowance(owner, spender);
+                console.log('Current allowance:', ethers.utils.formatUnits(allowance));
+                return allowance;
+            } catch (error) {
+                console.error('Error checking allowance:', error);
+                return ethers.constants.Zero;
+            }
+        }
+
         window.createOrder = async function() {
             try {
                 console.log('Starting order creation...');
@@ -134,7 +145,9 @@
                 // Get token decimals first
                 const tokenContract = new ethers.Contract(sellToken, [
                     'function decimals() view returns (uint8)',
-                    'function approve(address spender, uint256 amount) external returns (bool)'
+                    'function approve(address spender, uint256 amount) external returns (bool)',
+                    'function balanceOf(address account) view returns (uint256)',
+                    'function allowance(address owner, address spender) view returns (uint256)'
                 ], signer);
                 const decimals = await tokenContract.decimals();
                 
@@ -142,27 +155,211 @@
                 const sellAmount = ethers.utils.parseUnits(document.getElementById('sellAmount').value, decimals);
                 const buyAmount = ethers.utils.parseUnits(document.getElementById('buyAmount').value, decimals);
 
-                console.log('Approving token spend...', {
+                // Add network check
+                const network = await provider.getNetwork();
+                console.log('Connected to network:', network);
+
+                // Add balance check
+                const balance = await provider.getBalance(await signer.getAddress());
+                console.log('Account balance:', ethers.utils.formatEther(balance), 'POL');
+
+                // Add token balance check
+                const tokenBalance = await tokenContract.balanceOf(await signer.getAddress());
+                console.log('Token balance:', ethers.utils.formatUnits(tokenBalance, decimals));
+
+                // Modified approval section
+                const userAddress = await signer.getAddress();
+                const currentAllowance = await checkAllowance(tokenContract, userAddress, contractAddress);
+                
+                if (currentAllowance.lt(sellAmount)) {
+                    console.log('Approving token spend...', {
+                        sellToken,
+                        sellAmount: sellAmount.toString(),
+                        contractAddress
+                    });
+                    
+                    try {
+                        // Skip the reset to 0 step and try direct approval with specific parameters
+                        const approvalAmount = ethers.constants.MaxUint256; // Infinite approval
+                        const approveTx = await tokenContract.approve(
+                            contractAddress, 
+                            approvalAmount,
+                            {
+                                gasLimit: 100000,
+                                gasPrice: await provider.getGasPrice(),
+                                nonce: await provider.getTransactionCount(userAddress)
+                            }
+                        );
+                        console.log('Approval transaction submitted:', approveTx.hash);
+                        
+                        // Wait for confirmation with timeout
+                        const receipt = await Promise.race([
+                            approveTx.wait(),
+                            new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error('Approval timeout')), 30000)
+                            )
+                        ]);
+                        
+                        console.log('Approval confirmed in block:', receipt.blockNumber);
+                        
+                        // Verify the new allowance
+                        const newAllowance = await checkAllowance(tokenContract, userAddress, contractAddress);
+                        console.log('New allowance:', ethers.utils.formatUnits(newAllowance));
+                        
+                        if (newAllowance.lt(sellAmount)) {
+                            throw new Error('Approval failed - allowance not increased');
+                        }
+                    } catch (approvalError) {
+                        console.error('Approval error details:', {
+                            error: approvalError,
+                            token: sellToken,
+                            owner: userAddress,
+                            spender: contractAddress
+                        });
+                        
+                        // Check if the token contract exists
+                        const code = await provider.getCode(sellToken);
+                        if (code === '0x') {
+                            throw new Error('Invalid token contract - no code at address');
+                        }
+                        
+                        throw new Error(`Approval failed: ${approvalError.message}`);
+                    }
+                } else {
+                    console.log('Sufficient allowance already exists');
+                }
+
+                console.log('Creating order with params:', {
+                    partner,
                     sellToken,
                     sellAmount: sellAmount.toString(),
-                    contractAddress
+                    buyToken,
+                    buyAmount: buyAmount.toString()
                 });
-                // Reuse the existing tokenContract instance for approval
-                const approveTx = await tokenContract.approve(contractAddress, sellAmount);
-                await approveTx.wait();
 
-                console.log('Creating order...');
-                // Create the order
-                const contract = new ethers.Contract(contractAddress, contractABI, signer);
-                const tx = await contract.createOrder(partner, sellToken, sellAmount, buyToken, buyAmount);
-                
-                document.getElementById('status').innerHTML = `Transaction submitted: ${tx.hash}`;
-                
-                const receipt = await tx.wait();
-                document.getElementById('status').innerHTML = `Order created successfully! Transaction: ${receipt.transactionHash}`;
+                try {
+                    const contract = new ethers.Contract(contractAddress, contractABI, signer);
+                    
+                    // Add validation before transaction
+                    const userAddress = await signer.getAddress();
+                    
+                    // Validate partner address
+                    if (partner !== ethers.constants.AddressZero) {
+                        if (partner.toLowerCase() === userAddress.toLowerCase()) {
+                            throw new Error('Partner address cannot be your own address');
+                        }
+                    }
+                    
+                    // Validate token addresses
+                    if (sellToken.toLowerCase() === buyToken.toLowerCase()) {
+                        throw new Error('Sell and buy tokens must be different');
+                    }
+                    
+                    // Validate allowance again
+                    const tokenContract = new ethers.Contract(sellToken, [
+                        'function allowance(address,address) view returns (uint256)'
+                    ], signer);
+                    const allowance = await tokenContract.allowance(userAddress, contractAddress);
+                    if (allowance.lt(sellAmount)) {
+                        throw new Error('Insufficient allowance for sell amount');
+                    }
+                    
+                    // Add transaction parameters
+                    const tx = await contract.createOrder(
+                        partner,
+                        sellToken,
+                        sellAmount,
+                        buyToken,
+                        buyAmount,
+                        {
+                            gasLimit: 300000,
+                            gasPrice: await provider.getGasPrice()
+                        }
+                    );
+                    
+                    console.log('Order creation transaction submitted:', tx.hash);
+                    document.getElementById('status').innerHTML = `Transaction submitted: ${tx.hash}`;
+                    
+                    const receipt = await tx.wait();
+                    
+                    // Check transaction status
+                    if (receipt.status === 0) {
+                        // Try to get more specific error information
+                        try {
+                            // Simulate the transaction to get the revert reason
+                            await provider.call(
+                                {
+                                    from: userAddress,
+                                    to: contractAddress,
+                                    data: contract.interface.encodeFunctionData('createOrder', [
+                                        partner,
+                                        sellToken,
+                                        sellAmount,
+                                        buyToken,
+                                        buyAmount
+                                    ])
+                                },
+                                receipt.blockNumber
+                            );
+                        } catch (callError) {
+                            console.error('Transaction simulation error:', callError);
+                            // Extract revert reason if available
+                            const revertReason = callError.data || callError.message;
+                            throw new Error(`Transaction reverted: ${revertReason}`);
+                        }
+                        throw new Error('Transaction failed - contract reverted');
+                    }
+                    
+                    console.log('Order creation confirmed in block:', receipt.blockNumber);
+                    document.getElementById('status').innerHTML = 
+                        `Order created successfully! Transaction: ${receipt.transactionHash}`;
+                    
+                } catch (orderError) {
+                    console.error('Order creation error details:', {
+                        error: orderError,
+                        params: {
+                            partner,
+                            sellToken,
+                            sellAmount: sellAmount.toString(),
+                            buyToken,
+                            buyAmount: buyAmount.toString()
+                        }
+                    });
+                    
+                    let errorMessage = 'Order creation failed. Please check:\n';
+                    if (orderError.code === 'CALL_EXCEPTION') {
+                        errorMessage += '1. You have sufficient token balance\n';
+                        errorMessage += '2. The token approvals are correct\n';
+                        errorMessage += '3. The partner address is valid\n';
+                        errorMessage += '4. The amounts are valid\n';
+                        errorMessage += '5. You are not trying to trade with yourself\n';
+                        errorMessage += '6. The tokens are different\n';
+                        if (orderError.reason) {
+                            errorMessage += `\nContract error: ${orderError.reason}`;
+                        }
+                    } else {
+                        errorMessage += orderError.message;
+                    }
+                    
+                    document.getElementById('status').innerHTML = `Error: ${errorMessage}`;
+                    throw new Error(errorMessage);
+                }
             } catch (error) {
                 console.error('Detailed error:', error);
-                document.getElementById('status').innerHTML = `Error: ${error.message}`;
+                let errorMessage = error.message;
+                
+                // Enhanced error handling
+                if (error.code === 'INSUFFICIENT_FUNDS') {
+                    errorMessage = 'Insufficient funds for transaction';
+                } else if (error.code === -32603) {
+                    errorMessage = 'Transaction failed. Please check: \n' +
+                        '1. Token contract address: ' + sellToken + '\n' +
+                        '2. Network: Amoy Testnet (Chain ID 80002)\n' +
+                        '3. Token supports ERC20 approve function\n' +
+                        '4. You have enough POL for gas';
+                }
+                
+                document.getElementById('status').innerHTML = `Error: ${errorMessage}`;
                 if (error.data) {
                     console.error('Error data:', error.data);
                 }
