@@ -108,6 +108,10 @@
             "function getActiveOrderIds(uint256 offset, uint256 limit) external view returns (uint256[] memory orderIds)"
         ];
 
+        const erc20ABI = [
+            "function decimals() external view returns (uint8)"
+        ];
+
         async function loadMyOrders() {
             try {
                 if (typeof window.ethereum === 'undefined') {
@@ -136,14 +140,21 @@
                         (currentOrderId - orders.makers.length + i) : 
                         (orders.makers.length - 1 - i);
 
+                    const sellTokenContract = new ethers.Contract(orders.sellTokens[i], erc20ABI, provider);
+                    const buyTokenContract = new ethers.Contract(orders.buyTokens[i], erc20ABI, provider);
+                    const [sellDecimals, buyDecimals] = await Promise.all([
+                        sellTokenContract.decimals(),
+                        buyTokenContract.decimals()
+                    ]);
+
                     const row = tbody.insertRow();
                     row.innerHTML = `
                         <td>${orderId}</td>
                         <td>${orders.partners[i] === ethers.constants.AddressZero ? 'Any' : shortenAddress(orders.partners[i])}</td>
                         <td>${shortenAddress(orders.sellTokens[i])}</td>
-                        <td>${ethers.utils.formatEther(orders.sellAmounts[i])}</td>
+                        <td>${ethers.utils.formatUnits(orders.sellAmounts[i], sellDecimals)}</td>
                         <td>${shortenAddress(orders.buyTokens[i])}</td>
-                        <td>${ethers.utils.formatEther(orders.buyAmounts[i])}</td>
+                        <td>${ethers.utils.formatUnits(orders.buyAmounts[i], buyDecimals)}</td>
                         <td>${new Date(orders.createdAts[i] * 1000).toLocaleString()}</td>
                         <td>
                             <button class="action-button" onclick="cancelOrder(${orderId})">Cancel Order</button>
