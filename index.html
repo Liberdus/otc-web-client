@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OTC Swap - Create Order</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <style>
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .nav {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        .nav a {
+            color: #4CAF50;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .nav a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+        .nav a.active {
+            color: #2E7D32;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="index.html" class="active">Create Order</a>
+            <a href="view-orders.html">View Orders</a>
+            <a href="my-orders.html">My Orders</a>
+            <a href="taker-orders.html">Taker Orders</a>
+        </div>
+        <h1>Create OTC Swap Order</h1>
+        <div class="form-group">
+            <label for="partner">Partner Address (optional):</label>
+            <input type="text" id="partner" placeholder="0x...">
+        </div>
+        <div class="form-group">
+            <label for="sellToken">Sell Token Address:</label>
+            <input type="text" id="sellToken" placeholder="0x...">
+        </div>
+        <div class="form-group">
+            <label for="sellAmount">Sell Amount:</label>
+            <input type="text" id="sellAmount" placeholder="Enter amount (e.g., 10)">
+        </div>
+        <div class="form-group">
+            <label for="buyToken">Buy Token Address:</label>
+            <input type="text" id="buyToken" placeholder="0x...">
+        </div>
+        <div class="form-group">
+            <label for="buyAmount">Buy Amount:</label>
+            <input type="text" id="buyAmount" placeholder="Enter amount (e.g., 10)">
+        </div>
+        <button onclick="createOrder()">Create Order</button>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const contractAddress = "0x48463C89254d001Bdc6B5d2af92d531E60FB4f72";
+        const contractABI = [
+            "function createOrder(address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount) external returns (uint256)",
+            "function approve(address spender, uint256 amount) external returns (bool)"
+        ];
+
+        async function createOrder() {
+            try {
+                // Connect to MetaMask
+                if (typeof window.ethereum === 'undefined') {
+                    alert('Please install MetaMask!');
+                    return;
+                }
+
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const signer = provider.getSigner();
+
+                // Get form values
+                const partner = document.getElementById('partner').value || ethers.constants.AddressZero;
+                const sellToken = document.getElementById('sellToken').value;
+                const sellAmount = ethers.utils.parseUnits(document.getElementById('sellAmount').value, 18);
+                const buyToken = document.getElementById('buyToken').value;
+                const buyAmount = ethers.utils.parseUnits(document.getElementById('buyAmount').value, 18);
+
+                // First approve the contract to spend tokens
+                const tokenContract = new ethers.Contract(sellToken, ['function approve(address spender, uint256 amount) external returns (bool)'], signer);
+                const approveTx = await tokenContract.approve(contractAddress, sellAmount);
+                await approveTx.wait();
+
+                // Create the order
+                const contract = new ethers.Contract(contractAddress, contractABI, signer);
+                const tx = await contract.createOrder(partner, sellToken, sellAmount, buyToken, buyAmount);
+                
+                document.getElementById('status').innerHTML = `Transaction submitted: ${tx.hash}`;
+                
+                const receipt = await tx.wait();
+                document.getElementById('status').innerHTML = `Order created successfully! Transaction: ${receipt.transactionHash}`;
+            } catch (error) {
+                document.getElementById('status').innerHTML = `Error: ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>

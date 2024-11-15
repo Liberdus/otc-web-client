@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OTC Swap - View Orders</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <style>
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .action-button {
+            padding: 5px 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin: 2px;
+        }
+        .action-button:hover {
+            background-color: #45a049;
+        }
+        .nav {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        .nav a {
+            color: #4CAF50;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .nav a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+        .nav a.active {
+            color: #2E7D32;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="index.html">Create Order</a>
+            <a href="view-orders.html" class="active">View Orders</a>
+            <a href="my-orders.html">My Orders</a>
+            <a href="taker-orders.html">Taker Orders</a>
+        </div>
+        <h1>Active OTC Swap Orders</h1>
+        <table id="ordersTable">
+            <thead>
+                <tr>
+                    <th>Maker</th>
+                    <th>Partner</th>
+                    <th>Sell Token</th>
+                    <th>Sell Amount</th>
+                    <th>Buy Token</th>
+                    <th>Buy Amount</th>
+                    <th>Created At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="ordersBody">
+            </tbody>
+        </table>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const contractAddress = "0x48463C89254d001Bdc6B5d2af92d531E60FB4f72";
+        const contractABI = [
+            "function getActiveOrders(uint256 offset, uint256 limit) external view returns (address[] memory makers, address[] memory partners, address[] memory sellTokens, uint256[] memory sellAmounts, address[] memory buyTokens, uint256[] memory buyAmounts, uint256[] memory createdAts, bool[] memory actives, uint256 nextOffset)",
+            "function fillOrder(uint256 orderId) external"
+        ];
+
+        async function loadOrders() {
+            try {
+                if (typeof window.ethereum === 'undefined') {
+                    alert('Please install MetaMask!');
+                    return;
+                }
+
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const contract = new ethers.Contract(contractAddress, contractABI, provider);
+
+                // Get active orders (first page with 100 orders)
+                const orders = await contract.getActiveOrders(0, 100);
+                const tbody = document.getElementById('ordersBody');
+                tbody.innerHTML = '';
+
+                // Start from nextOrderId - 1 and work backwards
+                let currentOrderId = orders.nextOffset;
+
+                for (let i = 0; i < orders.makers.length; i++) {
+                    // Skip orders that are not active
+                    if (!orders.actives[i]) continue;
+                    
+                    // Calculate the correct orderId for this position
+                    // If nextOffset is 0, we need to use the array length to calculate backwards
+                    const orderId = currentOrderId > 0 ? 
+                        (currentOrderId - orders.makers.length + i) : 
+                        (orders.makers.length - 1 - i);
+
+                    // Debug logging
+                    console.log(`Order at index ${i}:`, {
+                        maker: orders.makers[i],
+                        orderId: orderId,
+                        currentOrderId: currentOrderId,
+                        arrayLength: orders.makers.length
+                    });
+                    
+                    const row = tbody.insertRow();
+                    row.innerHTML = `
+                        <td>${shortenAddress(orders.makers[i])}</td>
+                        <td>${orders.partners[i] === ethers.constants.AddressZero ? 'Any' : shortenAddress(orders.partners[i])}</td>
+                        <td>${shortenAddress(orders.sellTokens[i])}</td>
+                        <td>${ethers.utils.formatEther(orders.sellAmounts[i])}</td>
+                        <td>${shortenAddress(orders.buyTokens[i])}</td>
+                        <td>${ethers.utils.formatEther(orders.buyAmounts[i])}</td>
+                        <td>${new Date(orders.createdAts[i] * 1000).toLocaleString()}</td>
+                        <td>
+                            <button class="action-button" onclick="approveTokens('${orders.buyTokens[i]}', '${orders.buyAmounts[i]}')">Approve</button>
+                            <button class="action-button" onclick="fillOrder(${orderId})">Fill Order</button>
+                        </td>
+                    `;
+                }
+            } catch (error) {
+                console.error('Load orders error:', error);
+                document.getElementById('status').innerHTML = `Error: ${error.message}`;
+            }
+        }
+
+        function shortenAddress(address) {
+            return `${address.substring(0, 6)}...${address.substring(38)}`;
+        }
+
+        async function fillOrder(orderId) {
+            try {
+                if (orderId < 0) {
+                    throw new Error(`Invalid order ID: ${orderId}`);
+                }
+
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const signer = provider.getSigner();
+                const userAddress = await signer.getAddress();
+                const contract = new ethers.Contract(contractAddress, contractABI, signer);
+
+                console.log('Attempting to fill order:', orderId);
+
+                // Get the order details first
+                const orders = await contract.getActiveOrders(0, 100);
+                const orderIndex = orders.makers.findIndex((maker, index) => {
+                    const calculatedOrderId = orders.nextOffset > 0 ? 
+                        (orders.nextOffset - orders.makers.length + index) : 
+                        (orders.makers.length - 1 - index);
+                    return calculatedOrderId === orderId;
+                });
+
+                if (orderIndex === -1) {
+                    throw new Error('Order not found or no longer active');
+                }
+
+                // Log all order details for debugging
+                console.log('Order details:', {
+                    maker: orders.makers[orderIndex],
+                    partner: orders.partners[orderIndex],
+                    sellToken: orders.sellTokens[orderIndex],
+                    sellAmount: ethers.utils.formatEther(orders.sellAmounts[orderIndex]),
+                    buyToken: orders.buyTokens[orderIndex],
+                    buyAmount: ethers.utils.formatEther(orders.buyAmounts[orderIndex]),
+                    active: orders.actives[orderIndex],
+                    userAddress: userAddress
+                });
+
+                // Check if the order is still active
+                if (!orders.actives[orderIndex]) {
+                    throw new Error('Order is not active');
+                }
+
+                // Check if we're an authorized partner
+                if (orders.partners[orderIndex] !== ethers.constants.AddressZero && 
+                    orders.partners[orderIndex] !== userAddress) {
+                    throw new Error('Not authorized partner for this order');
+                }
+
+                // Check buy token approval and balance
+                const buyTokenContract = new ethers.Contract(orders.buyTokens[orderIndex], [
+                    "function allowance(address owner, address spender) view returns (uint256)",
+                    "function balanceOf(address account) view returns (uint256)",
+                    "function symbol() view returns (string)"
+                ], provider);
+
+                const [allowance, balance, symbol] = await Promise.all([
+                    buyTokenContract.allowance(userAddress, contractAddress),
+                    buyTokenContract.balanceOf(userAddress),
+                    buyTokenContract.symbol()
+                ]);
+                
+                const requiredAmount = orders.buyAmounts[orderIndex];
+
+                console.log('Buy token checks:', {
+                    symbol: symbol,
+                    allowance: ethers.utils.formatEther(allowance),
+                    balance: ethers.utils.formatEther(balance),
+                    required: ethers.utils.formatEther(requiredAmount)
+                });
+
+                if (allowance.lt(requiredAmount)) {
+                    throw new Error(
+                        `Insufficient allowance for ${symbol} token (${orders.buyTokens[orderIndex]}).\n` +
+                        `Required: ${ethers.utils.formatEther(requiredAmount)}\n` +
+                        `Current: ${ethers.utils.formatEther(allowance)}`
+                    );
+                }
+
+                if (balance.lt(requiredAmount)) {
+                    throw new Error(
+                        `Insufficient ${symbol} balance.\n` +
+                        `Required: ${ethers.utils.formatEther(requiredAmount)}\n` +
+                        `Current: ${ethers.utils.formatEther(balance)}`
+                    );
+                }
+
+                try {
+                    // Try with manual gas limit first
+                    const tx = await contract.fillOrder(orderId, {
+                        gasLimit: 300000 // Set a manual gas limit
+                    });
+                    
+                    document.getElementById('status').innerHTML = 
+                        `Filling order... Transaction: ${tx.hash}`;
+                    
+                    console.log('Transaction sent:', tx.hash);
+                    
+                    const receipt = await tx.wait();
+                    console.log('Transaction receipt:', receipt);
+                    
+                    document.getElementById('status').innerHTML = 
+                        `Order filled successfully! Transaction: ${tx.hash}`;
+                    
+                    await loadOrders();
+                } catch (error) {
+                    console.error('Fill order error:', error);
+                    
+                    // Get more details about the error
+                    const errorMessage = error.error?.data?.message || error.message;
+                    console.log('Detailed error:', {
+                        error: error,
+                        errorData: error.error?.data,
+                        errorMessage: errorMessage
+                    });
+
+                    let message = 'Transaction failed. Detailed checks:\n';
+                    message += `1. Buy Token (${symbol}) Balance: ${ethers.utils.formatEther(balance)} (Required: ${ethers.utils.formatEther(requiredAmount)})\n`;
+                    message += `2. Contract Allowance: ${ethers.utils.formatEther(allowance)} (Required: ${ethers.utils.formatEther(requiredAmount)})\n`;
+                    message += `3. Order Active: ${orders.actives[orderIndex]}\n`;
+                    message += `4. Authorized Partner: ${orders.partners[orderIndex] === ethers.constants.AddressZero || orders.partners[orderIndex] === userAddress}\n`;
+                    message += `\nError details: ${errorMessage}`;
+                    
+                    document.getElementById('status').innerHTML = message;
+                }
+            } catch (error) {
+                console.error('Wallet interaction error:', error);
+                document.getElementById('status').innerHTML = `Error: ${error.message}`;
+            }
+        }
+
+        // Helper function to approve tokens (you can call this separately)
+        async function approveTokens(tokenAddress, amount) {
+            try {
+                console.log('Approving tokens:', {
+                    tokenAddress: tokenAddress,
+                    amount: ethers.utils.formatEther(amount),
+                    contractAddress: contractAddress
+                });
+
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const signer = provider.getSigner();
+                
+                const tokenContract = new ethers.Contract(tokenAddress, [
+                    "function approve(address spender, uint256 amount)",
+                    "function symbol() view returns (string)"
+                ], signer);
+
+                // Get token symbol for better messaging
+                const symbol = await tokenContract.symbol();
+                console.log(`Approving ${symbol} token...`);
+
+                const tx = await tokenContract.approve(contractAddress, amount);
+                console.log('Approval transaction:', tx.hash);
+                
+                document.getElementById('status').innerHTML = 
+                    `Approving ${symbol} tokens... Transaction: ${tx.hash}`;
+                
+                await tx.wait();
+                console.log('Approval confirmed');
+                document.getElementById('status').innerHTML = 
+                    `Successfully approved ${symbol} tokens!`;
+            } catch (error) {
+                console.error('Approval error:', error);
+                document.getElementById('status').innerHTML = 
+                    `Error approving tokens: ${error.message}`;
+                throw error;
+            }
+        }
+
+        // Load orders when page loads
+        window.addEventListener('load', loadOrders);
+    </script>
+</body>
+</html>
