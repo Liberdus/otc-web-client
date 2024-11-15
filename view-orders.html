@@ -90,7 +90,7 @@
     <script>
         const contractAddress = "0xE9B83Ef40251017D9E8E0685d3Dd96F7C64d40cA";
         const contractABI = [
-            "function getActiveOrders(uint256 offset, uint256 limit) external view returns (address[] memory makers, address[] memory partners, address[] memory sellTokens, uint256[] memory sellAmounts, address[] memory buyTokens, uint256[] memory buyAmounts, uint256[] memory createdAts, bool[] memory actives, uint256 nextOffset)",
+            "function getActiveOrders(uint256 offset, uint256 limit) external view returns (tuple(uint256 orderId, address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)[] memory orderInfos, uint256 nextOffset)",
             "function fillOrder(uint256 orderId) external"
         ];
 
@@ -105,34 +105,20 @@
                 const contract = new ethers.Contract(contractAddress, contractABI, provider);
 
                 // Get active orders (first page with 100 orders)
-                const orders = await contract.getActiveOrders(0, 100);
+                const { orderInfos, nextOffset } = await contract.getActiveOrders(0, 100);
                 const tbody = document.getElementById('ordersBody');
                 tbody.innerHTML = '';
 
-                // Start from nextOrderId - 1 and work backwards
-                let currentOrderId = orders.nextOffset;
-
-                for (let i = 0; i < orders.makers.length; i++) {
-                    // Skip orders that are not active
-                    if (!orders.actives[i]) continue;
-                    
-                    // Calculate the correct orderId for this position
-                    // If nextOffset is 0, we need to use the array length to calculate backwards
-                    const orderId = currentOrderId > 0 ? 
-                        (currentOrderId - orders.makers.length + i) : 
-                        (orders.makers.length - 1 - i);
-
+                for (const order of orderInfos) {
                     // Debug logging
-                    console.log(`Order at index ${i}:`, {
-                        maker: orders.makers[i],
-                        orderId: orderId,
-                        currentOrderId: currentOrderId,
-                        arrayLength: orders.makers.length
+                    console.log('Order:', {
+                        orderId: order.orderId.toString(),
+                        maker: order.maker,
                     });
                     
                     const erc20ABI = ["function decimals() view returns (uint8)"];
-                    const sellTokenContract = new ethers.Contract(orders.sellTokens[i], erc20ABI, provider);
-                    const buyTokenContract = new ethers.Contract(orders.buyTokens[i], erc20ABI, provider);
+                    const sellTokenContract = new ethers.Contract(order.sellToken, erc20ABI, provider);
+                    const buyTokenContract = new ethers.Contract(order.buyToken, erc20ABI, provider);
                     const [sellDecimals, buyDecimals] = await Promise.all([
                         sellTokenContract.decimals(),
                         buyTokenContract.decimals()
@@ -140,16 +126,16 @@
 
                     const row = tbody.insertRow();
                     row.innerHTML = `
-                        <td>${shortenAddress(orders.makers[i])}</td>
-                        <td>${orders.partners[i] === ethers.constants.AddressZero ? 'Any' : shortenAddress(orders.partners[i])}</td>
-                        <td>${shortenAddress(orders.sellTokens[i])}</td>
-                        <td>${ethers.utils.formatUnits(orders.sellAmounts[i], sellDecimals)}</td>
-                        <td>${shortenAddress(orders.buyTokens[i])}</td>
-                        <td>${ethers.utils.formatUnits(orders.buyAmounts[i], buyDecimals)}</td>
-                        <td>${new Date(orders.createdAts[i] * 1000).toLocaleString()}</td>
+                        <td>${shortenAddress(order.maker)}</td>
+                        <td>${order.partner === ethers.constants.AddressZero ? 'Any' : shortenAddress(order.partner)}</td>
+                        <td>${shortenAddress(order.sellToken)}</td>
+                        <td>${ethers.utils.formatUnits(order.sellAmount, sellDecimals)}</td>
+                        <td>${shortenAddress(order.buyToken)}</td>
+                        <td>${ethers.utils.formatUnits(order.buyAmount, buyDecimals)}</td>
+                        <td>${new Date(order.createdAt * 1000).toLocaleString()}</td>
                         <td>
-                            <button class="action-button" onclick="approveTokens('${orders.buyTokens[i]}', '${orders.buyAmounts[i]}')">Approve</button>
-                            <button class="action-button" onclick="fillOrder(${orderId})">Fill Order</button>
+                            <button class="action-button" onclick="approveTokens('${order.buyToken}', '${order.buyAmount}')">Approve</button>
+                            <button class="action-button" onclick="fillOrder(${order.orderId})">Fill Order</button>
                         </td>
                     `;
                 }
@@ -178,43 +164,38 @@
                 console.log('Attempting to fill order:', orderId);
 
                 // Get the order details first
-                const orders = await contract.getActiveOrders(0, 100);
-                const orderIndex = orders.makers.findIndex((maker, index) => {
-                    const calculatedOrderId = orders.nextOffset > 0 ? 
-                        (orders.nextOffset - orders.makers.length + index) : 
-                        (orders.makers.length - 1 - index);
-                    return calculatedOrderId === orderId;
-                });
+                const { orderInfos } = await contract.getActiveOrders(0, 100);
+                const order = orderInfos.find(o => o.orderId.toString() === orderId.toString());
 
-                if (orderIndex === -1) {
+                if (!order) {
                     throw new Error('Order not found or no longer active');
                 }
 
                 // Log all order details for debugging
                 console.log('Order details:', {
-                    maker: orders.makers[orderIndex],
-                    partner: orders.partners[orderIndex],
-                    sellToken: orders.sellTokens[orderIndex],
-                    sellAmount: ethers.utils.formatEther(orders.sellAmounts[orderIndex]),
-                    buyToken: orders.buyTokens[orderIndex],
-                    buyAmount: ethers.utils.formatEther(orders.buyAmounts[orderIndex]),
-                    active: orders.actives[orderIndex],
+                    maker: order.maker,
+                    partner: order.partner,
+                    sellToken: order.sellToken,
+                    sellAmount: ethers.utils.formatEther(order.sellAmount),
+                    buyToken: order.buyToken,
+                    buyAmount: ethers.utils.formatEther(order.buyAmount),
+                    active: order.active,
                     userAddress: userAddress
                 });
 
                 // Check if the order is still active
-                if (!orders.actives[orderIndex]) {
+                if (!order.active) {
                     throw new Error('Order is not active');
                 }
 
                 // Check if we're an authorized partner
-                if (orders.partners[orderIndex] !== ethers.constants.AddressZero && 
-                    orders.partners[orderIndex] !== userAddress) {
+                if (order.partner !== ethers.constants.AddressZero && 
+                    order.partner !== userAddress) {
                     throw new Error('Not authorized partner for this order');
                 }
 
                 // Check buy token approval and balance
-                const buyTokenContract = new ethers.Contract(orders.buyTokens[orderIndex], [
+                const buyTokenContract = new ethers.Contract(order.buyToken, [
                     "function allowance(address owner, address spender) view returns (uint256)",
                     "function balanceOf(address account) view returns (uint256)",
                     "function symbol() view returns (string)"
@@ -226,7 +207,7 @@
                     buyTokenContract.symbol()
                 ]);
                 
-                const requiredAmount = orders.buyAmounts[orderIndex];
+                const requiredAmount = order.buyAmount;
 
                 console.log('Buy token checks:', {
                     symbol: symbol,
@@ -237,7 +218,7 @@
 
                 if (allowance.lt(requiredAmount)) {
                     throw new Error(
-                        `Insufficient allowance for ${symbol} token (${orders.buyTokens[orderIndex]}).\n` +
+                        `Insufficient allowance for ${symbol} token (${order.buyToken}).\n` +
                         `Required: ${ethers.utils.formatEther(requiredAmount)}\n` +
                         `Current: ${ethers.utils.formatEther(allowance)}`
                     );
@@ -283,8 +264,8 @@
                     let message = 'Transaction failed. Detailed checks:\n';
                     message += `1. Buy Token (${symbol}) Balance: ${ethers.utils.formatEther(balance)} (Required: ${ethers.utils.formatEther(requiredAmount)})\n`;
                     message += `2. Contract Allowance: ${ethers.utils.formatEther(allowance)} (Required: ${ethers.utils.formatEther(requiredAmount)})\n`;
-                    message += `3. Order Active: ${orders.actives[orderIndex]}\n`;
-                    message += `4. Authorized Partner: ${orders.partners[orderIndex] === ethers.constants.AddressZero || orders.partners[orderIndex] === userAddress}\n`;
+                    message += `3. Order Active: ${order.active}\n`;
+                    message += `4. Authorized Partner: ${order.partner === ethers.constants.AddressZero || order.partner === userAddress}\n`;
                     message += `\nError details: ${errorMessage}`;
                     
                     document.getElementById('status').innerHTML = message;

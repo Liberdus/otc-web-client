@@ -118,7 +118,7 @@
     <script>
         const contractAddress = "0xE9B83Ef40251017D9E8E0685d3Dd96F7C64d40cA";
         const contractABI = [
-            "function getActiveOrders(uint256 offset, uint256 limit) external view returns (address[] memory makers, address[] memory partners, address[] memory sellTokens, uint256[] memory sellAmounts, address[] memory buyTokens, uint256[] memory buyAmounts, uint256[] memory createdAts, bool[] memory actives, uint256 nextOffset)",
+            "function getActiveOrders(uint256 offset, uint256 limit) external view returns (tuple(uint256 orderId, address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)[] memory orderInfos, uint256 nextOffset)",
             "function fillOrder(uint256 orderId) external"
         ];
 
@@ -146,26 +146,20 @@
                 const contract = new ethers.Contract(contractAddress, contractABI, provider);
 
                 // Get active orders
-                const orders = await contract.getActiveOrders(0, 100);
+                const { orderInfos } = await contract.getActiveOrders(0, 100);
                 const tbody = document.getElementById('ordersBody');
                 tbody.innerHTML = '';
 
-                let currentOrderId = orders.nextOffset;
-
-                for (let i = 0; i < orders.makers.length; i++) {
+                for (const order of orderInfos) {
                     // Only show orders where user is specifically the designated partner
-                    if (!orders.actives[i] || 
-                        orders.partners[i].toLowerCase() !== userAddress.toLowerCase()) {
+                    if (!order.active || 
+                        order.partner.toLowerCase() !== userAddress.toLowerCase()) {
                         continue;
                     }
 
-                    const orderId = currentOrderId > 0 ? 
-                        (currentOrderId - orders.makers.length + i) : 
-                        (orders.makers.length - 1 - i);
-
                     // Get token symbols and decimals
-                    const sellTokenContract = new ethers.Contract(orders.sellTokens[i], erc20ABI, provider);
-                    const buyTokenContract = new ethers.Contract(orders.buyTokens[i], erc20ABI, provider);
+                    const sellTokenContract = new ethers.Contract(order.sellToken, erc20ABI, provider);
+                    const buyTokenContract = new ethers.Contract(order.buyToken, erc20ABI, provider);
                     
                     const [sellSymbol, buySymbol, buyDecimals, buyAllowance, buyBalance] = await Promise.all([
                         sellTokenContract.symbol(),
@@ -177,18 +171,18 @@
 
                     const row = tbody.insertRow();
                     row.innerHTML = `
-                        <td>${orderId}</td>
-                        <td>${shortenAddress(orders.makers[i])}</td>
-                        <td>${sellSymbol}<br><span class="token-info">${shortenAddress(orders.sellTokens[i])}</span></td>
-                        <td>${ethers.utils.formatEther(orders.sellAmounts[i])} ${sellSymbol}</td>
-                        <td>${buySymbol}<br><span class="token-info">${shortenAddress(orders.buyTokens[i])}</span></td>
-                        <td>${ethers.utils.formatEther(orders.buyAmounts[i])} ${buySymbol}</td>
-                        <td>${new Date(orders.createdAts[i] * 1000).toLocaleString()}</td>
+                        <td>${order.orderId}</td>
+                        <td>${shortenAddress(order.maker)}</td>
+                        <td>${sellSymbol}<br><span class="token-info">${shortenAddress(order.sellToken)}</span></td>
+                        <td>${ethers.utils.formatUnits(order.sellAmount, buyDecimals)} ${sellSymbol}</td>
+                        <td>${buySymbol}<br><span class="token-info">${shortenAddress(order.buyToken)}</span></td>
+                        <td>${ethers.utils.formatUnits(order.buyAmount, buyDecimals)} ${buySymbol}</td>
+                        <td>${new Date(order.createdAt * 1000).toLocaleString()}</td>
                         <td>
-                            <button class="action-button approve-button" onclick="approveTokens('${orders.buyTokens[i]}', '${orders.buyAmounts[i]}', '${buySymbol}')">
+                            <button class="action-button approve-button" onclick="approveTokens('${order.buyToken}', '${order.buyAmount}', '${buySymbol}')">
                                 Approve ${buySymbol}
                             </button>
-                            <button class="action-button fill-button" onclick="fillOrder(${orderId}, '${buySymbol}', '${orders.buyAmounts[i]}')">
+                            <button class="action-button fill-button" onclick="fillOrder(${order.orderId}, '${buySymbol}', '${order.buyAmount}')">
                                 Fill Order
                             </button>
                             <div class="token-info">
