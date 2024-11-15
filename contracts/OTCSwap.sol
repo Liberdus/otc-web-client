@@ -22,6 +22,18 @@ contract OTCSwap is ReentrancyGuard {
         bool active;
     }
 
+    struct OrderInfo {
+        uint256 orderId;  // Added field for order identification
+        address maker;
+        address partner;
+        address sellToken;
+        uint256 sellAmount;
+        address buyToken;
+        uint256 buyAmount;
+        uint256 createdAt;
+        bool active;
+    }
+
     mapping(uint256 => Order) public orders;
     uint256 public nextOrderId;
 
@@ -162,117 +174,74 @@ contract OTCSwap is ReentrancyGuard {
         Order memory order = orders[orderId];
         require(order.active, "Order not active");
         require(order.maker == msg.sender, "Not order maker");
-
+      
         // Store values needed for transfer and event
         address sellToken = order.sellToken;
         uint256 sellAmount = order.sellAmount;
-
+      
+        // Update activeOrderIds array by replacing with last element
+        uint256 orderIndex = orderIdToIndex[orderId];
+        uint256 lastOrderId = activeOrderIds[activeOrderIds.length - 1];
+        activeOrderIds[orderIndex] = lastOrderId;
+        orderIdToIndex[lastOrderId] = orderIndex;
+        activeOrderIds.pop();
+        delete orderIdToIndex[orderId];
+      
         // Delete cancelled order for gas refund
         delete orders[orderId];
-
+      
         // Return sell tokens to maker
         IERC20(sellToken).safeTransfer(msg.sender, sellAmount);
-
+      
         emit OrderCancelled(orderId, msg.sender, block.timestamp);
     }
 
-    function getActiveOrders(uint256 offset, uint256 limit)
-    external
-    view
-    returns (
-        address[] memory makers,
-        address[] memory partners,
-        address[] memory sellTokens,
-        uint256[] memory sellAmounts,
-        address[] memory buyTokens,
-        uint256[] memory buyAmounts,
-        uint256[] memory createdAts,
-        bool[] memory actives,
-        uint256 nextOffset
-    )
+    function getActiveOrders(uint256 offset, uint256 limit) 
+        external 
+        view 
+        returns (OrderInfo[] memory orderInfos, uint256 nextOffset) 
     {
         // Cap the limit to MAX_PAGE_SIZE
         uint256 actualLimit = limit > MAX_PAGE_SIZE ? MAX_PAGE_SIZE : limit;
-
-        // If offset is 0, start from the latest order
-        // Otherwise start from the provided offset
-        uint256 current = offset == 0 ? nextOrderId - 1 : offset - 1;
-
-        // First pass: Count valid orders
-        uint256 validCount = 0;
-        uint256 cursor = current;
-
-        while (validCount < actualLimit && cursor >= 0) {
-            Order storage order = orders[cursor];
-            if (order.maker != address(0) &&
-            order.active &&
-                block.timestamp <= order.createdAt + ORDER_EXPIRY) {
-                validCount++;
-            }
-            if (cursor == 0) break;
-            cursor--;
-        }
-
-        // Create arrays of exact size needed
-        makers = new address[](validCount);
-        partners = new address[](validCount);
-        sellTokens = new address[](validCount);
-        sellAmounts = new uint256[](validCount);
-        buyTokens = new address[](validCount);
-        buyAmounts = new uint256[](validCount);
-        createdAts = new uint256[](validCount);
-        actives = new bool[](validCount);
-
-        // Second pass: Fill arrays
-        uint256 index = 0;
-        cursor = current;
-
-        // Fill arrays by scanning backwards from current
-        while (index < validCount && cursor >= 0) {
-            Order storage order = orders[cursor];
-            if (order.maker != address(0) &&
-            order.active &&
-                block.timestamp <= order.createdAt + ORDER_EXPIRY) {
-                makers[index] = order.maker;
-                partners[index] = order.partner;
-                sellTokens[index] = order.sellToken;
-                sellAmounts[index] = order.sellAmount;
-                buyTokens[index] = order.buyToken;
-                buyAmounts[index] = order.buyAmount;
-                createdAts[index] = order.createdAt;
-                actives[index] = true;
-                index++;
-            }
-            if (cursor == 0) break;
-            cursor--;
-        }
-
-        // Return cursor as nextOffset for the next page
-        nextOffset = cursor;
-
-        return (
-            makers,
-            partners,
-            sellTokens,
-            sellAmounts,
-            buyTokens,
-            buyAmounts,
-            createdAts,
-            actives,
-            nextOffset
-        );
-    }
-
-    // Add this new function
-    function getActiveOrderIds(uint256 offset, uint256 limit) external view returns (uint256[] memory orderIds) {
-        uint256 actualLimit = limit > MAX_PAGE_SIZE ? MAX_PAGE_SIZE : limit;
-        uint256 resultSize = actualLimit < activeOrderIds.length - offset ? actualLimit : activeOrderIds.length - offset;
         
-        orderIds = new uint256[](resultSize);
-        for (uint256 i = 0; i < resultSize; i++) {
-            orderIds[i] = activeOrderIds[offset + i];
+        // Calculate how many orders we can return
+        uint256 remaining = activeOrderIds.length > offset ? 
+            activeOrderIds.length - offset : 0;
+        uint256 resultCount = remaining < actualLimit ? remaining : actualLimit;
+        
+        // Create array of exact size needed
+        orderInfos = new OrderInfo[](resultCount);
+        
+        // Fill array with active, non-expired orders
+        uint256 added = 0;
+        for (uint256 i = 0; i < resultCount && (offset + i) < activeOrderIds.length; i++) {
+            uint256 orderId = activeOrderIds[offset + i];
+            Order storage order = orders[orderId];
+            
+            // Skip expired orders
+            if (block.timestamp > order.createdAt + ORDER_EXPIRY) {
+                continue;
+            }
+            
+            orderInfos[added] = OrderInfo({
+                orderId: orderId,
+                maker: order.maker,
+                partner: order.partner,
+                sellToken: order.sellToken,
+                sellAmount: order.sellAmount,
+                buyToken: order.buyToken,
+                buyAmount: order.buyAmount,
+                createdAt: order.createdAt,
+                active: order.active
+            });
+            added++;
         }
         
-        return orderIds;
+        // If we have more orders that could be retrieved
+        nextOffset = offset + resultCount < activeOrderIds.length ? 
+            offset + resultCount : 0;
+            
+        return (orderInfos, nextOffset);
     }
 }
+
