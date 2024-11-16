@@ -1,16 +1,17 @@
 const networkConfig = {
-    "80002": {
-        name: "Amoy",
-        contractAddress: "0xE9B83Ef40251017D9E8E0685d3Dd96F7C64d40cA",
-        explorer: "https://www.oklink.com/amoy",
-        rpcUrl: "https://rpc-amoy.polygon.technology"
-    },
-    // "80001": {
-    //     name: "Mumbai",
-    //     contractAddress: "0x...", // Mumbai deployment
-    //     explorer: "https://mumbai.polygonscan.com",
-    //     rpcUrl: "https://rpc-mumbai.maticvigil.com"
-    // }
+  "137": {
+      name: "Polygon Mainnet",
+      contractAddress: "0x...", // Replace with your mainnet contract address
+      explorer: "https://polygonscan.com",
+      rpcUrl: "https://polygon-rpc.com"
+  },
+  "80002": {
+      name: "Amoy",
+      contractAddress: "0xE9B83Ef40251017D9E8E0685d3Dd96F7C64d40cA",
+      explorer: "https://www.oklink.com/amoy",
+      rpcUrl: "https://rpc-amoy.polygon.technology"
+  },
+  // add more networks here
 };
 
 async function getNetworkConfig() {
