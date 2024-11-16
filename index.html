@@ -52,10 +52,61 @@
             color: #2E7D32;
             text-decoration: underline;
         }
+        #sellTokenBalance, #buyTokenBalance {
+            margin-left: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+        .wallet-info {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .network-badge {
+            padding: 5px 10px;
+            border-radius: 15px;
+            background-color: #f0f0f0;
+            font-size: 0.9em;
+        }
+        #connectButton {
+            padding: 5px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #connectButton:hover {
+            background-color: #45a049;
+        }
+        #connectButton.connected {
+            background-color: #2E7D32;
+        }
+        .wallet-info button {
+            padding: 5px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #disconnectButton {
+            background-color: #f44336; /* Red color for disconnect */
+        }
+        #disconnectButton:hover {
+            background-color: #d32f2f;
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <div class="wallet-info">
+            <span id="networkInfo" class="network-badge">Not Connected</span>
+            <button id="connectButton">Connect Wallet</button>
+            <button id="disconnectButton" style="display: none;">Disconnect</button>
+        </div>
         <div class="nav">
             <a href="index.html" class="active">Create Order</a>
             <a href="view-orders.html">View Orders</a>
@@ -69,7 +120,8 @@
         </div>
         <div class="form-group">
             <label for="sellToken">Sell Token Address:</label>
-            <input type="text" id="sellToken" placeholder="0x...">
+            <input type="text" id="sellToken" placeholder="0x..." onchange="updateTokenBalance('sell')">
+            <span id="sellTokenBalance"></span>
         </div>
         <div class="form-group">
             <label for="sellAmount">Sell Amount:</label>
@@ -77,7 +129,8 @@
         </div>
         <div class="form-group">
             <label for="buyToken">Buy Token Address:</label>
-            <input type="text" id="buyToken" placeholder="0x...">
+            <input type="text" id="buyToken" placeholder="0x..." onchange="updateTokenBalance('buy')">
+            <span id="buyTokenBalance"></span>
         </div>
         <div class="form-group">
             <label for="buyAmount">Buy Amount:</label>
@@ -103,6 +156,187 @@
                 return ethers.constants.Zero;
             }
         }
+
+        async function updateTokenBalance(type) {
+            try {
+                const tokenAddress = document.getElementById(`${type}Token`).value;
+                const balanceSpan = document.getElementById(`${type}TokenBalance`);
+                
+                if (!ethers.utils.isAddress(tokenAddress)) {
+                    balanceSpan.innerHTML = '';
+                    return;
+                }
+
+                // Connect to MetaMask
+                if (typeof window.ethereum === 'undefined') {
+                    balanceSpan.innerHTML = ' (Please install MetaMask)';
+                    return;
+                }
+
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const signer = provider.getSigner();
+                
+                const tokenContract = new ethers.Contract(tokenAddress, [
+                    'function decimals() view returns (uint8)',
+                    'function symbol() view returns (string)',
+                    'function balanceOf(address account) view returns (uint256)'
+                ], provider);
+
+                const [decimals, symbol, balance] = await Promise.all([
+                    tokenContract.decimals(),
+                    tokenContract.symbol().catch(() => 'UNKNOWN'),
+                    tokenContract.balanceOf(await signer.getAddress())
+                ]);
+
+                const formattedBalance = ethers.utils.formatUnits(balance, decimals);
+                balanceSpan.innerHTML = ` (Balance: ${formattedBalance} ${symbol})`;
+            } catch (error) {
+                console.error('Error fetching token balance:', error);
+                document.getElementById(`${type}TokenBalance`).innerHTML = ' (Error fetching balance)';
+            }
+        }
+
+        async function updateNetworkInfo() {
+            const networkSpan = document.getElementById('networkInfo');
+            try {
+                if (typeof window.ethereum === 'undefined') {
+                    networkSpan.textContent = 'MetaMask Not Installed';
+                    return;
+                }
+
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const network = await provider.getNetwork();
+                const networkNames = {
+                    1: 'Ethereum Mainnet',
+                    5: 'Goerli Testnet',
+                    11155111: 'Sepolia',
+                    137: 'Polygon Mainnet',
+                    80001: 'Mumbai Testnet',
+                    56: 'BSC Mainnet',
+                    97: 'BSC Testnet',
+                    42161: 'Arbitrum One',
+                    421613: 'Arbitrum Goerli',
+                    10: 'Optimism',
+                    420: 'Optimism Goerli',
+                    43114: 'Avalanche C-Chain',
+                    43113: 'Avalanche Fuji',
+                    250: 'Fantom Opera',
+                    4002: 'Fantom Testnet',
+                    42220: 'Celo Mainnet',
+                    44787: 'Celo Alfajores',
+                    1284: 'Moonbeam',
+                    1285: 'Moonriver',
+                    1287: 'Moonbase Alpha',
+                    80002: 'Amoy Testnet'
+                };
+                
+                const networkName = networkNames[network.chainId];
+                if (networkName) {
+                    networkSpan.textContent = networkName;
+                } else {
+                    // For unknown networks, show both name (if available) and chain ID
+                    networkSpan.textContent = network.name 
+                        ? `${network.name} (${network.chainId})`
+                        : `Chain ID: ${network.chainId}`;
+                }
+            } catch (error) {
+                networkSpan.textContent = 'Network Error';
+                console.error('Error getting network:', error);
+            }
+        }
+
+        async function updateConnectionButton() {
+            const connectButton = document.getElementById('connectButton');
+            const disconnectButton = document.getElementById('disconnectButton');
+            try {
+                if (typeof window.ethereum === 'undefined') {
+                    connectButton.textContent = 'Install MetaMask';
+                    connectButton.onclick = () => window.open('https://metamask.io', '_blank');
+                    disconnectButton.style.display = 'none';
+                    return;
+                }
+
+                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                if (accounts.length > 0) {
+                    connectButton.textContent = `${accounts[0].substring(0, 6)}...${accounts[0].substring(38)}`;
+                    connectButton.classList.add('connected');
+                    disconnectButton.style.display = 'inline-block';
+                } else {
+                    connectButton.textContent = 'Connect Wallet';
+                    connectButton.classList.remove('connected');
+                    disconnectButton.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error updating connection button:', error);
+                connectButton.textContent = 'Error Connecting';
+                disconnectButton.style.display = 'none';
+            }
+        }
+
+        async function connectWallet() {
+            try {
+                if (typeof window.ethereum === 'undefined') {
+                    alert('Please install MetaMask!');
+                    return;
+                }
+
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                await updateConnectionButton();
+                await updateNetworkInfo();
+            } catch (error) {
+                console.error('Error connecting wallet:', error);
+                alert('Error connecting wallet: ' + error.message);
+            }
+        }
+
+        async function disconnectWallet() {
+            try {
+                // Clear the dApp state
+                document.getElementById('connectButton').textContent = 'Connect Wallet';
+                document.getElementById('connectButton').classList.remove('connected');
+                document.getElementById('disconnectButton').style.display = 'none';
+                document.getElementById('networkInfo').textContent = 'Not Connected';
+                
+                // Clear any token balances
+                document.getElementById('sellTokenBalance').innerHTML = '';
+                document.getElementById('buyTokenBalance').innerHTML = '';
+                
+                // Optional: Reload the page to clear all states
+                // window.location.reload();
+                
+                // Notify user
+                console.log('Disconnected from dApp');
+            } catch (error) {
+                console.error('Error disconnecting wallet:', error);
+                alert('Error disconnecting wallet: ' + error.message);
+            }
+        }
+
+        // Add event listeners
+        document.getElementById('connectButton').onclick = connectWallet;
+        document.getElementById('disconnectButton').onclick = disconnectWallet;
+
+        // Update the existing MetaMask event listeners
+        if (window.ethereum) {
+            window.ethereum.on('accountsChanged', async (accounts) => {
+                if (accounts.length === 0) {
+                    // Handle disconnection from MetaMask
+                    await disconnectWallet();
+                } else {
+                    await updateConnectionButton();
+                    await updateNetworkInfo();
+                }
+            });
+
+            window.ethereum.on('chainChanged', async () => {
+                await updateNetworkInfo();
+                await updateConnectionButton();
+            });
+        }
+
+        // Initial update
+        updateConnectionButton();
+        updateNetworkInfo();
 
         window.createOrder = async function() {
             try {
