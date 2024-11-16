@@ -403,8 +403,7 @@
 
                 // Use exact amount instead of infinite approval
                 const tx = await tokenContract.approve(
-                    config.contractAddress,  // Use config.contractAddress here
-                    amount,
+                    config.contractAddress,
                     {
                         gasLimit: 100000,
                         gasPrice: await provider.getGasPrice()
@@ -419,6 +418,10 @@
                 console.log('Approval confirmed');
                 document.getElementById('status').innerHTML = 
                     `Successfully approved ${symbol} tokens!`;
+                
+                // Refresh to update allowances
+                await loadOrders();
+                
             } catch (error) {
                 console.error('Approval error:', error);
                 document.getElementById('status').innerHTML = 

@@ -198,8 +198,8 @@
                     });
                     
                     try {
-                        // Use exact sellAmount instead of MaxUint256
-                        const approvalAmount = sellAmount;  // Changed from ethers.constants.MaxUint256
+                        // Use exact sellAmount
+                        const approvalAmount = sellAmount;
                         const approveTx = await tokenContract.approve(
                             config.contractAddress, 
                             approvalAmount,
