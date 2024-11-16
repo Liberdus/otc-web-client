@@ -401,9 +401,9 @@
                 const symbol = await tokenContract.symbol();
                 console.log(`Approving ${symbol} token...`);
 
-                // Use exact amount instead of infinite approval
                 const tx = await tokenContract.approve(
                     config.contractAddress,
+                    amount,
                     {
                         gasLimit: 100000,
                         gasPrice: await provider.getGasPrice()
