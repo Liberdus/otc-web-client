@@ -58,6 +58,24 @@
             color: #2E7D32;
             text-decoration: underline;
         }
+        .token-info {
+            font-size: 0.9em;
+            color: #666;
+        }
+        .approve-button {
+            background-color: #2196F3;
+            color: white;
+        }
+        .approve-button:hover {
+            background-color: #1976D2;
+        }
+        .fill-button {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .fill-button:hover {
+            background-color: #45a049;
+        }
     </style>
 </head>
 <body>
@@ -94,6 +112,13 @@
             "function fillOrder(uint256 orderId) external"
         ];
 
+        const erc20ABI = [
+            "function decimals() view returns (uint8)",
+            "function symbol() external view returns (string)",
+            "function balanceOf(address account) external view returns (uint256)",
+            "function allowance(address owner, address spender) external view returns (uint256)"
+        ];
+
         async function loadOrders() {
             try {
                 if (typeof window.ethereum === 'undefined') {
@@ -115,33 +140,50 @@
                 const tbody = document.getElementById('ordersBody');
                 tbody.innerHTML = '';
 
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const signer = provider.getSigner();
+                const userAddress = await signer.getAddress();
+
                 for (const order of orderInfos) {
-                    // Debug logging
-                    console.log('Order:', {
-                        orderId: order.orderId.toString(),
-                        maker: order.maker,
-                    });
-                    
-                    const erc20ABI = ["function decimals() view returns (uint8)"];
                     const sellTokenContract = new ethers.Contract(order.sellToken, erc20ABI, provider);
                     const buyTokenContract = new ethers.Contract(order.buyToken, erc20ABI, provider);
-                    const [sellDecimals, buyDecimals] = await Promise.all([
+                    
+                    const [
+                        sellDecimals, 
+                        buyDecimals, 
+                        sellSymbol, 
+                        buySymbol,
+                        buyAllowance,
+                        buyBalance
+                    ] = await Promise.all([
                         sellTokenContract.decimals(),
-                        buyTokenContract.decimals()
+                        buyTokenContract.decimals(),
+                        sellTokenContract.symbol(),
+                        buyTokenContract.symbol(),
+                        buyTokenContract.allowance(userAddress, config.contractAddress),
+                        buyTokenContract.balanceOf(userAddress)
                     ]);
 
                     const row = tbody.insertRow();
                     row.innerHTML = `
                         <td>${shortenAddress(order.maker)}</td>
                         <td>${order.partner === ethers.constants.AddressZero ? 'Any' : shortenAddress(order.partner)}</td>
-                        <td>${shortenAddress(order.sellToken)}</td>
-                        <td>${ethers.utils.formatUnits(order.sellAmount, sellDecimals)}</td>
-                        <td>${shortenAddress(order.buyToken)}</td>
-                        <td>${ethers.utils.formatUnits(order.buyAmount, buyDecimals)}</td>
+                        <td>${sellSymbol}<br><span class="token-info">${shortenAddress(order.sellToken)}</span></td>
+                        <td>${ethers.utils.formatUnits(order.sellAmount, sellDecimals)} ${sellSymbol}</td>
+                        <td>${buySymbol}<br><span class="token-info">${shortenAddress(order.buyToken)}</span></td>
+                        <td>${ethers.utils.formatUnits(order.buyAmount, buyDecimals)} ${buySymbol}</td>
                         <td>${new Date(order.createdAt * 1000).toLocaleString()}</td>
                         <td>
-                            <button class="action-button" onclick="approveTokens('${order.buyToken}', '${order.buyAmount}')">Approve</button>
-                            <button class="action-button" onclick="fillOrder(${order.orderId})">Fill Order</button>
+                            <button class="action-button approve-button" onclick="approveTokens('${order.buyToken}', '${order.buyAmount}')">
+                                Approve ${buySymbol}
+                            </button>
+                            <button class="action-button fill-button" onclick="fillOrder(${order.orderId})">
+                                Fill Order
+                            </button>
+                            <div class="token-info">
+                                Balance: ${ethers.utils.formatUnits(buyBalance, buyDecimals)} ${buySymbol}<br>
+                                Allowance: ${ethers.utils.formatUnits(buyAllowance, buyDecimals)} ${buySymbol}
+                            </div>
                         </td>
                     `;
                 }
