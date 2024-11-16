@@ -203,11 +203,17 @@
                     throw new Error(`Invalid order ID: ${orderId}`);
                 }
 
+                // Get network configuration
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
                 await window.ethereum.request({ method: 'eth_requestAccounts' });
                 const provider = new ethers.providers.Web3Provider(window.ethereum);
                 const signer = provider.getSigner();
                 const userAddress = await signer.getAddress();
-                const contract = new ethers.Contract(contractAddress, contractABI, signer);
+                const contract = new ethers.Contract(config.contractAddress, contractABI, signer);
 
                 console.log('Attempting to fill order:', orderId);
 
@@ -244,7 +250,7 @@
 
                 const [balance, allowance, symbol] = await Promise.all([
                     buyTokenContract.balanceOf(userAddress),
-                    buyTokenContract.allowance(userAddress, contractAddress),
+                    buyTokenContract.allowance(userAddress, config.contractAddress),
                     buyTokenContract.symbol()
                 ]);
 
@@ -266,7 +272,7 @@
                 });
 
                 // Try simulation with error decoding
-                const orderContract = new ethers.Contract(contractAddress, [
+                const orderContract = new ethers.Contract(config.contractAddress, [
                     ...contractABI,
                     "function orders(uint256) view returns (address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)"
                 ], signer);
@@ -287,7 +293,7 @@
 
                     const [balance, allowance] = await Promise.all([
                         buyTokenContract.balanceOf(userAddress),
-                        buyTokenContract.allowance(userAddress, contractAddress)
+                        buyTokenContract.allowance(userAddress, config.contractAddress)
                     ]);
 
                     if (balance.lt(order.buyAmount)) {
@@ -305,7 +311,7 @@
                 try {
                     const fillTx = await contract.populateTransaction.fillOrder(orderId);
                     await provider.call({
-                        to: contractAddress,
+                        to: config.contractAddress,
                         data: fillTx.data,
                         from: userAddress
                     });
@@ -371,10 +377,16 @@
         // Helper function to approve tokens (you can call this separately)
         async function approveTokens(tokenAddress, amount) {
             try {
+                // Get network configuration
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
                 console.log('Approving tokens:', {
                     tokenAddress: tokenAddress,
                     amount: ethers.utils.formatEther(amount),
-                    contractAddress: contractAddress
+                    contractAddress: config.contractAddress
                 });
 
                 await window.ethereum.request({ method: 'eth_requestAccounts' });
@@ -391,8 +403,8 @@
 
                 // Use exact amount instead of infinite approval
                 const tx = await tokenContract.approve(
-                    contractAddress, 
-                    amount,  // Use the exact amount needed
+                    config.contractAddress,  // Use config.contractAddress here
+                    amount,
                     {
                         gasLimit: 100000,
                         gasPrice: await provider.getGasPrice()
