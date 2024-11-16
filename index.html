@@ -3,6 +3,7 @@
 <head>
     <title>OTC Swap - Create Order</title>
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script src="config.js"></script>
     <style>
         .container {
             max-width: 600px;
@@ -87,7 +88,6 @@
     </div>
 
     <script>
-        const contractAddress = "0xE9B83Ef40251017D9E8E0685d3Dd96F7C64d40cA";
         const contractABI = [
             "function createOrder(address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount) external returns (uint256)",
             "function approve(address spender, uint256 amount) external returns (bool)"
@@ -108,6 +108,12 @@
             try {
                 console.log('Starting order creation...');
                 
+                // Get network configuration first
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
                 // Get form values
                 let partner = document.getElementById('partner').value;
                 
@@ -116,7 +122,6 @@
                     partner = ethers.constants.AddressZero;
                     console.log('Creating public order (no partner specified)');
                 } else {
-                    // Only validate format, don't restrict self-addressing
                     if (!ethers.utils.isAddress(partner)) {
                         throw new Error('Invalid partner address format');
                     }
@@ -183,20 +188,20 @@
 
                 // Modified approval section
                 const userAddress = await signer.getAddress();
-                const currentAllowance = await checkAllowance(tokenContract, userAddress, contractAddress);
+                const currentAllowance = await checkAllowance(tokenContract, userAddress, config.contractAddress);
                 
                 if (currentAllowance.lt(sellAmount)) {
                     console.log('Approving token spend...', {
                         sellToken,
                         sellAmount: sellAmount.toString(),
-                        contractAddress
+                        contractAddress: config.contractAddress
                     });
                     
                     try {
                         // Use exact sellAmount instead of MaxUint256
                         const approvalAmount = sellAmount;  // Changed from ethers.constants.MaxUint256
                         const approveTx = await tokenContract.approve(
-                            contractAddress, 
+                            config.contractAddress, 
                             approvalAmount,
                             {
                                 gasLimit: 100000,
@@ -217,7 +222,7 @@
                         console.log('Approval confirmed in block:', receipt.blockNumber);
                         
                         // Verify the new allowance
-                        const newAllowance = await checkAllowance(tokenContract, userAddress, contractAddress);
+                        const newAllowance = await checkAllowance(tokenContract, userAddress, config.contractAddress);
                         console.log('New allowance:', ethers.utils.formatUnits(newAllowance));
                         
                         if (newAllowance.lt(sellAmount)) {
@@ -228,7 +233,7 @@
                             error: approvalError,
                             token: sellToken,
                             owner: userAddress,
-                            spender: contractAddress
+                            spender: config.contractAddress
                         });
                         
                         // Check if the token contract exists
@@ -248,11 +253,12 @@
                     sellToken,
                     sellAmount: sellAmount.toString(),
                     buyToken,
-                    buyAmount: buyAmount.toString()
+                    buyAmount: buyAmount.toString(),
+                    contractAddress: config.contractAddress
                 });
 
                 try {
-                    const contract = new ethers.Contract(contractAddress, contractABI, signer);
+                    const contract = new ethers.Contract(config.contractAddress, contractABI, signer);
                     
                     // Add validation before transaction
                     const userAddress = await signer.getAddress();
@@ -273,7 +279,7 @@
                     const tokenContract = new ethers.Contract(sellToken, [
                         'function allowance(address,address) view returns (uint256)'
                     ], signer);
-                    const allowance = await tokenContract.allowance(userAddress, contractAddress);
+                    const allowance = await tokenContract.allowance(userAddress, config.contractAddress);
                     if (allowance.lt(sellAmount)) {
                         throw new Error('Insufficient allowance for sell amount');
                     }
@@ -304,7 +310,7 @@
                             await provider.call(
                                 {
                                     from: userAddress,
-                                    to: contractAddress,
+                                    to: config.contractAddress,
                                     data: contract.interface.encodeFunctionData('createOrder', [
                                         partner,
                                         sellToken,
@@ -362,21 +368,17 @@
                 console.error('Detailed error:', error);
                 let errorMessage = error.message;
                 
-                // Enhanced error handling
                 if (error.code === 'INSUFFICIENT_FUNDS') {
                     errorMessage = 'Insufficient funds for transaction';
                 } else if (error.code === -32603) {
                     errorMessage = 'Transaction failed. Please check: \n' +
                         '1. Token contract address: ' + sellToken + '\n' +
-                        '2. Network: Amoy Testnet (Chain ID 80002)\n' +
+                        '2. Network: ' + config.name + '\n' +
                         '3. Token supports ERC20 approve function\n' +
                         '4. You have enough POL for gas';
                 }
                 
                 document.getElementById('status').innerHTML = `Error: ${errorMessage}`;
-                if (error.data) {
-                    console.error('Error data:', error.data);
-                }
             }
         }
     </script>

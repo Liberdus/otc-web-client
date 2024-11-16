@@ -3,6 +3,7 @@
 <head>
     <title>OTC Swap - Taker Orders</title>
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script src="config.js"></script>
     <style>
         .container {
             max-width: 1200px;
@@ -116,7 +117,6 @@
     </div>
 
     <script>
-        const contractAddress = "0xE9B83Ef40251017D9E8E0685d3Dd96F7C64d40cA";
         const contractABI = [
             "function getActiveOrders(uint256 offset, uint256 limit) external view returns (tuple(uint256 orderId, address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)[] memory orderInfos, uint256 nextOffset)",
             "function fillOrder(uint256 orderId) external"
@@ -139,11 +139,17 @@
                     return;
                 }
 
+                // Get network configuration
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
                 await window.ethereum.request({ method: 'eth_requestAccounts' });
                 const provider = new ethers.providers.Web3Provider(window.ethereum);
                 const signer = provider.getSigner();
                 userAddress = await signer.getAddress();
-                const contract = new ethers.Contract(contractAddress, contractABI, provider);
+                const contract = new ethers.Contract(config.contractAddress, contractABI, provider);
 
                 // Get active orders
                 const { orderInfos } = await contract.getActiveOrders(0, 100);
@@ -165,7 +171,7 @@
                         sellTokenContract.symbol(),
                         buyTokenContract.symbol(),
                         buyTokenContract.decimals(),
-                        buyTokenContract.allowance(userAddress, contractAddress),
+                        buyTokenContract.allowance(userAddress, config.contractAddress),
                         buyTokenContract.balanceOf(userAddress)
                     ]);
 
@@ -210,14 +216,19 @@
 
         async function approveTokens(tokenAddress, amount, symbol) {
             try {
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
                 const provider = new ethers.providers.Web3Provider(window.ethereum);
                 const signer = provider.getSigner();
                 const tokenContract = new ethers.Contract(tokenAddress, erc20ABI, signer);
 
                 showStatus(`Approving ${symbol} tokens...`);
                 const tx = await tokenContract.approve(
-                    contractAddress, 
-                    amount,  // Use the exact amount needed
+                    config.contractAddress, 
+                    amount,
                     {
                         gasLimit: 100000,
                         gasPrice: await provider.getGasPrice()
@@ -237,12 +248,17 @@
 
         async function fillOrder(orderId, symbol, amount) {
             try {
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
                 const provider = new ethers.providers.Web3Provider(window.ethereum);
                 const signer = provider.getSigner();
-                const contract = new ethers.Contract(contractAddress, contractABI, signer);
+                const contract = new ethers.Contract(config.contractAddress, contractABI, signer);
 
                 // Add pre-transaction checks
-                const orderContract = new ethers.Contract(contractAddress, [
+                const orderContract = new ethers.Contract(config.contractAddress, [
                     ...contractABI,
                     "function orders(uint256) view returns (address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)"
                 ], signer);
@@ -258,7 +274,7 @@
                     // Try to simulate the transaction first
                     const fillTx = await contract.populateTransaction.fillOrder(orderId);
                     await provider.call({
-                        to: contractAddress,
+                        to: config.contractAddress,
                         data: fillTx.data,
                         from: userAddress
                     });

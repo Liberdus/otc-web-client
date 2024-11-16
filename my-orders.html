@@ -3,6 +3,7 @@
 <head>
     <title>OTC Swap - My Orders</title>
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script src="config.js"></script>
     <style>
         .container {
             max-width: 1200px;
@@ -101,7 +102,6 @@
     </div>
 
     <script>
-        const contractAddress = "0xE9B83Ef40251017D9E8E0685d3Dd96F7C64d40cA";
         const contractABI = [
             "function getActiveOrders(uint256 offset, uint256 limit) external view returns (tuple(uint256 orderId, address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)[] memory orderInfos, uint256 nextOffset)",
             "function cancelOrder(uint256 orderId) external"
@@ -118,11 +118,17 @@
                     return;
                 }
 
+                // Get network configuration
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
                 await window.ethereum.request({ method: 'eth_requestAccounts' });
                 const provider = new ethers.providers.Web3Provider(window.ethereum);
                 const signer = provider.getSigner();
                 const userAddress = await signer.getAddress();
-                const contract = new ethers.Contract(contractAddress, contractABI, provider);
+                const contract = new ethers.Contract(config.contractAddress, contractABI, provider);
 
                 // Get active orders
                 const { orderInfos } = await contract.getActiveOrders(0, 100);
@@ -172,10 +178,16 @@
 
         async function cancelOrder(orderId) {
             try {
+                // Get network configuration
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
                 await window.ethereum.request({ method: 'eth_requestAccounts' });
                 const provider = new ethers.providers.Web3Provider(window.ethereum);
                 const signer = provider.getSigner();
-                const contract = new ethers.Contract(contractAddress, contractABI, signer);
+                const contract = new ethers.Contract(config.contractAddress, contractABI, signer);
 
                 showStatus(`Cancelling order ${orderId}...`);
                 const tx = await contract.cancelOrder(orderId);
