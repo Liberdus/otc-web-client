@@ -178,7 +178,6 @@
 
         async function cancelOrder(orderId) {
             try {
-                // Get network configuration
                 const config = await getNetworkConfig();
                 if (!config) {
                     throw new Error("Unsupported network. Please switch to a supported network.");
@@ -190,16 +189,36 @@
                 const contract = new ethers.Contract(config.contractAddress, contractABI, signer);
 
                 showStatus(`Cancelling order ${orderId}...`);
-                const tx = await contract.cancelOrder(orderId);
                 
-                showStatus(`Transaction submitted: ${tx.hash}`);
-                await tx.wait();
-                
-                showStatus(`Order ${orderId} cancelled successfully!`);
-                await loadMyOrders(); // Refresh the orders list
+                // Add gas estimation
+                try {
+                    const gasEstimate = await contract.estimateGas.cancelOrder(orderId);
+                    console.log('Estimated gas:', gasEstimate.toString());
+                    
+                    const tx = await contract.cancelOrder(orderId, {
+                        gasLimit: gasEstimate.mul(120).div(100) // Add 20% buffer to gas estimate
+                    });
+                    
+                    showStatus(`Transaction submitted: ${tx.hash}`);
+                    const receipt = await tx.wait();
+                    console.log('Transaction receipt:', receipt);
+                    
+                    showStatus(`Order ${orderId} cancelled successfully!`);
+                    await loadMyOrders();
+                } catch (estimateError) {
+                    console.error('Gas estimation error:', estimateError);
+                    if (estimateError.error && estimateError.error.message) {
+                        throw new Error(`Contract error: ${estimateError.error.message}`);
+                    } else if (estimateError.message) {
+                        throw new Error(`Error: ${estimateError.message}`);
+                    } else {
+                        throw estimateError;
+                    }
+                }
             } catch (error) {
                 console.error('Cancel order error:', error);
-                showStatus(error.message, true);
+                const errorMessage = error.error?.message || error.message || 'Unknown error occurred';
+                showStatus(`Failed to cancel order: ${errorMessage}`, true);
             }
         }
 
