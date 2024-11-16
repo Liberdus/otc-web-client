@@ -108,8 +108,22 @@
             try {
                 console.log('Starting order creation...');
                 
-                // Get form values FIRST
-                const partner = document.getElementById('partner').value || ethers.constants.AddressZero;
+                // Get form values
+                let partner = document.getElementById('partner').value;
+                
+                // Handle partner address - only check if it's a valid address if provided
+                if (!partner || partner.trim() === '') {
+                    partner = ethers.constants.AddressZero;
+                    console.log('Creating public order (no partner specified)');
+                } else {
+                    // Only validate format, don't restrict self-addressing
+                    if (!ethers.utils.isAddress(partner)) {
+                        throw new Error('Invalid partner address format');
+                    }
+                    console.log('Creating private order for partner:', partner);
+                }
+
+                // Get token addresses
                 const sellToken = document.getElementById('sellToken').value;
                 const buyToken = document.getElementById('buyToken').value;
                 const sellAmountInput = document.getElementById('sellAmount').value;
@@ -179,8 +193,8 @@
                     });
                     
                     try {
-                        // Skip the reset to 0 step and try direct approval with specific parameters
-                        const approvalAmount = ethers.constants.MaxUint256; // Infinite approval
+                        // Use exact sellAmount instead of MaxUint256
+                        const approvalAmount = sellAmount;  // Changed from ethers.constants.MaxUint256
                         const approveTx = await tokenContract.approve(
                             contractAddress, 
                             approvalAmount,
@@ -244,11 +258,11 @@
                     const userAddress = await signer.getAddress();
                     
                     // Validate partner address
-                    if (partner !== ethers.constants.AddressZero) {
-                        if (partner.toLowerCase() === userAddress.toLowerCase()) {
-                            throw new Error('Partner address cannot be your own address');
-                        }
-                    }
+                    // if (partner !== ethers.constants.AddressZero) {
+                    //     if (partner.toLowerCase() === userAddress.toLowerCase()) {
+                    //         throw new Error('Partner address cannot be your own address');
+                    //     }
+                    // }
                     
                     // Validate token addresses
                     if (sellToken.toLowerCase() === buyToken.toLowerCase()) {

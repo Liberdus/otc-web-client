@@ -215,7 +215,14 @@
                 const tokenContract = new ethers.Contract(tokenAddress, erc20ABI, signer);
 
                 showStatus(`Approving ${symbol} tokens...`);
-                const tx = await tokenContract.approve(contractAddress, amount);
+                const tx = await tokenContract.approve(
+                    contractAddress, 
+                    amount,  // Use the exact amount needed
+                    {
+                        gasLimit: 100000,
+                        gasPrice: await provider.getGasPrice()
+                    }
+                );
                 
                 showStatus(`Approval transaction submitted: ${tx.hash}`);
                 await tx.wait();
@@ -234,6 +241,32 @@
                 const signer = provider.getSigner();
                 const contract = new ethers.Contract(contractAddress, contractABI, signer);
 
+                // Add pre-transaction checks
+                const orderContract = new ethers.Contract(contractAddress, [
+                    ...contractABI,
+                    "function orders(uint256) view returns (address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)"
+                ], signer);
+
+                try {
+                    const orderState = await orderContract.orders(orderId);
+                    const isExpired = (Date.now() / 1000) > (orderState.createdAt.toNumber() + (7 * 24 * 60 * 60));
+                    
+                    if (!orderState.active || isExpired) {
+                        throw new Error('Order is no longer active or has expired');
+                    }
+
+                    // Try to simulate the transaction first
+                    const fillTx = await contract.populateTransaction.fillOrder(orderId);
+                    await provider.call({
+                        to: contractAddress,
+                        data: fillTx.data,
+                        from: userAddress
+                    });
+                } catch (stateError) {
+                    console.error('Pre-transaction check failed:', stateError);
+                    throw stateError;
+                }
+
                 showStatus(`Filling order ${orderId}...`);
                 const tx = await contract.fillOrder(orderId, {
                     gasLimit: 300000
@@ -243,10 +276,30 @@
                 await tx.wait();
                 
                 showStatus(`Order ${orderId} filled successfully!`);
-                await loadTakerOrders(); // Refresh the orders list
+                await loadTakerOrders();
             } catch (error) {
-                console.error('Fill order error:', error);
-                showStatus(error.message, true);
+                console.error('Fill order error:', {
+                    error,
+                    code: error.code,
+                    message: error.message,
+                    data: error.error?.data,
+                    receipt: error.receipt
+                });
+
+                let errorMessage = 'Transaction failed. Possible reasons:\n';
+                if (error.receipt?.status === 0) {
+                    errorMessage += '1. Order might be expired\n';
+                    errorMessage += '2. Order might have been already filled\n';
+                    errorMessage += '3. Insufficient token balance or allowance\n';
+                    errorMessage += '4. Order might be inactive\n';
+                }
+
+                if (error.transaction) {
+                    errorMessage += `\nTransaction Hash: ${error.transaction.hash}\n`;
+                    errorMessage += `Gas Used: ${error.receipt?.gasUsed?.toString() || 'unknown'}\n`;
+                }
+
+                showStatus(errorMessage, true);
             }
         }
 

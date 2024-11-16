@@ -171,108 +171,152 @@
                     throw new Error('Order not found or no longer active');
                 }
 
-                // Log all order details for debugging
-                console.log('Order details:', {
-                    maker: order.maker,
-                    partner: order.partner,
-                    sellToken: order.sellToken,
-                    sellAmount: ethers.utils.formatEther(order.sellAmount),
-                    buyToken: order.buyToken,
-                    buyAmount: ethers.utils.formatEther(order.buyAmount),
-                    active: order.active,
-                    userAddress: userAddress
+                // Enhanced logging for debugging the first failure
+                console.log('Fill order attempt:', {
+                    orderId,
+                    order: {
+                        maker: order.maker,
+                        partner: order.partner,
+                        sellToken: order.sellToken,
+                        sellAmount: ethers.utils.formatEther(order.sellAmount),
+                        buyToken: order.buyToken,
+                        buyAmount: ethers.utils.formatEther(order.buyAmount),
+                        active: order.active
+                    },
+                    userAddress,
+                    currentTime: new Date().toISOString()
                 });
 
-                // Check if the order is still active
-                if (!order.active) {
-                    throw new Error('Order is not active');
-                }
-
-                // Check if we're an authorized partner
-                if (order.partner !== ethers.constants.AddressZero && 
-                    order.partner !== userAddress) {
-                    throw new Error('Not authorized partner for this order');
-                }
-
-                // Check buy token approval and balance
+                // Add more detailed order logging
                 const buyTokenContract = new ethers.Contract(order.buyToken, [
-                    "function allowance(address owner, address spender) view returns (uint256)",
-                    "function balanceOf(address account) view returns (uint256)",
+                    "function balanceOf(address) view returns (uint256)",
+                    "function allowance(address,address) view returns (uint256)",
                     "function symbol() view returns (string)"
                 ], provider);
 
-                const [allowance, balance, symbol] = await Promise.all([
-                    buyTokenContract.allowance(userAddress, contractAddress),
+                const [balance, allowance, symbol] = await Promise.all([
                     buyTokenContract.balanceOf(userAddress),
+                    buyTokenContract.allowance(userAddress, contractAddress),
                     buyTokenContract.symbol()
                 ]);
-                
-                const requiredAmount = order.buyAmount;
 
-                console.log('Buy token checks:', {
-                    symbol: symbol,
-                    allowance: ethers.utils.formatEther(allowance),
-                    balance: ethers.utils.formatEther(balance),
-                    required: ethers.utils.formatEther(requiredAmount)
+                console.log('Pre-transaction checks:', {
+                    orderDetails: {
+                        orderId,
+                        maker: order.maker,
+                        buyToken: order.buyToken,
+                        buyAmount: ethers.utils.formatEther(order.buyAmount),
+                        sellToken: order.sellToken,
+                        sellAmount: ethers.utils.formatEther(order.sellAmount)
+                    },
+                    userDetails: {
+                        address: userAddress,
+                        balance: ethers.utils.formatEther(balance),
+                        allowance: ethers.utils.formatEther(allowance),
+                        symbol
+                    }
                 });
 
-                if (allowance.lt(requiredAmount)) {
-                    throw new Error(
-                        `Insufficient allowance for ${symbol} token (${order.buyToken}).\n` +
-                        `Required: ${ethers.utils.formatEther(requiredAmount)}\n` +
-                        `Current: ${ethers.utils.formatEther(allowance)}`
-                    );
-                }
-
-                if (balance.lt(requiredAmount)) {
-                    throw new Error(
-                        `Insufficient ${symbol} balance.\n` +
-                        `Required: ${ethers.utils.formatEther(requiredAmount)}\n` +
-                        `Current: ${ethers.utils.formatEther(balance)}`
-                    );
-                }
+                // Try simulation with error decoding
+                const orderContract = new ethers.Contract(contractAddress, [
+                    ...contractABI,
+                    "function orders(uint256) view returns (address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)"
+                ], signer);
 
                 try {
-                    // Try with manual gas limit first
-                    const tx = await contract.fillOrder(orderId, {
-                        gasLimit: 300000 // Set a manual gas limit
-                    });
+                    const orderState = await orderContract.orders(orderId);
+                    const isExpired = (Date.now() / 1000) > (orderState.createdAt.toNumber() + (7 * 24 * 60 * 60));
                     
-                    document.getElementById('status').innerHTML = 
-                        `Filling order... Transaction: ${tx.hash}`;
-                    
-                    console.log('Transaction sent:', tx.hash);
-                    
-                    const receipt = await tx.wait();
-                    console.log('Transaction receipt:', receipt);
-                    
-                    document.getElementById('status').innerHTML = 
-                        `Order filled successfully! Transaction: ${tx.hash}`;
-                    
-                    await loadOrders();
-                } catch (error) {
-                    console.error('Fill order error:', error);
-                    
-                    // Get more details about the error
-                    const errorMessage = error.error?.data?.message || error.message;
-                    console.log('Detailed error:', {
-                        error: error,
-                        errorData: error.error?.data,
-                        errorMessage: errorMessage
-                    });
+                    if (!orderState.active || isExpired) {
+                        throw new Error('Order is no longer active or has expired');
+                    }
 
-                    let message = 'Transaction failed. Detailed checks:\n';
-                    message += `1. Buy Token (${symbol}) Balance: ${ethers.utils.formatEther(balance)} (Required: ${ethers.utils.formatEther(requiredAmount)})\n`;
-                    message += `2. Contract Allowance: ${ethers.utils.formatEther(allowance)} (Required: ${ethers.utils.formatEther(requiredAmount)})\n`;
-                    message += `3. Order Active: ${order.active}\n`;
-                    message += `4. Authorized Partner: ${order.partner === ethers.constants.AddressZero || order.partner === userAddress}\n`;
-                    message += `\nError details: ${errorMessage}`;
-                    
-                    document.getElementById('status').innerHTML = message;
+                    // Check if user has sufficient balance and allowance
+                    const buyTokenContract = new ethers.Contract(order.buyToken, [
+                        "function balanceOf(address) view returns (uint256)",
+                        "function allowance(address,address) view returns (uint256)"
+                    ], provider);
+
+                    const [balance, allowance] = await Promise.all([
+                        buyTokenContract.balanceOf(userAddress),
+                        buyTokenContract.allowance(userAddress, contractAddress)
+                    ]);
+
+                    if (balance.lt(order.buyAmount)) {
+                        throw new Error('Insufficient token balance');
+                    }
+                    if (allowance.lt(order.buyAmount)) {
+                        throw new Error('Insufficient token allowance');
+                    }
+                } catch (stateError) {
+                    console.error('Pre-transaction check failed:', stateError);
+                    throw stateError;
                 }
+
+                // Try to simulate the transaction first
+                try {
+                    const fillTx = await contract.populateTransaction.fillOrder(orderId);
+                    await provider.call({
+                        to: contractAddress,
+                        data: fillTx.data,
+                        from: userAddress
+                    });
+                    console.log('Transaction simulation successful');
+                } catch (simulationError) {
+                    console.error('Transaction simulation failed:', {
+                        error: simulationError,
+                        errorData: simulationError.error?.data,
+                        errorArgs: simulationError.errorArgs,
+                        errorName: simulationError.errorName
+                    });
+                    throw new Error(`Transaction would fail: ${simulationError.message}`);
+                }
+
+                // Rest of your existing code...
+                const tx = await contract.fillOrder(orderId, {
+                    gasLimit: 300000
+                });
+                
+                document.getElementById('status').innerHTML = 
+                    `Filling order... Transaction: ${tx.hash}`;
+                
+                console.log('Transaction sent:', tx.hash);
+                
+                const receipt = await tx.wait();
+                console.log('Transaction receipt:', receipt);
+                
+                document.getElementById('status').innerHTML = 
+                    `Order filled successfully! Transaction: ${tx.hash}`;
+                
+                await loadOrders();
+
             } catch (error) {
-                console.error('Wallet interaction error:', error);
-                document.getElementById('status').innerHTML = `Error: ${error.message}`;
+                console.error('Fill order error:', {
+                    error,
+                    code: error.code,
+                    message: error.message,
+                    data: error.error?.data,
+                    receipt: error.receipt
+                });
+
+                let errorMessage = 'Transaction failed. Possible reasons:\n';
+                
+                if (error.receipt) {
+                    if (error.receipt.status === 0) {
+                        errorMessage += '1. Order might be expired\n';
+                        errorMessage += '2. Order might have been already filled\n';
+                        errorMessage += '3. Insufficient token balance or allowance\n';
+                        errorMessage += '4. Order might be inactive\n';
+                    }
+                }
+
+                // Add transaction details
+                if (error.transaction) {
+                    errorMessage += `\nTransaction Hash: ${error.transaction.hash}\n`;
+                    errorMessage += `Gas Used: ${error.receipt?.gasUsed?.toString() || 'unknown'}\n`;
+                }
+
+                document.getElementById('status').innerHTML = errorMessage;
             }
         }
 
@@ -294,13 +338,20 @@
                     "function symbol() view returns (string)"
                 ], signer);
 
-                // Get token symbol for better messaging
                 const symbol = await tokenContract.symbol();
                 console.log(`Approving ${symbol} token...`);
 
-                const tx = await tokenContract.approve(contractAddress, amount);
-                console.log('Approval transaction:', tx.hash);
+                // Use exact amount instead of infinite approval
+                const tx = await tokenContract.approve(
+                    contractAddress, 
+                    amount,  // Use the exact amount needed
+                    {
+                        gasLimit: 100000,
+                        gasPrice: await provider.getGasPrice()
+                    }
+                );
                 
+                console.log('Approval transaction:', tx.hash);
                 document.getElementById('status').innerHTML = 
                     `Approving ${symbol} tokens... Transaction: ${tx.hash}`;
                 
