@@ -7,3 +7,5 @@ node_modules/
 # Hardhat artifacts and cache
 artifacts/
 cache/
+
+delete_when_done/

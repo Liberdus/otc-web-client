@@ -1,0 +1,157 @@
+/* Base styles */
+body {
+    background-color: #f7f8fa;
+    color: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+    margin: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Header styles */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.header-left h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #333;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* Wallet styles */
+.wallet-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 12px;
+}
+
+.wallet-button {
+    background: #4B6BFB;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: block;
+}
+
+.wallet-button:hover {
+    background: #3A54D6;
+}
+
+.wallet-button.loading {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.network-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    margin-right: 8px;
+    background-color: #666;
+    color: white;
+}
+
+.network-badge.connected {
+    background-color: #4CAF50;
+}
+
+.network-badge.wrong-network {
+    background-color: #f44336;
+}
+
+.wallet-info {
+    display: none;
+    align-items: center;
+    gap: 8px;
+}
+
+.account-address {
+    font-family: monospace;
+    font-size: 14px;
+    color: #666;
+}
+
+.wallet-disconnect {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    color: #666;
+}
+
+.wallet-disconnect:hover {
+    color: #f44336;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.main-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.content-wrapper {
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.05);
+    margin-top: 20px;
+    overflow: hidden;
+}
+
+.tab-content-wrapper {
+    padding: 20px;
+    text-align: center;
+}
+
+.tab-content-wrapper h2 {
+    margin-bottom: 16px;
+    color: #333;
+}
+
+.tab-content-wrapper p {
+    color: #666;
+}
+
+/* Example of browser-specific fixes */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Firefox-specific styles */
+@-moz-document url-prefix() {
+    /* Add Firefox-specific rules here */
+}
+
+.wallet-info.visible {
+    display: flex;
+}
