@@ -1,5 +1,6 @@
 import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
+import { erc20Abi } from '../abi/erc20.js';
 
 export class CreateOrder extends BaseComponent {
     constructor() {
@@ -196,155 +197,80 @@ export class CreateOrder extends BaseComponent {
         throw lastError;
     }
 
+    async getValidatedInputs() {
+        // Get values from input fields
+        const sellToken = document.getElementById('sellToken').value;
+        const buyToken = document.getElementById('buyToken').value;
+        const sellAmount = document.getElementById('sellAmount').value;
+        const buyAmount = document.getElementById('buyAmount').value;
+
+        console.log('Input values:', {
+            sellToken,
+            buyToken,
+            sellAmount,
+            buyAmount
+        });
+
+        // Validation checks
+        if (!sellToken || sellToken.trim() === '') {
+            throw new Error('Sell token address is required');
+        }
+        if (!buyToken || buyToken.trim() === '') {
+            throw new Error('Buy token address is required');
+        }
+        if (!sellAmount || parseFloat(sellAmount) <= 0) {
+            throw new Error('Valid sell amount is required');
+        }
+        if (!buyAmount || parseFloat(buyAmount) <= 0) {
+            throw new Error('Valid buy amount is required');
+        }
+
+        // Convert amounts to Wei using cached token details
+        const sellAmountWei = ethers.utils.parseUnits(
+            sellAmount.toString(),
+            this.sellTokenDetails?.decimals || 18
+        );
+        const buyAmountWei = ethers.utils.parseUnits(
+            buyAmount.toString(),
+            this.buyTokenDetails?.decimals || 18
+        );
+
+        return {
+            sellToken,
+            buyToken,
+            sellAmountWei,
+            buyAmountWei
+        };
+    }
+
     async createOrder() {
         try {
-            console.log('[CreateOrder] Starting order creation...');
+            const { sellToken, buyToken, sellAmountWei, buyAmountWei } = 
+                await this.getValidatedInputs();
+
+            const contract = await this.getContract();
             
-            // Get form values and validate them
-            const sellTokenInput = document.getElementById('sellToken');
-            const buyTokenInput = document.getElementById('buyToken');
-            const sellAmountInput = document.getElementById('sellAmount');
-            const buyAmountInput = document.getElementById('buyAmount');
+            // Validate and get current fee
+            const orderCreationFee = await this.validateOrderCreationFee();
 
-            // Debug log to see what we're getting
-            console.log('[CreateOrder] Form elements:', {
-                sellToken: sellTokenInput?.value,
-                buyToken: buyTokenInput?.value,
-                sellAmount: sellAmountInput?.value,
-                buyAmount: buyAmountInput?.value
-            });
-
-            // Validate inputs exist and have values
-            if (!sellTokenInput?.value || !buyTokenInput?.value || 
-                !sellAmountInput?.value || !buyAmountInput?.value) {
-                throw new Error('Please fill in all fields');
-            }
-
-            const sellToken = sellTokenInput.value;
-            const buyToken = buyTokenInput.value;
-            const sellAmount = sellAmountInput.value;
-            const buyAmount = buyAmountInput.value;
-
-            // Validate addresses are properly formatted
-            if (!ethers.utils.isAddress(sellToken)) {
-                throw new Error('Invalid sell token address');
-            }
-            if (!ethers.utils.isAddress(buyToken)) {
-                throw new Error('Invalid buy token address');
-            }
-
-            console.log('[CreateOrder] Validated values:', {
+            // Rest of your createOrder implementation...
+            const tx = await contract.createOrder(
+                ethers.constants.AddressZero,
                 sellToken,
+                sellAmountWei,
                 buyToken,
-                sellAmount,
-                buyAmount
-            });
-            try {
-                // Get token details and convert amounts
-                console.log('[CreateOrder] Getting token details...');
-                let sellTokenDetails, buyTokenDetails;
-                try {
-                    sellTokenDetails = await this.getTokenDetails(sellToken, true);
-                    buyTokenDetails = await this.getTokenDetails(buyToken, true);
-                    console.log('[CreateOrder] Token details:', {
-                        sellTokenDetails,
-                        buyTokenDetails
-                    });
-                } catch (error) {
-                    console.error('[CreateOrder] Failed to fetch token details:', error);
-                    throw new Error('Failed to fetch token details: ' + error.message);
+                buyAmountWei,
+                {
+                    value: orderCreationFee,
+                    gasLimit: 300000
                 }
-                    
-                const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellTokenDetails.decimals);
-                const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDetails.decimals);
-                
-                // 1. First get the order creation fee
-                // Add debug logs
-                console.log('[CreateOrder] Getting contract instance...');
-                const contract = await this.getContract();
-                if (!contract) {
-                    throw new Error('Failed to get contract instance');
-                }
-                
-                console.log('[CreateOrder] Getting order creation fee...');
-                const orderCreationFee = await contract.orderCreationFee();
-                console.log('[CreateOrder] Order creation fee:', orderCreationFee.toString());
+            );
 
-                // Get signer
-                this.signer = await this.getSigner();
-                console.log('[CreateOrder] Got signer:', !!this.signer);
-
-                // 2. Validate token balance and approve tokens
-                console.log('[CreateOrder] Validating token balance...');
-                const sellTokenContract = new ethers.Contract(
-                    sellToken,
-                    ['function approve(address spender, uint256 amount) returns (bool)',
-                     'function allowance(address owner, address spender) view returns (uint256)',
-                     'function balanceOf(address account) view returns (uint256)',
-                     'function decimals() view returns (uint8)'],
-                    this.signer
-                );
-
-                // Validate balance and approve tokens
-                await this.validateTokenAndBalance(sellTokenContract, sellAmountWei);
-                await this.approveToken(sellTokenContract, window.walletManager.contractAddress, sellAmountWei);
-
-                // 3. Create the order
-                console.log('[CreateOrder] Creating order transaction...');
-                const provider = contract.provider;
-                const feeData = await provider.getFeeData();
-                const gasPrice = feeData.gasPrice.mul(120).div(100); // 20% buffer
-
-                // Estimate gas for the createOrder transaction
-                const gasEstimate = await contract.estimateGas.createOrder(
-                    ethers.constants.AddressZero,
-                    sellToken,
-                    sellAmountWei,
-                    buyToken,
-                    buyAmountWei,
-                    { value: orderCreationFee }
-                );
-
-                const gasLimit = gasEstimate.mul(130).div(100); // 30% buffer
-
-                // Send transaction with explicit parameters
-                const tx = await contract.createOrder(
-                    ethers.constants.AddressZero,
-                    sellToken,
-                    sellAmountWei,
-                    buyToken,
-                    buyAmountWei,
-                    {
-                        value: orderCreationFee,
-                        gasLimit,
-                        gasPrice,
-                        nonce: await provider.getTransactionCount(await this.signer.getAddress())
-                    }
-                );
-
-                console.log('[CreateOrder] Waiting for transaction confirmation...');
-                await tx.wait();
-                this.showSuccess('Order created successfully!');
-
-            } catch (error) {
-                console.error('[CreateOrder] Transaction failed:', {
-                    error: error,
-                    message: error.message,
-                    code: error.code,
-                    data: error.data,
-                    stack: error.stack
-                });
-                this.showError(error.message || 'Failed to create order');
-            }
+            console.log('[CreateOrder] Transaction sent:', tx.hash);
+            return await tx.wait(1);
         } catch (error) {
-            console.error('[CreateOrder] Transaction failed:', {
-                error: error,
-                message: error.message,
-                code: error.code,
-                data: error.data,
-                stack: error.stack
-            });
-            this.showError(error.message || 'Failed to create order');
+            console.error('[CreateOrder] Transaction failed:', error);
+            throw error;
         }
     }
 
@@ -446,6 +372,40 @@ export class CreateOrder extends BaseComponent {
             return true;
         } catch (error) {
             throw new Error(`Token validation failed: ${error.message}`);
+        }
+    }
+
+    async validateOrderCreationFee() {
+        try {
+            const contract = await this.getContract();
+            const currentFee = await contract.orderCreationFee();
+            
+            // If this is our first fee check, store it and proceed
+            if (!this._currentFee) {
+                this._currentFee = currentFee;
+                return currentFee;
+            }
+
+            // Get contract's fee boundaries
+            const [minPercent, maxPercent] = await Promise.all([
+                contract.MIN_FEE_PERCENTAGE(),
+                contract.MAX_FEE_PERCENTAGE()
+            ]);
+
+            // Calculate acceptable range based on contract's parameters
+            const minFee = this._currentFee.mul(minPercent).div(100);
+            const maxFee = this._currentFee.mul(maxPercent).div(100);
+
+            // Check if new fee is within acceptable range
+            if (currentFee.lt(minFee) || currentFee.gt(maxFee)) {
+                await this.loadOrderCreationFee(); // Update stored fee
+                throw new Error('Order creation fee has changed outside acceptable range. Please try again.');
+            }
+
+            return currentFee;
+        } catch (error) {
+            console.error('[CreateOrder] Fee validation error:', error);
+            throw error;
         }
     }
 }
