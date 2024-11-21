@@ -56,17 +56,21 @@ export class BaseComponent {
 
     // Add method to get signer (used by CreateOrder)
     async getSigner() {
-        try {
+        if (!window.walletManager?.isInitialized) {
+            console.log('[BaseComponent] Waiting for wallet initialization...');
             await window.walletInitialized;
-            return walletManager.getSigner();
-        } catch (error) {
-            console.error('[BaseComponent] Error in getSigner:', error);
-            throw error;
         }
+        
+        const signer = await window.walletManager?.getSigner();
+        if (!signer || !signer.provider) {
+            throw new Error('Wallet not properly connected');
+        }
+        
+        return signer;
     }
 
     // Add this method to BaseComponent.js
-    async getTokenDetails(tokenAddress) {
+    async getTokenDetails(tokenAddress, forceRefresh = false) {
         try {
             console.log('[BaseComponent] Getting token details for:', tokenAddress);
             
@@ -75,10 +79,16 @@ export class BaseComponent {
                 return null;
             }
 
-            // Check cache
-            if (this.tokenCache?.has(tokenAddress)) {
-                console.log('[BaseComponent] Returning cached token details');
-                return this.tokenCache.get(tokenAddress);
+            // Check cache only if not forcing refresh
+            if (!forceRefresh && this.tokenCache?.has(tokenAddress)) {
+                const cachedData = this.tokenCache.get(tokenAddress);
+                const cacheAge = Date.now() - (cachedData.timestamp || 0);
+                
+                // Invalidate cache after 30 seconds for balances
+                if (cacheAge < 30000) {
+                    console.log('[BaseComponent] Returning cached token details');
+                    return cachedData;
+                }
             }
 
             console.log('[BaseComponent] Getting signer for token contract...');
@@ -125,7 +135,8 @@ export class BaseComponent {
                         balanceResult.value, 
                         decimalsResult.status === 'fulfilled' ? decimalsResult.value : 18
                     ) 
-                    : '0'
+                    : '0',
+                timestamp: Date.now()
             };
 
             // Cache the result

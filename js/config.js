@@ -323,6 +323,13 @@ export class WalletManager {
             abi: this.contractABI
         };
     }
+
+    getFallbackProviders() {
+        const config = getNetworkConfig();
+        return config.fallbackRpcUrls.map(url => 
+            new ethers.providers.JsonRpcProvider(url)
+        );
+    }
 }
 
 export const walletManager = new WalletManager();

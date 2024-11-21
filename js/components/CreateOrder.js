@@ -107,36 +107,31 @@ export class CreateOrder extends BaseComponent {
 
             console.log('[CreateOrder] Contract available, calling orderCreationFee...');
             const fee = await this.retryContractCall(() => contract.orderCreationFee());
-            console.log('[CreateOrder] Raw fee received:', fee?.toString());
             
-            if (!fee || fee.toString() === '0') {
-                console.warn('[CreateOrder] Warning: Fee returned as zero or undefined');
-                document.getElementById('orderCreationFee').textContent = 'Fee unavailable';
-                return;
-            }
-            
-            const formattedFee = ethers.utils.formatEther(fee);
-            console.log('[CreateOrder] Formatted fee:', formattedFee);
-            
-            const displayFee = parseFloat(formattedFee) < 0.000001 
-                ? parseFloat(formattedFee).toExponential(6) 
-                : parseFloat(formattedFee).toFixed(6).replace(/\.?0+$/, '');
-            
-            console.log('[CreateOrder] Setting display fee:', displayFee);
-            document.getElementById('orderCreationFee').textContent = `${displayFee} POL`;
+            console.log('[CreateOrder] Fee loaded:', fee.toString());
+            document.getElementById('orderCreationFee').textContent = 
+                `${ethers.utils.formatEther(fee)} POL`;
+            return fee;
         } catch (error) {
             console.error('[CreateOrder] Error in loadOrderCreationFee:', error);
             document.getElementById('orderCreationFee').textContent = 'Error loading fee';
+            throw error;
         }
     }
 
     setupEventListeners() {
-        document.getElementById('sellToken').addEventListener('change', 
-            () => this.updateTokenBalance('sell'));
-        document.getElementById('buyToken').addEventListener('change', 
-            () => this.updateTokenBalance('buy'));
+        const createOrderBtn = document.getElementById('createOrderBtn');
+        // Remove existing listeners
+        createOrderBtn.replaceWith(createOrderBtn.cloneNode(true));
+        // Add new listener
         document.getElementById('createOrderBtn').addEventListener('click', 
             () => this.createOrder());
+        
+        // Add token input listeners
+        document.getElementById('sellToken').addEventListener('input', 
+            () => this.updateTokenBalance('sell'));
+        document.getElementById('buyToken').addEventListener('input', 
+            () => this.updateTokenBalance('buy'));
     }
 
     async updateTokenBalance(type) {
@@ -203,252 +198,226 @@ export class CreateOrder extends BaseComponent {
 
     async createOrder() {
         try {
-            const contract = await this.getContract();
-            if (!contract) {
-                throw new Error('Contract not initialized');
+            console.log('[CreateOrder] Starting order creation...');
+            
+            // Get form values and validate them
+            const sellTokenInput = document.getElementById('sellToken');
+            const buyTokenInput = document.getElementById('buyToken');
+            const sellAmountInput = document.getElementById('sellAmount');
+            const buyAmountInput = document.getElementById('buyAmount');
+
+            // Debug log to see what we're getting
+            console.log('[CreateOrder] Form elements:', {
+                sellToken: sellTokenInput?.value,
+                buyToken: buyTokenInput?.value,
+                sellAmount: sellAmountInput?.value,
+                buyAmount: buyAmountInput?.value
+            });
+
+            // Validate inputs exist and have values
+            if (!sellTokenInput?.value || !buyTokenInput?.value || 
+                !sellAmountInput?.value || !buyAmountInput?.value) {
+                throw new Error('Please fill in all fields');
             }
 
-            // Get input values
-            const partner = document.getElementById('partner').value.trim();
-            const sellToken = document.getElementById('sellToken').value.trim();
-            const buyToken = document.getElementById('buyToken').value.trim();
-            const sellAmount = document.getElementById('sellAmount').value.trim();
-            const buyAmount = document.getElementById('buyAmount').value.trim();
+            const sellToken = sellTokenInput.value;
+            const buyToken = buyTokenInput.value;
+            const sellAmount = sellAmountInput.value;
+            const buyAmount = buyAmountInput.value;
 
-            // Validate inputs
-            if (!sellToken || !ethers.utils.isAddress(sellToken)) {
-                this.showError('Please enter a valid sell token address');
-                return;
+            // Validate addresses are properly formatted
+            if (!ethers.utils.isAddress(sellToken)) {
+                throw new Error('Invalid sell token address');
+            }
+            if (!ethers.utils.isAddress(buyToken)) {
+                throw new Error('Invalid buy token address');
             }
 
-            if (!buyToken || !ethers.utils.isAddress(buyToken)) {
-                this.showError('Please enter a valid buy token address');
-                return;
-            }
-
-            if (!sellAmount || isNaN(sellAmount) || parseFloat(sellAmount) <= 0) {
-                this.showError('Please enter a valid sell amount');
-                return;
-            }
-
-            if (!buyAmount || isNaN(buyAmount) || parseFloat(buyAmount) <= 0) {
-                this.showError('Please enter a valid buy amount');
-                return;
-            }
-
-            if (partner && !ethers.utils.isAddress(partner)) {
-                this.showError('Please enter a valid partner address or leave empty');
-                return;
-            }
-
-            // Get token decimals and convert amounts to Wei
-            let sellAmountWei, buyAmountWei;
+            console.log('[CreateOrder] Validated values:', {
+                sellToken,
+                buyToken,
+                sellAmount,
+                buyAmount
+            });
             try {
+                // Get token details and convert amounts
+                console.log('[CreateOrder] Getting token details...');
+                let sellTokenDetails, buyTokenDetails;
+                try {
+                    sellTokenDetails = await this.getTokenDetails(sellToken, true);
+                    buyTokenDetails = await this.getTokenDetails(buyToken, true);
+                    console.log('[CreateOrder] Token details:', {
+                        sellTokenDetails,
+                        buyTokenDetails
+                    });
+                } catch (error) {
+                    console.error('[CreateOrder] Failed to fetch token details:', error);
+                    throw new Error('Failed to fetch token details: ' + error.message);
+                }
+                    
+                const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellTokenDetails.decimals);
+                const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDetails.decimals);
+                
+                // 1. First get the order creation fee
+                // Add debug logs
+                console.log('[CreateOrder] Getting contract instance...');
+                const contract = await this.getContract();
+                if (!contract) {
+                    throw new Error('Failed to get contract instance');
+                }
+                
+                console.log('[CreateOrder] Getting order creation fee...');
+                const orderCreationFee = await contract.orderCreationFee();
+                console.log('[CreateOrder] Order creation fee:', orderCreationFee.toString());
+
+                // Get signer
+                this.signer = await this.getSigner();
+                console.log('[CreateOrder] Got signer:', !!this.signer);
+
+                // 2. Validate token balance and approve tokens
+                console.log('[CreateOrder] Validating token balance...');
                 const sellTokenContract = new ethers.Contract(
                     sellToken,
-                    ['function decimals() view returns (uint8)'],
-                    await this.getSigner()
+                    ['function approve(address spender, uint256 amount) returns (bool)',
+                     'function allowance(address owner, address spender) view returns (uint256)',
+                     'function balanceOf(address account) view returns (uint256)',
+                     'function decimals() view returns (uint8)'],
+                    this.signer
                 );
-                const buyTokenContract = new ethers.Contract(
+
+                // Validate balance and approve tokens
+                await this.validateTokenAndBalance(sellTokenContract, sellAmountWei);
+                await this.approveToken(sellTokenContract, window.walletManager.contractAddress, sellAmountWei);
+
+                // 3. Create the order
+                console.log('[CreateOrder] Creating order transaction...');
+                const tx = await contract.createOrder(
+                    ethers.constants.AddressZero,
+                    sellToken,
+                    sellAmountWei,
                     buyToken,
-                    ['function decimals() view returns (uint8)'],
-                    await this.getSigner()
+                    buyAmountWei,
+                    { value: orderCreationFee }
                 );
 
-                const [sellDecimals, buyDecimals] = await Promise.all([
-                    sellTokenContract.decimals(),
-                    buyTokenContract.decimals()
-                ]);
+                console.log('[CreateOrder] Waiting for transaction confirmation...');
+                await tx.wait();
+                this.showSuccess('Order created successfully!');
 
-                sellAmountWei = ethers.utils.parseUnits(sellAmount, sellDecimals);
-                buyAmountWei = ethers.utils.parseUnits(buyAmount, buyDecimals);
             } catch (error) {
-                console.error('[CreateOrder] Error getting token decimals:', error);
-                this.showError('Error processing token amounts. Please check the token addresses.');
-                return;
-            }
-
-            // Create ERC20 interface for the sell token
-            const erc20Interface = new ethers.utils.Interface([
-                "function name() public view returns (string)",
-                "function symbol() public view returns (string)",
-                "function decimals() public view returns (uint8)",
-                "function totalSupply() public view returns (uint256)",
-                "function balanceOf(address account) public view returns (uint256)",
-                "function transfer(address to, uint256 amount) public returns (bool)",
-                "function allowance(address owner, address spender) public view returns (uint256)",
-                "function approve(address spender, uint256 amount) public returns (bool)",
-                "function transferFrom(address from, address to, uint256 amount) public returns (bool)",
-                "event Transfer(address indexed from, address indexed to, uint256 value)",
-                "event Approval(address indexed owner, address indexed spender, uint256 value)"
-            ]);
-
-            // Create contract instance for the sell token
-            const sellTokenContract = new ethers.Contract(
-                sellToken,
-                erc20Interface,
-                await this.getSigner()
-            );
-
-            console.log('[CreateOrder] Starting approval process...');
-            try {
-                // Log token addresses and contract details
-                console.log('[CreateOrder] Token contract address:', sellToken);
-                console.log('[CreateOrder] Contract address:', contract.address);
-                
-                // Verify token contract first
-                const code = await this.getSigner().provider.getCode(sellToken);
-                console.log('[CreateOrder] Token contract bytecode:', code);
-                
-                if (code === '0x' || code === '0x0') {
-                    throw new Error('Invalid token contract address');
-                }
-
-                // Log signer details
-                const signerAddress = await this.getSigner().getAddress();
-                console.log('[CreateOrder] Signer address:', signerAddress);
-
-                // Add delay before allowance check
-                console.log('[CreateOrder] Waiting before allowance check...');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-
-                // Log allowance check parameters
-                console.log('[CreateOrder] Checking allowance with params:', {
-                    owner: signerAddress,
-                    spender: contract.address,
-                    sellAmount: sellAmountWei.toString()
-                });
-
-                const currentAllowance = await this.retryContractCall(async () => {
-                    const allowance = await sellTokenContract.allowance(
-                        signerAddress,
-                        contract.address
-                    );
-                    console.log('[CreateOrder] Raw allowance response:', allowance);
-                    return allowance;
-                }, 3);
-
-                console.log('[CreateOrder] Current allowance:', currentAllowance.toString());
-                console.log('[CreateOrder] Required amount:', sellAmountWei.toString());
-
-                if (currentAllowance.lt(sellAmountWei)) {
-                    console.log('[CreateOrder] Insufficient allowance, requesting approval...');
-                    this.showStatus('Requesting token approval...');
-                    
-                    // Log approval transaction parameters
-                    console.log('[CreateOrder] Approval params:', {
-                        spender: contract.address,
-                        amount: sellAmountWei.toString(),
-                        from: signerAddress,
-                        gasLimit: 100000
-                    });
-
-                    const approveTx = await sellTokenContract.approve(
-                        contract.address,
-                        sellAmountWei,
-                        {
-                            from: signerAddress,
-                            gasLimit: 100000
-                        }
-                    );
-                    
-                    console.log('[CreateOrder] Approval transaction created:', approveTx);
-                    console.log('[CreateOrder] Approval transaction hash:', approveTx.hash);
-                    
-                    this.showStatus('Confirming approval...');
-                    const receipt = await approveTx.wait(1);
-                    console.log('[CreateOrder] Approval receipt:', receipt);
-                    
-                } else {
-                    console.log('[CreateOrder] Sufficient allowance exists');
-                }
-            } catch (error) {
-                console.error('[CreateOrder] Approval error details:', {
+                console.error('[CreateOrder] Transaction failed:', {
+                    error: error,
                     message: error.message,
                     code: error.code,
                     data: error.data,
-                    transaction: error.transaction,
-                    receipt: error.receipt
+                    stack: error.stack
                 });
+                this.showError(error.message || 'Failed to create order');
+            }
+        } catch (error) {
+            console.error('[CreateOrder] Transaction failed:', {
+                error: error,
+                message: error.message,
+                code: error.code,
+                data: error.data,
+                stack: error.stack
+            });
+            this.showError(error.message || 'Failed to create order');
+        }
+    }
+
+    // Add this helper method to handle retries
+    async retryOperation(operation, operationName, maxRetries = 3, delay = 1000) {
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                console.log(`[CreateOrder] Attempting ${operationName} (attempt ${i + 1}/${maxRetries})`);
+                return await operation();
+            } catch (error) {
+                console.error(`[CreateOrder] ${operationName} failed:`, error);
                 
-                if (error.message.includes('Invalid token contract')) {
-                    this.showError('Invalid token contract address. Please verify the address.');
-                } else {
-                    this.showError('Failed to approve token transfer. Please try again.');
-                }
-                throw error;
+                const isRetryable = 
+                    error.code === 'CALL_EXCEPTION' ||
+                    error.message?.includes('header not found') ||
+                    error.message?.includes('Internal JSON-RPC error') ||
+                    error.data?.message?.includes('header not found');
+
+                if (i === maxRetries - 1 || !isRetryable) throw error;
+                
+                console.log(`[CreateOrder] Retrying ${operationName} in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    async approveToken(tokenContract, spender, amount) {
+        try {
+            const address = await this.signer.getAddress();
+            const currentAllowance = await tokenContract.allowance(address, spender);
+            
+            if (currentAllowance.gte(amount)) {
+                console.log('[CreateOrder] Sufficient allowance already exists');
+                return true;
             }
 
-            // Get the order creation fee
-            const fee = await contract.orderCreationFee();
-            console.log('[CreateOrder] Order creation fee:', ethers.utils.formatEther(fee));
-
-            // Calculate min and max acceptable fees
-            const minFee = fee.mul(90).div(100);  // 90% of fee
-            const maxFee = fee.mul(150).div(100); // 150% of fee
-
-            console.log('[CreateOrder] Min fee:', ethers.utils.formatEther(minFee));
-            console.log('[CreateOrder] Max fee:', ethers.utils.formatEther(maxFee));
-            console.log('[CreateOrder] Sending fee:', ethers.utils.formatEther(fee));
-
-            // Add the fee to transaction options
-            const txOptions = {
-                value: fee,
-                gasLimit: 500000  // Add explicit gas limit
-            };
-
-            // Add this before the transaction
-            console.log('[CreateOrder] Transaction params:', {
-                partner: partner || ethers.constants.AddressZero,
-                sellToken,
-                sellAmount: sellAmountWei.toString(),
-                buyToken,
-                buyAmount: buyAmountWei.toString(),
-                fee: fee.toString(),
-                minFee: minFee.toString(),
-                maxFee: maxFee.toString()
+            // Get current gas price
+            const provider = tokenContract.provider;
+            const gasPrice = await provider.getGasPrice();
+            
+            // Estimate gas with parameters
+            const gasEstimate = await tokenContract.estimateGas.approve(spender, amount, {
+                from: address,
+                gasPrice: gasPrice
             });
 
-            // Proceed with actual transaction
-            const transaction = await contract.createOrder(
-                partner || ethers.constants.AddressZero,
-                sellToken,
-                sellAmountWei,
-                buyToken,
-                buyAmountWei,
-                txOptions
-            );
+            // Add 30% buffer to gas estimate
+            const gasLimit = gasEstimate.mul(130).div(100);
 
-            console.log('[CreateOrder] Transaction sent:', transaction.hash);
-            const receipt = await transaction.wait();
-            console.log('[CreateOrder] Transaction confirmed:', receipt);
+            console.log('[CreateOrder] Gas estimation:', {
+                estimated: gasEstimate.toString(),
+                withBuffer: gasLimit.toString(),
+                gasPrice: gasPrice.toString()
+            });
 
-            this.showStatus(`Transaction sent: ${transaction.hash}`);
-            this.showStatus('Order created successfully!');
-
-        } catch (error) {
-            // Enhanced error handling
-            const errorDetails = {
-                code: error.code,
-                message: error.message,
-                data: error.error?.data || error.data,
-                reason: error.reason,
-                transaction: error.transaction,
-                receipt: error.receipt
-            };
+            const tx = await tokenContract.approve(spender, amount, {
+                gasLimit: gasLimit,
+                gasPrice: gasPrice
+            });
             
-            console.error('[CreateOrder] Transaction failed:', errorDetails);
-
-            let userMessage = 'Transaction failed. ';
-            if (error.code === -32603) {
-                userMessage += 'Network is experiencing issues. Please try again later.';
-            } else if (error.code === 'CALL_EXCEPTION') {
-                userMessage += 'Contract rejected the transaction. Please check your inputs.';
-            } else {
-                userMessage += error.message;
+            console.log('[CreateOrder] Approval transaction sent:', tx.hash);
+            const receipt = await tx.wait();
+            
+            if (receipt.status === 0) {
+                throw new Error('Approval transaction failed');
             }
             
-            this.showError(userMessage);
+            return true;
+        } catch (error) {
+            console.error('[CreateOrder] Approval error:', error);
+            if (error.code === 'UNPREDICTABLE_GAS_LIMIT') {
+                throw new Error('Failed to estimate gas. The transaction may fail.');
+            }
+            throw error;
+        }
+    }
+
+    async validateTokenAndBalance(tokenContract, amount) {
+        try {
+            const address = await this.signer.getAddress();
+            const [balance, decimals] = await Promise.all([
+                tokenContract.balanceOf(address),
+                tokenContract.decimals()
+            ]);
+            
+            if (balance.lt(amount)) {
+                const formattedAmount = ethers.utils.formatUnits(amount, decimals);
+                const formattedBalance = ethers.utils.formatUnits(balance, decimals);
+                throw new Error(
+                    `Insufficient balance. Required: ${formattedAmount}, Available: ${formattedBalance}`
+                );
+            }
+            return true;
+        } catch (error) {
+            throw new Error(`Token validation failed: ${error.message}`);
         }
     }
 }
