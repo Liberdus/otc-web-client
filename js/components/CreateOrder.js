@@ -291,13 +291,35 @@ export class CreateOrder extends BaseComponent {
 
                 // 3. Create the order
                 console.log('[CreateOrder] Creating order transaction...');
-                const tx = await contract.createOrder(
+                const provider = contract.provider;
+                const feeData = await provider.getFeeData();
+                const gasPrice = feeData.gasPrice.mul(120).div(100); // 20% buffer
+
+                // Estimate gas for the createOrder transaction
+                const gasEstimate = await contract.estimateGas.createOrder(
                     ethers.constants.AddressZero,
                     sellToken,
                     sellAmountWei,
                     buyToken,
                     buyAmountWei,
                     { value: orderCreationFee }
+                );
+
+                const gasLimit = gasEstimate.mul(130).div(100); // 30% buffer
+
+                // Send transaction with explicit parameters
+                const tx = await contract.createOrder(
+                    ethers.constants.AddressZero,
+                    sellToken,
+                    sellAmountWei,
+                    buyToken,
+                    buyAmountWei,
+                    {
+                        value: orderCreationFee,
+                        gasLimit,
+                        gasPrice,
+                        nonce: await provider.getTransactionCount(await this.signer.getAddress())
+                    }
                 );
 
                 console.log('[CreateOrder] Waiting for transaction confirmation...');
@@ -359,32 +381,35 @@ export class CreateOrder extends BaseComponent {
                 return true;
             }
 
-            // Get current gas price
+            // Get current gas price with a small buffer
             const provider = tokenContract.provider;
-            const gasPrice = await provider.getGasPrice();
+            const feeData = await provider.getFeeData();
+            const gasPrice = feeData.gasPrice.mul(120).div(100); // 20% buffer
             
-            // Estimate gas with parameters
-            const gasEstimate = await tokenContract.estimateGas.approve(spender, amount, {
+            console.log('[CreateOrder] Current gas price:', gasPrice.toString());
+
+            // First try to estimate gas
+            const gasEstimate = await tokenContract.estimateGas.approve(spender, amount);
+            const gasLimit = gasEstimate.mul(130).div(100); // 30% buffer
+
+            console.log('[CreateOrder] Approval parameters:', {
                 from: address,
-                gasPrice: gasPrice
-            });
-
-            // Add 30% buffer to gas estimate
-            const gasLimit = gasEstimate.mul(130).div(100);
-
-            console.log('[CreateOrder] Gas estimation:', {
-                estimated: gasEstimate.toString(),
-                withBuffer: gasLimit.toString(),
+                spender,
+                amount: amount.toString(),
+                gasLimit: gasLimit.toString(),
                 gasPrice: gasPrice.toString()
             });
 
+            // Send the transaction with explicit parameters
             const tx = await tokenContract.approve(spender, amount, {
-                gasLimit: gasLimit,
-                gasPrice: gasPrice
+                from: address,
+                gasLimit,
+                gasPrice,
+                nonce: await provider.getTransactionCount(address)
             });
             
             console.log('[CreateOrder] Approval transaction sent:', tx.hash);
-            const receipt = await tx.wait();
+            const receipt = await tx.wait(1); // Wait for 1 confirmation
             
             if (receipt.status === 0) {
                 throw new Error('Approval transaction failed');
@@ -392,10 +417,13 @@ export class CreateOrder extends BaseComponent {
             
             return true;
         } catch (error) {
-            console.error('[CreateOrder] Approval error:', error);
-            if (error.code === 'UNPREDICTABLE_GAS_LIMIT') {
-                throw new Error('Failed to estimate gas. The transaction may fail.');
-            }
+            console.error('[CreateOrder] Detailed approval error:', {
+                error,
+                code: error.code,
+                message: error.message,
+                data: error.data,
+                reason: error.reason
+            });
             throw error;
         }
     }
