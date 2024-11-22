@@ -1,0 +1,145 @@
+.wallet-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+
+.network-selector {
+  position: relative;
+}
+
+.network-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.network-button:hover {
+  background: var(--background-hover);
+}
+
+.network-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 4px;
+  min-width: 150px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.network-dropdown.hidden {
+  display: none;
+}
+
+.network-option {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.wallet-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #4B6BFB;
+  border: none;
+  border-radius: 12px;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.wallet-button:hover {
+  background: #3A54D6;
+}
+
+.wallet-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f8f9fa;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+  min-width: 200px;
+  justify-content: space-between;
+}
+
+.wallet-info.hidden {
+  display: none !important;
+}
+
+.account-address {
+  font-family: monospace;
+  font-size: 14px;
+  color: #666;
+  margin-right: 0;
+  flex: 1;
+}
+
+.wallet-disconnect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #f44336;
+  border: none;
+  border-radius: 12px;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.wallet-disconnect:hover {
+  background: #d32f2f;
+}
+
+.wallet-disconnect svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.chevron-down {
+  transition: transform 0.2s ease;
+}
+
+.network-button:hover .chevron-down {
+  transform: rotate(180deg);
+}
+
+.hidden {
+  display: none !important;
+}
+
+.network-button.single-network {
+  cursor: default;
+}
+
+.network-button.single-network:hover {
+  background: var(--background-secondary);
+}
+
+.network-button.single-network .chevron-down {
+  display: none;
+}
+ 

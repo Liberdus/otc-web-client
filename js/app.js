@@ -1,6 +1,6 @@
 import { BaseComponent } from './components/BaseComponent.js';
 import { CreateOrder } from './components/CreateOrder.js';
-import { walletManager, WalletManager, getNetworkConfig } from './config.js';
+import { walletManager, WalletManager, getNetworkConfig, getAllNetworks } from './config.js';
 import { WalletUI } from './components/WalletUI.js';
 import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
@@ -59,6 +59,27 @@ class App {
         });
 
         this.currentTab = 'create-order';
+
+        // Add wallet connect button handler
+        const walletConnectBtn = document.getElementById('walletConnect');
+        if (walletConnectBtn) {
+            walletConnectBtn.addEventListener('click', this.handleConnectWallet);
+        }
+
+        // Add wallet disconnect button handler
+        const walletDisconnectBtn = document.getElementById('walletDisconnect');
+        if (walletDisconnectBtn) {
+            walletDisconnectBtn.addEventListener('click', async () => {
+                console.log('Disconnect button clicked');
+                try {
+                    await window.walletManager.disconnect();
+                    this.handleWalletDisconnect();
+                } catch (error) {
+                    console.error('Disconnect error:', error);
+                    this.showError("Failed to disconnect: " + error.message);
+                }
+            });
+        }
     }
 
     async initialize() {
@@ -158,6 +179,27 @@ class App {
                 this.showTab(tabId);
             });
         });
+
+        // Add wallet connect button handler
+        const walletConnectBtn = document.getElementById('walletConnect');
+        if (walletConnectBtn) {
+            walletConnectBtn.addEventListener('click', this.handleConnectWallet);
+        }
+
+        // Add wallet disconnect button handler - moved outside constructor
+        const walletDisconnectBtn = document.getElementById('walletDisconnect');
+        if (walletDisconnectBtn) {
+            walletDisconnectBtn.addEventListener('click', async () => {
+                try {
+                    await window.walletManager.disconnect();
+                    this.handleWalletDisconnect();
+                } catch (error) {
+                    this.showError("Failed to disconnect: " + error.message);
+                }
+            });
+        } else {
+            console.error('Wallet disconnect button not found');
+        }
     }
 
     async connectWallet() {
@@ -173,13 +215,43 @@ class App {
     }
 
     handleWalletConnect(connectionInfo) {
+        const walletConnectBtn = document.getElementById('walletConnect');
+        const walletInfo = document.getElementById('walletInfo');
+        const accountAddress = document.getElementById('accountAddress');
+        
+        if (walletConnectBtn) {
+            walletConnectBtn.style.display = 'none';
+        }
+        
+        if (walletInfo) {
+            walletInfo.classList.remove('hidden');
+        }
+        
+        if (accountAddress && connectionInfo.address) {
+            accountAddress.textContent = `${connectionInfo.address.slice(0, 6)}...${connectionInfo.address.slice(-4)}`;
+        }
         
         this.showSuccess("Wallet connected successfully!");
     }
 
     handleWalletDisconnect() {
+        const walletConnectBtn = document.getElementById('walletConnect');
+        const walletInfo = document.getElementById('walletInfo');
+        const accountAddress = document.getElementById('accountAddress');
         
-        this.showError("Wallet disconnected");
+        if (walletConnectBtn) {
+            walletConnectBtn.style.display = 'flex';
+        }
+        
+        if (walletInfo) {
+            walletInfo.classList.add('hidden');
+        }
+        
+        if (accountAddress) {
+            accountAddress.textContent = '';
+        }
+        
+        this.showSuccess("Wallet disconnected successfully");
     }
 
     handleAccountChange(account) {
@@ -278,3 +350,50 @@ window.walletInitialized.then(async () => {
         console.error('[App] WebSocket initialization error:', error);
     }
 });
+
+// Network selector functionality
+const networkButton = document.querySelector('.network-button');
+const networkDropdown = document.querySelector('.network-dropdown');
+const networkBadge = document.querySelector('.network-badge');
+
+// Dynamically populate network options
+const populateNetworkOptions = () => {
+    const networks = getAllNetworks();
+    
+    // If only one network, hide dropdown functionality
+    if (networks.length <= 1) {
+        networkButton.classList.add('single-network');
+        return;
+    }
+    
+    networkDropdown.innerHTML = networks.map(network => `
+        <div class="network-option" data-network="${network.name.toLowerCase()}" data-chain-id="${network.chainId}">
+            ${network.displayName}
+        </div>
+    `).join('');
+    
+    // Re-attach click handlers only if multiple networks
+    document.querySelectorAll('.network-option').forEach(option => {
+        option.addEventListener('click', async () => {
+            try {
+                networkBadge.textContent = option.textContent;
+                networkDropdown.classList.add('hidden');
+                
+                if (window.walletManager && window.walletManager.isConnected()) {
+                    const chainId = option.dataset.chainId;
+                    await window.ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId }],
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to switch network:', error);
+                networkBadge.textContent = networkButton.querySelector('.network-badge').textContent;
+                app.showError('Failed to switch network: ' + error.message);
+            }
+        });
+    });
+};
+
+// Initialize network dropdown
+populateNetworkOptions();

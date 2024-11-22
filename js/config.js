@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 const networkConfig = {
     "80002": {
         name: "Amoy",
+        displayName: "Amoy Testnet",
         contractAddress: "0xF9D874860d5801233dd84569fad8513e0037A5d9",
         explorer: "https://www.oklink.com/amoy",
         rpcUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
@@ -19,8 +20,10 @@ const networkConfig = {
             symbol: "POL",
             decimals: 18
         }
-    }
+    },
 };
+
+export const getAllNetworks = () => Object.values(networkConfig);
 
 export class WalletManager {
     constructor() {

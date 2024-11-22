@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="css/components/forms.css" />
     <link rel="stylesheet" href="css/components/orders.css" />
     <link rel="stylesheet" href="css/components/tabs.css" />
+    <link rel="stylesheet" href="css/components/wallet.css" />
     <script type="importmap">
       {
         "imports": {
@@ -36,9 +37,31 @@
         </div>
         <div class="header-right">
           <div id="wallet-container" class="wallet-container">
-            <span class="network-badge">Amoy</span>
+            <div class="network-selector">
+              <button class="network-button">
+                <span class="network-badge">Amoy</span>
+                <svg
+                  class="chevron-down"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    d="M6 9l6 6 6-6"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+              <div class="network-dropdown hidden">
+                <!-- Network options will be populated dynamically -->
+              </div>
+            </div>
             <button id="walletConnect" class="wallet-button">
-              Connect Wallet
+              <span class="wallet-button-text">Connect Wallet</span>
             </button>
             <div id="walletInfo" class="wallet-info hidden">
               <span id="accountAddress" class="account-address"></span>

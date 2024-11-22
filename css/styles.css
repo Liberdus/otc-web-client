@@ -35,36 +35,6 @@ body {
     gap: 1rem;
 }
 
-/* Wallet styles */
-.wallet-container {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px;
-    border-radius: 12px;
-}
-
-.wallet-button {
-    background: #4B6BFB;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: block;
-}
-
-.wallet-button:hover {
-    background: #3A54D6;
-}
-
-.wallet-button.loading {
-    opacity: 0.7;
-    cursor: not-allowed;
-}
-
 .network-badge {
     padding: 4px 8px;
     border-radius: 12px;
@@ -80,30 +50,6 @@ body {
 
 .network-badge.wrong-network {
     background-color: #f44336;
-}
-
-.wallet-info {
-    display: none;
-    align-items: center;
-    gap: 8px;
-}
-
-.account-address {
-    font-family: monospace;
-    font-size: 14px;
-    color: #666;
-}
-
-.wallet-disconnect {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 4px;
-    color: #666;
-}
-
-.wallet-disconnect:hover {
-    color: #f44336;
 }
 
 .hidden {
@@ -150,8 +96,4 @@ body {
 /* Firefox-specific styles */
 @-moz-document url-prefix() {
     /* Add Firefox-specific rules here */
-}
-
-.wallet-info.visible {
-    display: flex;
 }
