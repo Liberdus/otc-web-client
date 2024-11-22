@@ -50,35 +50,38 @@ export class ViewOrders extends BaseComponent {
         });
     }
 
-    async initialize() {
+    async initialize(readOnlyMode = true) {
         try {
-            // Set up the table structure first
-            await this.setupTable();
-
-            // Wait for WebSocket to be ready
-            if (!window.webSocket?.isInitialSyncComplete) {
-                console.log('[ViewOrders] Waiting for WebSocket initialization...');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                return this.initialize();
+            // Clear previous content first
+            this.container.innerHTML = '';
+            
+            if (readOnlyMode) {
+                this.showReadOnlyMessage();
+                return;
             }
 
-            // Load initial orders from WebSocket service
-            console.log('[ViewOrders] Loading initial orders from WebSocket...');
-            const activeOrders = window.webSocket.getActiveOrders();
-            console.log('[ViewOrders] Found', activeOrders.length, 'active orders');
+            // Set up the table structure
+            await this.setupTable();
             
+            // Load initial orders
+            const activeOrders = window.webSocket?.getActiveOrders() || [];
             for (const orderData of activeOrders) {
                 await this.addOrderToTable(orderData);
             }
 
-            // Set up WebSocket listeners for future updates
             this.setupWebSocket();
-            this.setupEventListeners();
-            this.setupFilters();
         } catch (error) {
             console.error('[ViewOrders] Initialization error:', error);
             this.showError('Failed to initialize orders view');
         }
+    }
+
+    showReadOnlyMessage() {
+        this.container.innerHTML = `
+            <div class="tab-content-wrapper">
+                <h2>Orders</h2>
+                <p class="connect-prompt">Connect wallet to view orders</p>
+            </div>`;
     }
 
     setupWebSocket() {
@@ -165,25 +168,32 @@ export class ViewOrders extends BaseComponent {
     }
 
     setupTable() {
-        const table = this.createElement('table', 'orders-table');
-        table.innerHTML = `
-            <thead>
-                <tr>
-                    <th>Order ID</th>
-                    <th>Maker</th>
-                    <th>Sell Token</th>
-                    <th>Sell Amount</th>
-                    <th>Buy Token</th>
-                    <th>Buy Amount</th>
-                    <th>Created</th>
-                    <th>Expires</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody></tbody>
+        // Create wrapper and table
+        const wrapper = this.createElement('div', 'tab-content-wrapper');
+        wrapper.innerHTML = `
+            <h2>All Orders</h2>
+            <div class="orders-container">
+                <table class="orders-table">
+                    <thead>
+                        <tr>
+                            <th>Order ID</th>
+                            <th>Maker</th>
+                            <th>Sell Token</th>
+                            <th>Sell Amount</th>
+                            <th>Buy Token</th>
+                            <th>Buy Amount</th>
+                            <th>Created</th>
+                            <th>Expires</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
         `;
-        this.container.appendChild(table);
-        this.tbody = table.querySelector('tbody');
+        
+        this.container.appendChild(wrapper);
+        this.tbody = wrapper.querySelector('tbody');
     }
 
     formatAddress(address) {

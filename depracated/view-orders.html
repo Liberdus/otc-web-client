@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OTC Swap - View Orders</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script src="config.js"></script>
+    <style>
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .action-button {
+            padding: 5px 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin: 2px;
+        }
+        .action-button:hover {
+            background-color: #45a049;
+        }
+        .nav {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        .nav a {
+            color: #4CAF50;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .nav a:hover {
+            color: #45a049;
+            text-decoration: underline;
+        }
+        .nav a.active {
+            color: #2E7D32;
+            text-decoration: underline;
+        }
+        .token-info {
+            font-size: 0.9em;
+            color: #666;
+        }
+        .approve-button {
+            background-color: #2196F3;
+            color: white;
+        }
+        .approve-button:hover {
+            background-color: #1976D2;
+        }
+        .fill-button {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .fill-button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="index.html">Create Order</a>
+            <a href="view-orders.html" class="active">View Orders</a>
+            <a href="my-orders.html">My Orders</a>
+            <a href="taker-orders.html">Taker Orders</a>
+        </div>
+        <h1>Active OTC Swap Orders</h1>
+        <table id="ordersTable">
+            <thead>
+                <tr>
+                    <th>Maker</th>
+                    <th>Partner</th>
+                    <th>Sell Token</th>
+                    <th>Sell Amount</th>
+                    <th>Buy Token</th>
+                    <th>Buy Amount</th>
+                    <th>Created At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="ordersBody">
+            </tbody>
+        </table>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const contractABI = [
+            "function getActiveOrders(uint256 offset, uint256 limit) external view returns (tuple(uint256 orderId, address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)[] memory orderInfos, uint256 nextOffset)",
+            "function fillOrder(uint256 orderId) external"
+        ];
+
+        const erc20ABI = [
+            "function decimals() view returns (uint8)",
+            "function symbol() external view returns (string)",
+            "function balanceOf(address account) external view returns (uint256)",
+            "function allowance(address owner, address spender) external view returns (uint256)"
+        ];
+
+        async function loadOrders() {
+            try {
+                if (typeof window.ethereum === 'undefined') {
+                    alert('Please install MetaMask!');
+                    return;
+                }
+
+                // Get network configuration
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const contract = new ethers.Contract(config.contractAddress, contractABI, provider);
+
+                // Get active orders (first page with 100 orders)
+                const { orderInfos, nextOffset } = await contract.getActiveOrders(0, 100);
+                const tbody = document.getElementById('ordersBody');
+                tbody.innerHTML = '';
+
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const signer = provider.getSigner();
+                const userAddress = await signer.getAddress();
+
+                for (const order of orderInfos) {
+                    const sellTokenContract = new ethers.Contract(order.sellToken, erc20ABI, provider);
+                    const buyTokenContract = new ethers.Contract(order.buyToken, erc20ABI, provider);
+                    
+                    const [
+                        sellDecimals, 
+                        buyDecimals, 
+                        sellSymbol, 
+                        buySymbol,
+                        buyAllowance,
+                        buyBalance
+                    ] = await Promise.all([
+                        sellTokenContract.decimals(),
+                        buyTokenContract.decimals(),
+                        sellTokenContract.symbol(),
+                        buyTokenContract.symbol(),
+                        buyTokenContract.allowance(userAddress, config.contractAddress),
+                        buyTokenContract.balanceOf(userAddress)
+                    ]);
+
+                    const row = tbody.insertRow();
+                    row.innerHTML = `
+                        <td>${shortenAddress(order.maker)}</td>
+                        <td>${order.partner === ethers.constants.AddressZero ? 'Any' : shortenAddress(order.partner)}</td>
+                        <td>${sellSymbol}<br><span class="token-info">${shortenAddress(order.sellToken)}</span></td>
+                        <td>${ethers.utils.formatUnits(order.sellAmount, sellDecimals)} ${sellSymbol}</td>
+                        <td>${buySymbol}<br><span class="token-info">${shortenAddress(order.buyToken)}</span></td>
+                        <td>${ethers.utils.formatUnits(order.buyAmount, buyDecimals)} ${buySymbol}</td>
+                        <td>${new Date(order.createdAt * 1000).toLocaleString()}</td>
+                        <td>
+                            <button class="action-button approve-button" onclick="approveTokens('${order.buyToken}', '${order.buyAmount}')">
+                                Approve ${buySymbol}
+                            </button>
+                            <button class="action-button fill-button" onclick="fillOrder(${order.orderId})">
+                                Fill Order
+                            </button>
+                            <div class="token-info">
+                                Balance: ${ethers.utils.formatUnits(buyBalance, buyDecimals)} ${buySymbol}<br>
+                                Allowance: ${ethers.utils.formatUnits(buyAllowance, buyDecimals)} ${buySymbol}
+                            </div>
+                        </td>
+                    `;
+                }
+            } catch (error) {
+                console.error('Load orders error:', error);
+                document.getElementById('status').innerHTML = `Error: ${error.message}`;
+            }
+        }
+
+        function shortenAddress(address) {
+            return `${address.substring(0, 6)}...${address.substring(38)}`;
+        }
+
+        async function fillOrder(orderId) {
+            try {
+                if (orderId < 0) {
+                    throw new Error(`Invalid order ID: ${orderId}`);
+                }
+
+                // Get network configuration
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const signer = provider.getSigner();
+                const userAddress = await signer.getAddress();
+                const contract = new ethers.Contract(config.contractAddress, contractABI, signer);
+
+                console.log('Attempting to fill order:', orderId);
+
+                // Get the order details first
+                const { orderInfos } = await contract.getActiveOrders(0, 100);
+                const order = orderInfos.find(o => o.orderId.toString() === orderId.toString());
+
+                if (!order) {
+                    throw new Error('Order not found or no longer active');
+                }
+
+                // Enhanced logging for debugging the first failure
+                console.log('Fill order attempt:', {
+                    orderId,
+                    order: {
+                        maker: order.maker,
+                        partner: order.partner,
+                        sellToken: order.sellToken,
+                        sellAmount: ethers.utils.formatEther(order.sellAmount),
+                        buyToken: order.buyToken,
+                        buyAmount: ethers.utils.formatEther(order.buyAmount),
+                        active: order.active
+                    },
+                    userAddress,
+                    currentTime: new Date().toISOString()
+                });
+
+                // Add more detailed order logging
+                const buyTokenContract = new ethers.Contract(order.buyToken, [
+                    "function balanceOf(address) view returns (uint256)",
+                    "function allowance(address,address) view returns (uint256)",
+                    "function symbol() view returns (string)"
+                ], provider);
+
+                const [balance, allowance, symbol] = await Promise.all([
+                    buyTokenContract.balanceOf(userAddress),
+                    buyTokenContract.allowance(userAddress, config.contractAddress),
+                    buyTokenContract.symbol()
+                ]);
+
+                console.log('Pre-transaction checks:', {
+                    orderDetails: {
+                        orderId,
+                        maker: order.maker,
+                        buyToken: order.buyToken,
+                        buyAmount: ethers.utils.formatEther(order.buyAmount),
+                        sellToken: order.sellToken,
+                        sellAmount: ethers.utils.formatEther(order.sellAmount)
+                    },
+                    userDetails: {
+                        address: userAddress,
+                        balance: ethers.utils.formatEther(balance),
+                        allowance: ethers.utils.formatEther(allowance),
+                        symbol
+                    }
+                });
+
+                // Try simulation with error decoding
+                const orderContract = new ethers.Contract(config.contractAddress, [
+                    ...contractABI,
+                    "function orders(uint256) view returns (address maker, address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 createdAt, bool active)"
+                ], signer);
+
+                try {
+                    const orderState = await orderContract.orders(orderId);
+                    const isExpired = (Date.now() / 1000) > (orderState.createdAt.toNumber() + (7 * 24 * 60 * 60));
+                    
+                    if (!orderState.active || isExpired) {
+                        throw new Error('Order is no longer active or has expired');
+                    }
+
+                    // Check if user has sufficient balance and allowance
+                    const buyTokenContract = new ethers.Contract(order.buyToken, [
+                        "function balanceOf(address) view returns (uint256)",
+                        "function allowance(address,address) view returns (uint256)"
+                    ], provider);
+
+                    const [balance, allowance] = await Promise.all([
+                        buyTokenContract.balanceOf(userAddress),
+                        buyTokenContract.allowance(userAddress, config.contractAddress)
+                    ]);
+
+                    if (balance.lt(order.buyAmount)) {
+                        throw new Error('Insufficient token balance');
+                    }
+                    if (allowance.lt(order.buyAmount)) {
+                        throw new Error('Insufficient token allowance');
+                    }
+                } catch (stateError) {
+                    console.error('Pre-transaction check failed:', stateError);
+                    throw stateError;
+                }
+
+                // Try to simulate the transaction first
+                try {
+                    const fillTx = await contract.populateTransaction.fillOrder(orderId);
+                    await provider.call({
+                        to: config.contractAddress,
+                        data: fillTx.data,
+                        from: userAddress
+                    });
+                    console.log('Transaction simulation successful');
+                } catch (simulationError) {
+                    console.error('Transaction simulation failed:', {
+                        error: simulationError,
+                        errorData: simulationError.error?.data,
+                        errorArgs: simulationError.errorArgs,
+                        errorName: simulationError.errorName
+                    });
+                    throw new Error(`Transaction would fail: ${simulationError.message}`);
+                }
+
+                // Rest of your existing code...
+                const tx = await contract.fillOrder(orderId, {
+                    gasLimit: 300000
+                });
+                
+                document.getElementById('status').innerHTML = 
+                    `Filling order... Transaction: ${tx.hash}`;
+                
+                console.log('Transaction sent:', tx.hash);
+                
+                const receipt = await tx.wait();
+                console.log('Transaction receipt:', receipt);
+                
+                document.getElementById('status').innerHTML = 
+                    `Order filled successfully! Transaction: ${tx.hash}`;
+                
+                await loadOrders();
+
+            } catch (error) {
+                console.error('Fill order error:', {
+                    error,
+                    code: error.code,
+                    message: error.message,
+                    data: error.error?.data,
+                    receipt: error.receipt
+                });
+
+                let errorMessage = 'Transaction failed. Possible reasons:\n';
+                
+                if (error.receipt) {
+                    if (error.receipt.status === 0) {
+                        errorMessage += '1. Order might be expired\n';
+                        errorMessage += '2. Order might have been already filled\n';
+                        errorMessage += '3. Insufficient token balance or allowance\n';
+                        errorMessage += '4. Order might be inactive\n';
+                    }
+                }
+
+                // Add transaction details
+                if (error.transaction) {
+                    errorMessage += `\nTransaction Hash: ${error.transaction.hash}\n`;
+                    errorMessage += `Gas Used: ${error.receipt?.gasUsed?.toString() || 'unknown'}\n`;
+                }
+
+                document.getElementById('status').innerHTML = errorMessage;
+            }
+        }
+
+        // Helper function to approve tokens (you can call this separately)
+        async function approveTokens(tokenAddress, amount) {
+            try {
+                // Get network configuration
+                const config = await getNetworkConfig();
+                if (!config) {
+                    throw new Error("Unsupported network. Please switch to a supported network.");
+                }
+
+                console.log('Approving tokens:', {
+                    tokenAddress: tokenAddress,
+                    amount: ethers.utils.formatEther(amount),
+                    contractAddress: config.contractAddress
+                });
+
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const signer = provider.getSigner();
+                
+                const tokenContract = new ethers.Contract(tokenAddress, [
+                    "function approve(address spender, uint256 amount)",
+                    "function symbol() view returns (string)"
+                ], signer);
+
+                const symbol = await tokenContract.symbol();
+                console.log(`Approving ${symbol} token...`);
+
+                const tx = await tokenContract.approve(
+                    config.contractAddress,
+                    amount,
+                    {
+                        gasLimit: 100000,
+                        gasPrice: await provider.getGasPrice()
+                    }
+                );
+                
+                console.log('Approval transaction:', tx.hash);
+                document.getElementById('status').innerHTML = 
+                    `Approving ${symbol} tokens... Transaction: ${tx.hash}`;
+                
+                await tx.wait();
+                console.log('Approval confirmed');
+                document.getElementById('status').innerHTML = 
+                    `Successfully approved ${symbol} tokens!`;
+                
+                // Refresh to update allowances
+                await loadOrders();
+                
+            } catch (error) {
+                console.error('Approval error:', error);
+                document.getElementById('status').innerHTML = 
+                    `Error approving tokens: ${error.message}`;
+                throw error;
+            }
+        }
+
+        // Load orders when page loads
+        window.addEventListener('load', loadOrders);
+    </script>
+</body>
+</html>

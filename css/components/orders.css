@@ -134,3 +134,17 @@
         overflow-x: auto;
     }
 }
+
+.connect-prompt {
+    text-align: center;
+    padding: 20px;
+    color: #666;
+    font-size: 1.1em;
+}
+
+.error-message {
+    text-align: center;
+    padding: 20px;
+    color: #ff4444;
+    font-size: 1.1em;
+}

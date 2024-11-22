@@ -11,12 +11,7 @@ export class WalletUI extends BaseComponent {
             super('wallet-container');
             console.log('[WalletUI] BaseComponent initialized');
             this.initializeElements();
-            console.log('[WalletUI] Creating walletInitialized promise');
-            window.walletInitialized = new Promise(async (resolve) => {
-                await this.init();
-                console.log('[WalletUI] Wallet initialization complete, resolving promise');
-                resolve(true);
-            });
+            this.init();
         } catch (error) {
             console.error('[WalletUI] Error in constructor:', error);
         }
@@ -65,6 +60,10 @@ export class WalletUI extends BaseComponent {
             console.log('[WalletUI] Connect result:', result);
             if (result && result.account) {
                 this.updateUI(result.account);
+                // Trigger app-level wallet connection handler
+                if (window.app && typeof window.app.handleWalletConnect === 'function') {
+                    await window.app.handleWalletConnect(result.account);
+                }
             }
         } catch (error) {
             console.error('[WalletUI] Error in handleConnectClick:', error);
@@ -87,68 +86,75 @@ export class WalletUI extends BaseComponent {
         try {
             console.log('[WalletUI] Starting init...');
             
-            // Check if MetaMask is already connected
-            if (window.ethereum) {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                if (accounts.length > 0) {
-                    console.log('[WalletUI] Found existing connection:', accounts[0]);
-                    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-                    this.updateUI(accounts[0]);
-                    this.updateNetworkBadge(chainId);
-                }
-            }
-
             if (typeof window.ethereum === 'undefined') {
                 console.error('[WalletUI] MetaMask is not installed!');
                 return false;
             }
 
-            console.log('[WalletUI] Initializing wallet manager...');
-            await walletManager.init();
-            
-            // Add click handler for disconnect button
-            this.disconnectButton.addEventListener('click', async (e) => {
-                e.preventDefault();
-                console.log('[WalletUI] Disconnect button clicked');
-                await walletManager.disconnect();
-                this.showConnectButton();
-            });
-
-            // Setup wallet manager listeners
-            walletManager.addListener((event, data) => {
-                console.log('[WalletUI] Wallet event:', event, data);
-                switch (event) {
-                    case 'connect':
-                        console.log('[WalletUI] Connect event received');
-                        this.updateUI(data.account);
-                        break;
-                    case 'disconnect':
-                        console.log('[WalletUI] Disconnect event received');
-                        this.showConnectButton();
-                        break;
-                    case 'accountsChanged':
-                        console.log('[WalletUI] Account change event received');
-                        this.updateUI(data.account);
-                        break;
-                    case 'chainChanged':
-                        console.log('[WalletUI] Chain change event received');
-                        this.updateNetworkBadge(data.chainId);
-                        break;
-                }
-            });
-
-            // Check initial connection state
-            if (walletManager.isWalletConnected()) {
-                console.log('[WalletUI] Wallet already connected, updating UI');
-                this.updateUI(walletManager.getAccount());
-                this.updateNetworkBadge(walletManager.chainId);
-            }
+            // Setup event listeners without checking connection
+            this.setupEventListeners();
             
             return true;
         } catch (error) {
             console.error('[WalletUI] Error in init:', error);
             throw error;
         }
+    }
+
+    setupEventListeners() {
+        // Update disconnect button handler
+        this.disconnectButton.addEventListener('click', async (e) => {
+            e.preventDefault();
+            console.log('[WalletUI] Disconnect button clicked');
+            try {
+                // Clear our app's connection state
+                await walletManager.disconnect();
+                
+                // Reset UI
+                this.showConnectButton();
+                this.accountAddress.textContent = '';
+                
+                // Show message to user
+                const message = "Note: To fully disconnect MetaMask, please lock your wallet manually through the MetaMask extension.";
+                if (window.app && typeof window.app.showSuccess === 'function') {
+                    window.app.showSuccess(message);
+                }
+                
+                // Trigger app-level disconnect handler
+                if (window.app && typeof window.app.handleWalletDisconnect === 'function') {
+                    window.app.handleWalletDisconnect();
+                }
+            } catch (error) {
+                console.error('[WalletUI] Error disconnecting:', error);
+            }
+        });
+
+        // Setup wallet manager listeners
+        walletManager.addListener((event, data) => {
+            console.log('[WalletUI] Wallet event:', event, data);
+            switch (event) {
+                case 'connect':
+                    console.log('[WalletUI] Connect event received');
+                    this.updateUI(data.account);
+                    // Trigger app-level wallet connection handler
+                    if (window.app && typeof window.app.handleWalletConnect === 'function') {
+                        window.app.handleWalletConnect(data.account);
+                    }
+                    break;
+                case 'disconnect':
+                    console.log('[WalletUI] Disconnect event received');
+                    this.showConnectButton();
+                    break;
+                case 'accountsChanged':
+                    console.log('[WalletUI] Account change event received');
+                    this.updateUI(data.account);
+                    break;
+                case 'chainChanged':
+                    console.log('[WalletUI] Chain change event received');
+                    this.updateNetworkBadge(data.chainId);
+                    break;
+            }
+        });
     }
 
     updateUI(account) {

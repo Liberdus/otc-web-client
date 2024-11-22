@@ -6,6 +6,7 @@ const networkConfig = {
         name: "Amoy",
         displayName: "Amoy Testnet",
         contractAddress: "0xF9D874860d5801233dd84569fad8513e0037A5d9",
+        contractABI: CONTRACT_ABI,
         explorer: "https://www.oklink.com/amoy",
         rpcUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
         fallbackRpcUrls: [
@@ -342,6 +343,10 @@ export class WalletManager {
             throw new Error('No signer available');
         }
         return await this.signer.getAddress();
+    }
+
+    isConnected() {
+        return this.account !== null && this.chainId !== null;
     }
 }
 
