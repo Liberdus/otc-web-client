@@ -124,4 +124,49 @@ export class MyOrders extends ViewOrders {
         this.container.appendChild(table);
         this.tbody = table.querySelector('tbody');
     }
+
+    setupEventListeners() {
+        // Add click handler for cancel buttons
+        this.container.addEventListener('click', async (event) => {
+            if (event.target.classList.contains('cancel-button')) {
+                const orderId = event.target.dataset.orderId;
+                await this.cancelOrder(orderId);
+            }
+        });
+    }
+
+    async cancelOrder(orderId) {
+        try {
+            // Disable the cancel button and update status
+            const row = this.tbody.querySelector(`tr[data-order-id="${orderId}"]`);
+            const cancelButton = row.querySelector('.cancel-button');
+            const statusCell = row.querySelector('.order-status');
+            
+            cancelButton.disabled = true;
+            statusCell.textContent = 'Canceling...';
+
+            // Get the contract instance and cancel the order
+            const contract = await this.getContract();
+            const tx = await contract.cancelOrder(orderId);
+            await tx.wait();
+
+            // Success message
+            this.showSuccess('Order canceled successfully');
+            
+            // Note: The order will be removed from the table when we receive the
+            // orderCanceled event through WebSocket
+        } catch (error) {
+            console.error('[MyOrders] Error canceling order:', error);
+            this.showError('Failed to cancel order');
+            
+            // Reset the button and status on error
+            const row = this.tbody.querySelector(`tr[data-order-id="${orderId}"]`);
+            if (row) {
+                const cancelButton = row.querySelector('.cancel-button');
+                const statusCell = row.querySelector('.order-status');
+                cancelButton.disabled = false;
+                statusCell.textContent = 'Active';
+            }
+        }
+    }
 }
