@@ -56,17 +56,16 @@ export class BaseComponent {
 
     // Add method to get signer (used by CreateOrder)
     async getSigner() {
-        if (!window.walletManager?.isInitialized) {
-            console.log('[BaseComponent] Waiting for wallet initialization...');
-            await window.walletInitialized;
+        try {
+            if (!window.walletManager?.provider) {
+                throw new Error('Please connect your wallet first');
+            }
+            this.signer = await window.walletManager.provider.getSigner();
+            return this.signer;
+        } catch (error) {
+            console.error('[BaseComponent] Error getting signer:', error);
+            throw error;
         }
-        
-        const signer = await window.walletManager?.getSigner();
-        if (!signer || !signer.provider) {
-            throw new Error('Wallet not properly connected');
-        }
-        
-        return signer;
     }
 
     // Add this method to BaseComponent.js
@@ -153,52 +152,107 @@ export class BaseComponent {
 
     // New helper method to determine if an error is retryable
     isRetryableError(error) {
+        const retryableCodes = [-32603, -32000]; // Common RPC error codes
         const retryableMessages = [
             'header not found',
             'Internal JSON-RPC error',
             'timeout',
             'network error',
             'missing response',
-            'missing trie node'
+            'missing trie node',
+            'connection reset',
+            'connection refused'
         ];
 
-        return retryableMessages.some(msg => 
-            error.message?.toLowerCase().includes(msg.toLowerCase()) ||
-            error.data?.message?.toLowerCase().includes(msg.toLowerCase())
+        // Check RPC error codes
+        const rpcCode = error.error?.code || error.code;
+        if (retryableCodes.includes(rpcCode)) {
+            console.log('[BaseComponent] Retryable RPC code detected:', rpcCode);
+            return true;
+        }
+
+        // Check error messages
+        const errorMessage = (error.message || '').toLowerCase();
+        const rpcMessage = (error.error?.message || '').toLowerCase();
+        const dataMessage = (error.data?.message || '').toLowerCase();
+
+        const hasRetryableMessage = retryableMessages.some(msg => 
+            errorMessage.includes(msg.toLowerCase()) ||
+            rpcMessage.includes(msg.toLowerCase()) ||
+            dataMessage.includes(msg.toLowerCase())
         );
+
+        if (hasRetryableMessage) {
+            console.log('[BaseComponent] Retryable message detected:', {
+                errorMessage,
+                rpcMessage,
+                dataMessage
+            });
+            return true;
+        }
+
+        return false;
     }
 
     // New helper method for detailed error logging
     logDetailedError(prefix, error) {
-        console.error(prefix, {
-            error: error,
-            code: error.code,
+        const errorDetails = {
             message: error.message,
+            code: error.code,
             data: error.data,
             reason: error.reason,
-            stack: error.stack,
+            // RPC specific details
             rpcError: error.error?.data || error.data,
-            transaction: error.transaction,
-            receipt: error.receipt
-        });
+            rpcCode: error.error?.code || error.code,
+            rpcMessage: error.error?.message,
+            // Transaction details if available
+            transaction: error.transaction && {
+                from: error.transaction.from,
+                to: error.transaction.to,
+                data: error.transaction.data,
+                value: error.transaction.value?.toString(),
+            },
+            // Receipt if available
+            receipt: error.receipt && {
+                status: error.receipt.status,
+                gasUsed: error.receipt.gasUsed?.toString(),
+                blockNumber: error.receipt.blockNumber,
+            },
+            // Stack trace
+            stack: error.stack,
+        };
+
+        console.error(prefix, JSON.stringify(errorDetails, null, 2));
+        return errorDetails;
     }
 
     // Modified retry call with better logging
     async retryCall(fn, maxRetries = 3, delay = 1000) {
         for (let i = 0; i < maxRetries; i++) {
             try {
+                console.log(`[BaseComponent] Attempt ${i + 1}/${maxRetries}`);
                 return await fn();
             } catch (error) {
-                const isRetryable = 
-                    error.code === 'CALL_EXCEPTION' ||
-                    error.message?.includes('header not found') ||
-                    error.message?.includes('Internal JSON-RPC error') ||
-                    error.data?.message?.includes('header not found');
+                const errorDetails = this.logDetailedError(
+                    `[BaseComponent] Attempt ${i + 1} failed:`,
+                    error
+                );
 
-                if (i === maxRetries - 1 || !isRetryable) throw error;
+                const isRetryable = this.isRetryableError(error);
+                console.log('[BaseComponent] Error is retryable:', isRetryable, {
+                    errorCode: errorDetails.code,
+                    rpcCode: errorDetails.rpcCode,
+                    message: errorDetails.message
+                });
+
+                if (i === maxRetries - 1 || !isRetryable) {
+                    console.error('[BaseComponent] Max retries reached or non-retryable error');
+                    throw error;
+                }
                 
-                console.log(`[BaseComponent] Retry ${i + 1}/${maxRetries} after ${delay}ms`);
-                await new Promise(resolve => setTimeout(resolve, delay));
+                const waitTime = delay * Math.pow(2, i); // Exponential backoff
+                console.log(`[BaseComponent] Retrying in ${waitTime}ms...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
             }
         }
     }

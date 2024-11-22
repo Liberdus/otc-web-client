@@ -14,7 +14,7 @@
 }
 
 .orders-table th {
-    padding: 16px;
+    padding: 16px 24px;
     text-align: left;
     font-weight: 600;
     color: #666666;
@@ -22,7 +22,7 @@
 }
 
 .orders-table td {
-    padding: 16px;
+    padding: 16px 24px;
     border-bottom: 1px solid #E8ECF4;
     color: #333333;
 }

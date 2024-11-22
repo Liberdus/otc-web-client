@@ -4,6 +4,8 @@ import { walletManager, WalletManager, getNetworkConfig } from './config.js';
 import { WalletUI } from './components/WalletUI.js';
 import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
+import { MyOrders } from './components/MyOrders.js';
+import { TakerOrders } from './components/TakerOrders.js';
 
 console.log('App.js loaded');
 
@@ -26,8 +28,8 @@ class App {
         this.components = {
             'wallet-info': this.walletUI,
             'view-orders': new ViewOrders(),
-            'my-orders': new BaseComponent('my-orders'),
-            'taker-orders': new BaseComponent('taker-orders')
+            'my-orders': new MyOrders(),
+            'taker-orders': new TakerOrders()
         };
 
         // Render wallet UI immediately
@@ -38,6 +40,7 @@ class App {
             if (component instanceof BaseComponent && 
                 !(component instanceof CreateOrder) && 
                 !(component instanceof ViewOrders) &&
+                !(component instanceof TakerOrders) &&
                 !(component instanceof WalletUI)) {
                 component.render = function() {
                     if (!this.initialized) {

@@ -1,11 +1,14 @@
 import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
+import { erc20Abi } from '../abi/erc20.js';
+import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 
 export class ViewOrders extends BaseComponent {
-    constructor() {
-        super('view-orders');
+    constructor(containerId = 'view-orders') {
+        super(containerId);
         this.orders = new Map();
         this.tokenCache = new Map();
+        this.provider = new ethers.providers.Web3Provider(window.ethereum);
         this.setupErrorHandling();
         this.initialize();
     }
@@ -112,7 +115,7 @@ export class ViewOrders extends BaseComponent {
                     <th>Buy Amount</th>
                     <th>Created</th>
                     <th>Expires</th>
-                    <th>Actions</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -142,6 +145,13 @@ export class ViewOrders extends BaseComponent {
                 (error) => error.message.includes('header not found')
             );
             
+            // indicates no orders exist yet
+            if (firstOrderId.eq(nextOrderId)) {
+                console.log('[ViewOrders] No orders exist yet');
+                this.showMessage('No orders have been created yet');
+                return;
+            }
+
             console.log('[ViewOrders] Loading orders from', firstOrderId.toString(), 'to', nextOrderId.toString());
 
             // Clear existing orders
@@ -165,52 +175,34 @@ export class ViewOrders extends BaseComponent {
 
     async loadOrder(orderId) {
         try {
+            console.log(`[ViewOrders] Loading order ${orderId}`);
             const contract = await this.getContract();
             const order = await contract.orders(orderId);
-            
-            // Validate order data
-            if (order.maker === ethers.constants.AddressZero) {
-                throw new ContractError(
-                    CONTRACT_ERRORS.INVALID_ORDER.message,
-                    CONTRACT_ERRORS.INVALID_ORDER.code,
-                    { orderId }
-                );
+
+            // Skip empty/invalid orders silently
+            if (order.maker === ethers.constants.AddressZero || order.status !== 0) {
+                console.log(`[ViewOrders] Order ${orderId} is empty or inactive - skipping`);
+                return null;
             }
 
             // Check if order is expired
             const expiryTime = (order.timestamp * 1000) + (7 * 24 * 60 * 60 * 1000);
             if (Date.now() > expiryTime) {
-                throw new ContractError(
-                    CONTRACT_ERRORS.EXPIRED_ORDER.message,
-                    CONTRACT_ERRORS.EXPIRED_ORDER.code,
-                    { orderId, timestamp: order.timestamp }
-                );
+                console.log(`[ViewOrders] Order ${orderId} is expired - skipping`);
+                return null;
             }
 
-            console.log('[ViewOrders] Loading order', orderId, ':', order);
-            
-            // Skip if order is empty or not active
-            if (order.maker === ethers.constants.AddressZero || order.status !== 0) {
-                console.log('[ViewOrders] Skipping order', orderId, '- Empty or inactive');
-                return;
-            }
-
-            // Store order in memory
+            // Store valid order in memory
             this.orders.set(orderId, order);
 
-            // Load token details
+            // Load token details for valid orders only
             console.log('[ViewOrders] Loading token details for order', orderId);
             const [sellTokenDetails, buyTokenDetails] = await Promise.all([
                 this.getTokenDetails(order.sellToken),
                 this.getTokenDetails(order.buyToken)
             ]);
-            
-            console.log('[ViewOrders] Token details loaded:', {
-                sellToken: sellTokenDetails,
-                buyToken: buyTokenDetails
-            });
 
-            // Create table row
+            // Create and return table row for valid order
             const tr = this.createElement('tr');
             tr.innerHTML = `
                 <td>${orderId}</td>
@@ -227,17 +219,11 @@ export class ViewOrders extends BaseComponent {
             `;
 
             this.tbody.appendChild(tr);
+            
+            return order;
         } catch (error) {
-            if (error instanceof ContractError) {
-                console.error(`[ViewOrders] Contract error loading order ${orderId}:`, {
-                    code: error.code,
-                    message: error.message,
-                    details: error.details
-                });
-            } else {
-                console.error(`[ViewOrders] Error loading order ${orderId}:`, error);
-            }
-            throw error;
+            console.warn(`[ViewOrders] Error loading order ${orderId}:`, error);
+            return null;
         }
     }
 
@@ -276,83 +262,144 @@ export class ViewOrders extends BaseComponent {
 
     async fillOrder(orderId) {
         try {
+            console.log('[ViewOrders] Starting fill order process for orderId:', orderId);
+            
+            const order = await this.getOrderDetails(orderId);
+            console.log('[ViewOrders] Order details:', {
+                maker: order.maker,
+                taker: order.taker,
+                sellToken: order.sellToken,
+                sellAmount: order.sellAmount.toString(),
+                buyToken: order.buyToken,
+                buyAmount: order.buyAmount.toString(),
+                status: order.status,
+                timestamp: order.timestamp
+            });
+
+            if (!order) {
+                throw new Error('Order not found');
+            }
+
+            // Verify order status
+            if (order.status !== 0) {
+                throw new Error('Order is no longer available');
+            }
+            // Get contract and signer
             const contract = await this.getContract();
+            this.signer = await this.getSigner();
+            const signerAddress = await this.signer.getAddress();
+            console.log('[ViewOrders] Signer address:', signerAddress);
             
-            // Pre-fill checks
-            const order = await contract.orders(orderId);
-            
-            // Check if order exists
-            if (order.maker === ethers.constants.AddressZero) {
-                throw new ContractError(
-                    CONTRACT_ERRORS.INVALID_ORDER.message,
-                    CONTRACT_ERRORS.INVALID_ORDER.code,
-                    { orderId }
-                );
-            }
+            const contractWithSigner = contract.connect(this.signer);
+            console.log('[ViewOrders] Contract address:', contract.address);
 
-            // Check if order is expired
-            const expiryTime = (order.timestamp * 1000) + (7 * 24 * 60 * 60 * 1000);
-            if (Date.now() > expiryTime) {
-                throw new ContractError(
-                    CONTRACT_ERRORS.EXPIRED_ORDER.message,
-                    CONTRACT_ERRORS.EXPIRED_ORDER.code,
-                    { orderId, timestamp: order.timestamp }
-                );
-            }
-
-            // Check allowance
-            const tokenContract = new ethers.Contract(
-                order.sellToken,
-                ['function allowance(address,address) view returns (uint256)'],
-                contract.provider
+            // Get buy token contract
+            const buyTokenContract = new ethers.Contract(
+                order.buyToken,
+                ['function allowance(address,address) view returns (uint256)',
+                 'function approve(address,uint256)'],
+                this.signer
             );
-            
-            const allowance = await tokenContract.allowance(
-                await window.walletManager.getCurrentAddress(),
-                contract.address
-            );
-            
-            if (allowance.lt(order.sellAmount)) {
-                throw new ContractError(
-                    CONTRACT_ERRORS.INSUFFICIENT_ALLOWANCE.message,
-                    CONTRACT_ERRORS.INSUFFICIENT_ALLOWANCE.code,
-                    { 
-                        orderId,
-                        required: order.sellAmount.toString(),
-                        current: allowance.toString()
-                    }
+            // Check allowance with explicit error handling
+            try {
+                console.log('[ViewOrders] Checking allowance...');
+                const allowance = await buyTokenContract.allowance(
+                    signerAddress,
+                    contract.address
                 );
-            }
+                console.log('[ViewOrders] Current allowance:', allowance.toString());
+                console.log('[ViewOrders] Required amount:', order.buyAmount.toString());
 
-            const button = this.tbody.querySelector(`[data-order-id="${orderId}"]`);
-            button.disabled = true;
-            button.textContent = 'Processing...';
-
-            const tx = await contract.fillOrder(orderId);
-            await tx.wait();
-            
-            this.showSuccess('Order filled successfully!');
-            await this.loadOrders();
-            
-        } catch (error) {
-            if (error instanceof ContractError) {
-                this.showError(error.message);
-                console.error('[ViewOrders] Contract error filling order:', {
-                    code: error.code,
+                if (allowance.lt(order.buyAmount)) {
+                    console.log('[ViewOrders] Insufficient allowance, requesting approval...');
+                    const approveTx = await buyTokenContract.approve(
+                        contract.address,
+                        order.buyAmount
+                    );
+                    console.log('[ViewOrders] Approval transaction:', approveTx.hash);
+                    const approveReceipt = await approveTx.wait();
+                    console.log('[ViewOrders] Approval receipt:', {
+                        status: approveReceipt.status,
+                        gasUsed: approveReceipt.gasUsed.toString(),
+                        blockNumber: approveReceipt.blockNumber
+                    });
+                }
+            } catch (error) {
+                console.error('[ViewOrders] Allowance/Approval error:', {
                     message: error.message,
-                    details: error.details
+                    code: error.code,
+                    transaction: error.transaction,
+                    receipt: error.receipt,
+                    data: error.data
                 });
-            } else {
-                this.showError('Failed to fill order. Please try again.');
-                console.error('[ViewOrders] Error filling order:', error);
+                throw new Error('Failed to check/set token allowance');
             }
-            
-            // Reset button state
-            const button = this.tbody.querySelector(`[data-order-id="${orderId}"]`);
-            if (button) {
-                button.disabled = false;
-                button.textContent = 'Fill Order';
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            try {
+                console.log('[ViewOrders] Sending fillOrder transaction...');
+                const tx = await contractWithSigner.fillOrder(orderId, {
+                    gasLimit: 300000
+                });
+                console.log('[ViewOrders] Fill transaction hash:', tx.hash);
+                const receipt = await tx.wait();
+                console.log('[ViewOrders] Fill transaction receipt:', {
+                    status: receipt.status,
+                    gasUsed: receipt.gasUsed.toString(),
+                    blockNumber: receipt.blockNumber,
+                    events: receipt.events?.map(e => ({
+                        event: e.event,
+                        args: e.args
+                    }))
+                });
+
+                this.showSuccess('Order filled successfully!');
+                await this.loadOrders();
+                
+            } catch (error) {
+                console.log('[ViewOrders] Fill order error:', error);
+                this.showError('Failed to fill order: ' + (error.message || 'Unknown error'));
+                throw error;
             }
+        } catch (error) {
+            console.log('[ViewOrders] Fill order error:', error);
+            this.showError('Failed to fill order: ' + (error.message || 'Unknown error'));
+            throw error;
+        }
+    }
+
+    async getOrderDetails(orderId) {
+        try {
+            const contract = await this.getContract();
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
+
+            // Get order details from contract
+            const order = await this.retryCall(
+                () => contract.orders(orderId)
+            );
+
+            if (!order || !order.maker) {
+                throw new Error('Order not found');
+            }
+
+            return {
+                maker: order.maker,
+                taker: order.taker,
+                sellToken: order.sellToken,
+                sellAmount: order.sellAmount,
+                buyToken: order.buyToken,
+                buyAmount: order.buyAmount,
+                timestamp: order.timestamp,
+                status: order.status,
+                orderCreationFee: order.orderCreationFee,
+                tries: order.tries
+            };
+        } catch (error) {
+            console.error('[ViewOrders] Error getting order details:', error);
+            throw error;
         }
     }
 }

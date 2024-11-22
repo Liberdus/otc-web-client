@@ -330,6 +330,14 @@ export class WalletManager {
             new ethers.providers.JsonRpcProvider(url)
         );
     }
+
+    // Add this new method
+    async getCurrentAddress() {
+        if (!this.signer) {
+            throw new Error('No signer available');
+        }
+        return await this.signer.getAddress();
+    }
 }
 
 export const walletManager = new WalletManager();

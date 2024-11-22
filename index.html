@@ -1,105 +1,138 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OTC Swap</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css"
+    />
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-    </style>
-    <link rel="stylesheet" href="css/styles.css">
-    <link rel="stylesheet" href="css/components/forms.css">
-    <link rel="stylesheet" href="css/components/orders.css">
-    <link rel="stylesheet" href="css/components/tabs.css">
-    <script type="importmap">
-    {
-      "imports": {
-        "ethers": "https://unpkg.com/ethers@5.7.2/dist/ethers.esm.min.js"
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
-    }
+    </style>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/components/forms.css" />
+    <link rel="stylesheet" href="css/components/orders.css" />
+    <link rel="stylesheet" href="css/components/tabs.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "ethers": "https://unpkg.com/ethers@5.7.2/dist/ethers.esm.min.js"
+        }
+      }
     </script>
     <script type="module" src="js/app.js" defer></script>
-</head>
-<body>
+  </head>
+  <body>
     <div class="container">
-        <header class="header">
-            <div class="header-left">
-                <h1>OTC Swap</h1>
+      <header class="header">
+        <div class="header-left">
+          <h1>OTC Swap</h1>
+        </div>
+        <div class="header-right">
+          <div id="wallet-container" class="wallet-container">
+            <span class="network-badge">Amoy</span>
+            <button id="walletConnect" class="wallet-button">
+              Connect Wallet
+            </button>
+            <div id="walletInfo" class="wallet-info hidden">
+              <span id="accountAddress" class="account-address"></span>
+              <button id="walletDisconnect" class="wallet-disconnect">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M16 17l5-5-5-5"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                  <path d="M21 12H9" stroke-width="2" stroke-linecap="round" />
+                </svg>
+              </button>
             </div>
-            <div class="header-right">
-                <div id="wallet-container" class="wallet-container">
-                    <span class="network-badge">Amoy</span>
-                    <button id="walletConnect" class="wallet-button">
-                        Connect Wallet
-                    </button>
-                    <div id="walletInfo" class="wallet-info hidden">
-                        <span id="accountAddress" class="account-address"></span>
-                        <button id="walletDisconnect" class="wallet-disconnect">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke-width="2" stroke-linecap="round"/>
-                                <path d="M16 17l5-5-5-5" stroke-width="2" stroke-linecap="round"/>
-                                <path d="M21 12H9" stroke-width="2" stroke-linecap="round"/>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </header>
+          </div>
+        </div>
+      </header>
 
-        <main class="main-content">
-            <div class="content-wrapper">
-                <nav class="nav-tabs">
-                    <button class="tab-button active" data-tab="create-order">Create Order</button>
-                    <button class="tab-button" data-tab="view-orders">View Orders</button>
-                    <button class="tab-button" data-tab="my-orders">My Orders</button>
-                    <button class="tab-button" data-tab="taker-orders">Taker Orders</button>
-                </nav>
+      <main class="main-content">
+        <div class="content-wrapper">
+          <nav class="nav-tabs">
+            <button class="tab-button active" data-tab="create-order">
+              Create Order
+            </button>
+            <button class="tab-button" data-tab="view-orders">
+              View Orders
+            </button>
+            <button class="tab-button" data-tab="my-orders">My Orders</button>
+            <button class="tab-button" data-tab="taker-orders">
+              Invited Orders
+            </button>
+          </nav>
 
-                <div id="create-order" class="tab-content active">
-                    <div class="form-container">
-                        <div class="swap-box">
-                            <h2>Create OTC Swap Order</h2>
-                            <div class="form-group">
-                                <label for="partner">Partner Address (optional):</label>
-                                <input type="text" id="partner" placeholder="0x...">
-                            </div>
-                            <div class="form-group">
-                                <label for="sellToken">Sell Token Address:</label>
-                                <input type="text" id="sellToken" placeholder="0x...">
-                                <span id="sellTokenBalance"></span>
-                            </div>
-                            <div class="form-group">
-                                <label for="sellAmount">Sell Amount:</label>
-                                <input type="text" id="sellAmount" placeholder="Enter amount">
-                            </div>
-                            <div class="form-group">
-                                <label for="buyToken">Buy Token Address:</label>
-                                <input type="text" id="buyToken" placeholder="0x...">
-                                <span id="buyTokenBalance"></span>
-                            </div>
-                            <div class="form-group">
-                                <label for="buyAmount">Buy Amount:</label>
-                                <input type="text" id="buyAmount" placeholder="Enter amount">
-                            </div>
-                            <div class="form-group">
-                                <label>Order Creation Fee:</label>
-                                <span id="orderCreationFee">Loading...</span>
-                            </div>
-                            <button class="action-button" id="createOrderBtn">Create Order</button>
-                            <div id="status" class="status"></div>
-                        </div>
-                    </div>
+          <div id="create-order" class="tab-content active">
+            <div class="form-container">
+              <div class="swap-box">
+                <h2>Create OTC Swap Order</h2>
+                <div class="form-group">
+                  <label for="partner">Partner Address (optional):</label>
+                  <input type="text" id="partner" placeholder="0x..." />
                 </div>
-                <div id="view-orders" class="tab-content"></div>
-                <div id="my-orders" class="tab-content"></div>
-                <div id="taker-orders" class="tab-content"></div>
+                <div class="form-group">
+                  <label for="sellToken">Sell Token Address:</label>
+                  <input type="text" id="sellToken" placeholder="0x..." />
+                  <span id="sellTokenBalance"></span>
+                </div>
+                <div class="form-group">
+                  <label for="sellAmount">Sell Amount:</label>
+                  <input
+                    type="text"
+                    id="sellAmount"
+                    placeholder="Enter amount"
+                  />
+                </div>
+                <div class="form-group">
+                  <label for="buyToken">Buy Token Address:</label>
+                  <input type="text" id="buyToken" placeholder="0x..." />
+                  <span id="buyTokenBalance"></span>
+                </div>
+                <div class="form-group">
+                  <label for="buyAmount">Buy Amount:</label>
+                  <input
+                    type="text"
+                    id="buyAmount"
+                    placeholder="Enter amount"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Order Creation Fee:</label>
+                  <span id="orderCreationFee">Loading...</span>
+                </div>
+                <button class="action-button" id="createOrderBtn">
+                  Create Order
+                </button>
+                <div id="status" class="status"></div>
+              </div>
             </div>
-        </main>
+          </div>
+          <div id="view-orders" class="tab-content"></div>
+          <div id="my-orders" class="tab-content"></div>
+          <div id="taker-orders" class="tab-content"></div>
+        </div>
+      </main>
     </div>
-</body>
+  </body>
 </html>

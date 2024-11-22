@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { getNetworkConfig } from '../config.js';
 
 export class WebSocketService {
     constructor() {
@@ -84,122 +85,61 @@ export class WebSocketService {
                 this.provider
             );
 
-            // Store contract instance
-            this.contract = contract;
-
-            // Listen for contract events and handle potential errors
-            contract.on('OrderCreated', (...args) => {
-                try {
-                    const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee] = args;
-                    
-                    // Validate order data
-                    if (!orderId || !maker || !sellToken || !buyToken) {
-                        throw new ContractError(
-                            CONTRACT_ERRORS.INVALID_ORDER.message,
-                            CONTRACT_ERRORS.INVALID_ORDER.code,
-                            { orderId, maker }
-                        );
-                    }
-
-                    this.notifySubscribers('orderCreated', {
-                        orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee
-                    });
-                } catch (error) {
-                    if (error instanceof ContractError) {
-                        console.error('[WebSocket] Contract error:', {
-                            code: error.code,
-                            message: error.message,
-                            details: error.details
-                        });
-                    }
-                    this.notifySubscribers('error', error);
-                }
-            });
-
-            // Example of handling order fill attempts
-            contract.on('OrderFilled', async (...args) => {
-                try {
-                    const [orderId, maker, taker] = args;
-                    
-                    // Check order status before processing
-                    const orderStatus = await contract.getOrderStatus(orderId);
-                    if (orderStatus === 0) { // Assuming 0 means inactive
-                        throw new ContractError(
-                            CONTRACT_ERRORS.INACTIVE_ORDER.message,
-                            CONTRACT_ERRORS.INACTIVE_ORDER.code,
-                            { orderId }
-                        );
-                    }
-
-                    // Check authorization
-                    if (taker !== window.walletManager.currentAddress) {
-                        throw new ContractError(
-                            CONTRACT_ERRORS.UNAUTHORIZED.message,
-                            CONTRACT_ERRORS.UNAUTHORIZED.code,
-                            { orderId, taker }
-                        );
-                    }
-
-                    // Process the fill event
-                    this.notifySubscribers('orderFilled', {
-                        orderId, maker, taker, ...args
-                    });
-                } catch (error) {
-                    if (error instanceof ContractError) {
-                        console.error('[WebSocket] Order fill error:', {
-                            code: error.code,
-                            message: error.message,
-                            details: error.details
-                        });
-                        // Notify UI of specific error
-                        this.notifySubscribers('error', {
-                            type: 'orderFill',
-                            code: error.code,
-                            message: error.message
-                        });
-                    }
-                }
-            });
-
-            // Example of handling token allowance checks
-            contract.on('PreOrderCheck', async (orderId, maker, sellToken, sellAmount) => {
-                try {
-                    const tokenContract = new ethers.Contract(
-                        sellToken,
-                        ['function allowance(address,address) view returns (uint256)'],
-                        this.provider
-                    );
-
-                    const allowance = await tokenContract.allowance(maker, contract.address);
-                    if (allowance.lt(sellAmount)) {
-                        throw new ContractError(
-                            CONTRACT_ERRORS.INSUFFICIENT_ALLOWANCE.message,
-                            CONTRACT_ERRORS.INSUFFICIENT_ALLOWANCE.code,
-                            { 
-                                orderId,
-                                maker,
-                                required: sellAmount.toString(),
-                                current: allowance.toString()
+            // Add error handler for contract calls
+            const wrappedContract = new Proxy(contract, {
+                get: (target, prop) => {
+                    const original = target[prop];
+                    if (typeof original === 'function') {
+                        return async (...args) => {
+                            try {
+                                return await original.apply(target, args);
+                            } catch (error) {
+                                if (error.code === 'CALL_EXCEPTION' || 
+                                    (error.rpcError && error.rpcError.code === -32000)) {
+                                    throw new ContractError(
+                                        CONTRACT_ERRORS.MISSING_ORDER.message,
+                                        CONTRACT_ERRORS.MISSING_ORDER.code,
+                                        { originalError: error }
+                                    );
+                                }
+                                throw error;
                             }
-                        );
+                        };
                     }
-                } catch (error) {
-                    if (error instanceof ContractError) {
-                        console.error('[WebSocket] Allowance check failed:', {
-                            code: error.code,
-                            message: error.message,
-                            details: error.details
-                        });
-                        this.notifySubscribers('error', error);
-                    }
+                    return original;
                 }
             });
 
-            // Listen for OrderCanceled events
+            this.contract = wrappedContract;
+
+            // Core order events
+            contract.on('OrderCreated', (...args) => {
+                this.notifySubscribers('orderCreated', args);
+            });
+
+            contract.on('OrderFilled', (...args) => {
+                this.notifySubscribers('orderFilled', args);
+            });
+
             contract.on('OrderCanceled', (...args) => {
-                console.log('[WebSocket] OrderCanceled event received:', args);
-                const [orderId, maker, timestamp] = args;
-                this.notifySubscribers('orderCanceled', { orderId, maker, timestamp });
+                this.notifySubscribers('orderCanceled', args);
+            });
+
+            // Cleanup and retry events
+            contract.on('OrderCleanedUp', (...args) => {
+                this.notifySubscribers('orderCleanedUp', args);
+            });
+
+            contract.on('RetryOrder', (...args) => {
+                this.notifySubscribers('retryOrder', args);
+            });
+
+            contract.on('CleanupFeesDistributed', (...args) => {
+                this.notifySubscribers('cleanupFeesDistributed', args);
+            });
+
+            contract.on('CleanupError', (...args) => {
+                this.notifySubscribers('cleanupError', args);
             });
 
             console.log('[WebSocket] Event listeners setup complete');
@@ -217,18 +157,37 @@ export class WebSocketService {
     }
 
     async handleConnectionError() {
+        const errorDetails = {
+            attempts: this.reconnectAttempts,
+            maxAttempts: this.maxReconnectAttempts,
+            provider: {
+                network: this.provider?._network,
+                ready: this.provider?._ready,
+                websocket: {
+                    readyState: this.provider?._websocket?.readyState,
+                    url: this.provider?._websocket?.url
+                }
+            }
+        };
+
+        console.log('[WebSocket] Connection error details:', JSON.stringify(errorDetails, null, 2));
+
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error('[WebSocket] Max reconnection attempts reached');
+            console.error('[WebSocket] Max reconnection attempts reached', errorDetails);
             this.notifySubscribers('error', { 
                 code: 'WS_CONNECTION_FAILED',
                 message: 'WebSocket connection failed after multiple attempts',
-                attempts: this.reconnectAttempts
+                details: errorDetails
             });
             return;
         }
 
-        const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
-        console.log(`[WebSocket] Reconnecting in ${delay}ms...`);
+        const delay = Math.min(
+            this.reconnectDelay * Math.pow(2, this.reconnectAttempts),
+            30000 // Max 30 second delay
+        );
+        
+        console.log(`[WebSocket] Attempting reconnection ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts} in ${delay}ms`);
         
         // Clear existing listeners before reconnecting
         if (this.contract) {
@@ -239,10 +198,13 @@ export class WebSocketService {
             this.reconnectAttempts++;
             try {
                 await this.initialize();
+                console.log('[WebSocket] Reconnection successful');
                 this.notifySubscribers('reconnected', {
-                    attempts: this.reconnectAttempts
+                    attempts: this.reconnectAttempts,
+                    timestamp: Date.now()
                 });
             } catch (error) {
+                console.error('[WebSocket] Reconnection failed:', error);
                 this.handleConnectionError();
             }
         }, delay);
@@ -263,6 +225,13 @@ export class WebSocketService {
 
     notifySubscribers(eventType, data) {
         if (this.subscribers.has(eventType)) {
+            // Handle contract errors
+            if (data instanceof ContractError) {
+                this.subscribers.get(eventType).forEach(callback => 
+                    callback({ error: data })
+                );
+                return;
+            }
             this.subscribers.get(eventType).forEach(callback => callback(data));
         }
     }
@@ -299,16 +268,8 @@ const CONTRACT_ERRORS = {
         code: 'ORDER_003',
         message: 'Order has expired'
     },
-    INSUFFICIENT_BALANCE: {
-        code: 'TOKEN_001',
-        message: 'Insufficient balance for sell token'
-    },
-    INSUFFICIENT_ALLOWANCE: {
-        code: 'TOKEN_002',
-        message: 'Insufficient allowance for sell token'
-    },
-    UNAUTHORIZED: {
-        code: 'AUTH_001',
-        message: 'Not authorized to perform this action'
+    MISSING_ORDER: {
+        code: 'ORDER_004',
+        message: 'Order not found or missing'
     }
 };

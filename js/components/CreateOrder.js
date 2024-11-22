@@ -7,6 +7,9 @@ export class CreateOrder extends BaseComponent {
         console.log('[CreateOrder] Constructor starting...');
         super('create-order');
         this.contract = null;
+        this.cachedFee = null;
+        this.lastFeeUpdate = null;
+        this.FEE_CACHE_DURATION = 30000; // 30 seconds in milliseconds
         
         // Verify elements exist
         const elements = {
@@ -198,13 +201,15 @@ export class CreateOrder extends BaseComponent {
     }
 
     async getValidatedInputs() {
-        // Get values from input fields
+        // Add partner to the inputs
+        const partner = document.getElementById('partner').value;
         const sellToken = document.getElementById('sellToken').value;
         const buyToken = document.getElementById('buyToken').value;
         const sellAmount = document.getElementById('sellAmount').value;
         const buyAmount = document.getElementById('buyAmount').value;
 
         console.log('Input values:', {
+            partner,
             sellToken,
             buyToken,
             sellAmount,
@@ -236,6 +241,7 @@ export class CreateOrder extends BaseComponent {
         );
 
         return {
+            partner: partner || ethers.constants.AddressZero, // Use zero address if no partner specified
             sellToken,
             buyToken,
             sellAmountWei,
@@ -245,32 +251,98 @@ export class CreateOrder extends BaseComponent {
 
     async createOrder() {
         try {
-            const { sellToken, buyToken, sellAmountWei, buyAmountWei } = 
+            // Get signer first
+            this.signer = await this.getSigner();
+            if (!this.signer) {
+                throw new Error('Please connect your wallet first');
+            }
+
+            const { partner, sellToken, buyToken, sellAmountWei, buyAmountWei } = 
                 await this.getValidatedInputs();
 
             const contract = await this.getContract();
             
-            // Validate and get current fee
+            // Check and handle token approval first
+            const sellTokenContract = new ethers.Contract(
+                sellToken,
+                erc20Abi,
+                this.signer
+            );
+
+            console.log('[CreateOrder] Checking token approval...');
+            
+            // Check allowance
+            const address = await this.signer.getAddress();
+            console.log('[CreateOrder] User address:', address);
+
+            const allowance = await sellTokenContract.allowance(
+                address,
+                contract.address
+            );
+
+            console.log('[CreateOrder] Current allowance:', allowance.toString());
+
+            if (allowance.lt(sellAmountWei)) {
+                console.log('[CreateOrder] Insufficient allowance, requesting approval...');
+                const approveTx = await sellTokenContract.approve(
+                    contract.address,
+                    sellAmountWei
+                );
+                console.log('[CreateOrder] Waiting for approval transaction...');
+                await approveTx.wait(1);
+            }
+
+            // Get current fee
             const orderCreationFee = await this.validateOrderCreationFee();
 
-            // Rest of your createOrder implementation...
+            // Add error handling for low balance
+            const balance = await this.signer.getBalance();
+            if (balance.lt(orderCreationFee)) {
+                throw new Error(`Insufficient POL balance for fee. Required: ${ethers.utils.formatEther(orderCreationFee)} POL`);
+            }
+
+            console.log('[CreateOrder] Sending create order transaction with params:', {
+                partner,
+                sellToken,
+                sellAmount: sellAmountWei.toString(),
+                buyToken,
+                buyAmount: buyAmountWei.toString(),
+                fee: orderCreationFee.toString()
+            });
+
+            // Create order with higher gas limit and explicit parameters
             const tx = await contract.createOrder(
-                ethers.constants.AddressZero,
+                partner,
                 sellToken,
                 sellAmountWei,
                 buyToken,
                 buyAmountWei,
                 {
                     value: orderCreationFee,
-                    gasLimit: 300000
+                    gasLimit: 500000,
+                    gasPrice: await this.signer.getGasPrice()
                 }
             );
 
             console.log('[CreateOrder] Transaction sent:', tx.hash);
-            return await tx.wait(1);
+            
+            const receipt = await tx.wait(1);
+            if (receipt.status === 0) {
+                throw new Error('Transaction failed. Please check your token approvals and balances.');
+            }
+            
+            return receipt;
         } catch (error) {
             console.error('[CreateOrder] Transaction failed:', error);
-            throw error;
+            if (error.message.includes('insufficient funds')) {
+                throw new Error('Insufficient POL for gas fees');
+            } else if (error.message.includes('user rejected')) {
+                throw new Error('Transaction was rejected');
+            } else if (error.message.includes('connect your wallet')) {
+                throw new Error('Please connect your wallet first');
+            } else {
+                throw error;
+            }
         }
     }
 
@@ -375,36 +447,87 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
+    formatFee(fee) {
+        if (!fee) return '0 POL';
+        return `${ethers.utils.formatEther(fee)} POL`;
+    }
+
+    async getOrderCreationFee() {
+        const now = Date.now();
+        if (!this.cachedFee || !this.lastFeeUpdate || (now - this.lastFeeUpdate) > this.FEE_CACHE_DURATION) {
+            this.cachedFee = await this.loadOrderCreationFee();
+            this.lastFeeUpdate = now;
+            
+            // Update UI with raw value, since loadOrderCreationFee already formats it
+            const feeElement = document.getElementById('orderCreationFee');
+            if (feeElement) {
+                feeElement.textContent = await this.loadOrderCreationFee();
+            }
+        }
+        return this.cachedFee;
+    }
+
     async validateOrderCreationFee() {
         try {
-            const contract = await this.getContract();
-            const currentFee = await contract.orderCreationFee();
+            // Get current fee
+            const currentFee = await this.getOrderCreationFee();
             
-            // If this is our first fee check, store it and proceed
-            if (!this._currentFee) {
-                this._currentFee = currentFee;
-                return currentFee;
-            }
+            // Add 20% tolerance 
+            const tolerance = 0.2;
+            const lowerBound = currentFee.mul(90).div(100); // 90% of current fee
+            const upperBound = currentFee.mul(110).div(100); // 110% of current fee
+            
+            console.log('[CreateOrder] Fee validation:', {
+                currentFee: currentFee.toString(),
+                lowerBound: lowerBound.toString(),
+                upperBound: upperBound.toString()
+            });
 
-            // Get contract's fee boundaries
-            const [minPercent, maxPercent] = await Promise.all([
-                contract.MIN_FEE_PERCENTAGE(),
-                contract.MAX_FEE_PERCENTAGE()
-            ]);
-
-            // Calculate acceptable range based on contract's parameters
-            const minFee = this._currentFee.mul(minPercent).div(100);
-            const maxFee = this._currentFee.mul(maxPercent).div(100);
-
-            // Check if new fee is within acceptable range
-            if (currentFee.lt(minFee) || currentFee.gt(maxFee)) {
-                await this.loadOrderCreationFee(); // Update stored fee
-                throw new Error('Order creation fee has changed outside acceptable range. Please try again.');
-            }
-
-            return currentFee;
+            return currentFee; // Return the current fee for use in transaction
         } catch (error) {
             console.error('[CreateOrder] Fee validation error:', error);
+            throw error;
+        }
+    }
+
+    // Add auto-refresh
+    startFeeAutoRefresh() {
+        setInterval(async () => {
+            await this.getOrderCreationFee();
+        }, this.FEE_CACHE_DURATION);
+    }
+
+    // Add helper function to check token balances
+    async checkTokenBalance(tokenAddress, amount) {
+        const tokenContract = new ethers.Contract(
+            tokenAddress,
+            erc20Abi,
+            this.signer
+        );
+        
+        const address = await this.signer.getAddress();
+        const balance = await tokenContract.balanceOf(address);
+        
+        if (balance.lt(amount)) {
+            const symbol = await tokenContract.symbol();
+            const decimals = await tokenContract.decimals();
+            throw new Error(
+                `Insufficient ${symbol} balance. Required: ${ethers.utils.formatUnits(amount, decimals)}`
+            );
+        }
+        
+        return true;
+    }
+
+    // Add or update getSigner method if you haven't already
+    async getSigner() {
+        try {
+            if (!window.walletManager?.provider) {
+                throw new Error('Please connect your wallet first');
+            }
+            return window.walletManager.provider.getSigner();
+        } catch (error) {
+            console.error('[CreateOrder] Error getting signer:', error);
             throw error;
         }
     }
