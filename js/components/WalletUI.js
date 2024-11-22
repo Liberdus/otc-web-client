@@ -163,13 +163,12 @@ export class WalletUI extends BaseComponent {
             const shortAddress = `${account.slice(0, 6)}...${account.slice(-4)}`;
             console.log('[WalletUI] Setting short address:', shortAddress);
             
-            // Force display style changes
-            this.connectButton.style.display = 'none';
-            this.walletInfo.style.display = 'flex';
+            // Use classList instead of style.display
+            this.connectButton.classList.add('hidden');
+            this.walletInfo.classList.remove('hidden');
             
             this.accountAddress.textContent = shortAddress;
             
-            // Update network badge if chainId is available
             if (walletManager.chainId) {
                 this.updateNetworkBadge(walletManager.chainId);
             }
@@ -184,9 +183,9 @@ export class WalletUI extends BaseComponent {
         try {
             console.log('[WalletUI] Showing connect button');
             
-            // Force display style changes
-            this.connectButton.style.display = 'block';
-            this.walletInfo.style.display = 'none';
+            // Use classList instead of style.display
+            this.connectButton.classList.remove('hidden');
+            this.walletInfo.classList.add('hidden');
             
             console.log('[WalletUI] Connect button shown');
         } catch (error) {
