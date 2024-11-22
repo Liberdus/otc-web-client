@@ -61,6 +61,46 @@ class App {
         this.currentTab = 'create-order';
     }
 
+    async initialize() {
+        try {
+            // Initialize wallet first
+            await this.initializeWallet();
+            
+            // Initialize WebSocket service
+            window.webSocket = new WebSocketService();
+            await window.webSocket.initialize();
+            
+            // Initialize components after WebSocket is ready
+            await this.initializeComponents();
+            
+            console.log('[App] Initialization complete');
+        } catch (error) {
+            console.error('[App] Initialization error:', error);
+        }
+    }
+
+    async initializeComponents() {
+        try {
+            console.log('[App] Initializing components...');
+            
+            // Initialize each component
+            for (const [id, component] of Object.entries(this.components)) {
+                if (component && typeof component.initialize === 'function') {
+                    console.log(`[App] Initializing component: ${id}`);
+                    await component.initialize();
+                }
+            }
+            
+            // Show the current tab
+            this.showTab(this.currentTab);
+            
+            console.log('[App] Components initialized');
+        } catch (error) {
+            console.error('[App] Error initializing components:', error);
+            throw error;
+        }
+    }
+
     async initializeWallet() {
         try {
             console.log('[App] Starting wallet initialization...');
@@ -216,7 +256,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.app.showTab(window.app.currentTab);
         
         // Wait for wallet initialization to complete
-        await window.app.initializeWallet().catch(error => {
+        await window.app.initialize().catch(error => {
             console.error('[App] Failed to initialize wallet:', error);
             throw error;
         });

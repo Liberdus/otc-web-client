@@ -6,9 +6,11 @@ const networkConfig = {
         name: "Amoy",
         contractAddress: "0xF9D874860d5801233dd84569fad8513e0037A5d9",
         explorer: "https://www.oklink.com/amoy",
-        rpcUrl: "https://rpc.ankr.com/polygon_amoy",
+        rpcUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
         fallbackRpcUrls: [
+            "https://rpc.ankr.com/polygon_amoy",
             "https://polygon-amoy.blockpi.network/v1/rpc/public",
+            "wss://polygon-amoy-bor-rpc.publicnode.com",
             "https://polygon-amoy.public.blastapi.io"
         ],
         chainId: "0x13882",

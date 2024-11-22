@@ -4,42 +4,93 @@ import { ethers } from 'ethers';
 export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
+        this.userAddress = null;
     }
 
-    // Override loadOrder to filter for user's orders only
-    async loadOrder(orderId) {
+    async initialize() {
         try {
-            const contract = await this.getContract();
+            // Get user address first
             const signer = await this.getSigner();
-            const userAddress = await signer.getAddress();
-            const order = await contract.orders(orderId);
+            this.userAddress = await signer.getAddress();
+            
+            // Set up the table structure
+            await this.setupTable();
 
-            // Skip if not user's order or if order is invalid/inactive
-            if (order.maker !== userAddress || 
-                order.maker === ethers.constants.AddressZero || 
-                order.status !== 0) {
-                return null;
+            // Wait for WebSocket to be ready
+            while (!window.webSocket?.isInitialSyncComplete) {
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
 
-            // Store order in memory
-            this.orders.set(orderId, order);
+            // Load initial orders from WebSocket service (filtered for user)
+            const activeOrders = window.webSocket.getActiveOrders();
+            for (const orderData of activeOrders) {
+                if (orderData[1] === this.userAddress) { // orderData[1] is maker address
+                    await this.addOrderToTable(orderData);
+                }
+            }
+
+            // Set up WebSocket listeners
+            this.setupWebSocket();
+            this.setupEventListeners();
+
+        } catch (error) {
+            console.error('[MyOrders] Initialization error:', error);
+            this.showError('Failed to initialize my orders view');
+        }
+    }
+
+    setupWebSocket() {
+        if (!window.webSocket) {
+            console.log('[MyOrders] WebSocket not available yet, retrying in 1s...');
+            setTimeout(() => this.setupWebSocket(), 1000);
+            return;
+        }
+        
+        // Subscribe to order events (filtered for user)
+        window.webSocket.subscribe('orderCreated', async (orderData) => {
+            if (orderData[1] === this.userAddress) { // Check if maker is current user
+                console.log('[MyOrders] New order received:', orderData);
+                await this.addOrderToTable(orderData);
+                this.showSuccess('New order created');
+            }
+        });
+        
+        window.webSocket.subscribe('orderFilled', (orderId) => {
+            console.log('[MyOrders] Order filled:', orderId);
+            this.removeOrderFromTable(orderId);
+        });
+
+        window.webSocket.subscribe('orderCanceled', (orderId) => {
+            console.log('[MyOrders] Order canceled:', orderId);
+            this.removeOrderFromTable(orderId);
+        });
+    }
+
+    async addOrderToTable(orderData) {
+        try {
+            const [orderId, maker, , sellToken, sellAmount, buyToken, buyAmount, timestamp] = orderData;
+            
+            // Skip if not user's order
+            if (maker !== this.userAddress) {
+                return;
+            }
 
             // Get token details
             const [sellTokenDetails, buyTokenDetails] = await Promise.all([
-                this.getTokenDetails(order.sellToken),
-                this.getTokenDetails(order.buyToken)
+                this.getTokenDetails(sellToken),
+                this.getTokenDetails(buyToken)
             ]);
 
             const tr = this.createElement('tr');
-            tr.dataset.orderId = orderId;
+            tr.dataset.orderId = orderId.toString();
             tr.innerHTML = `
                 <td>${orderId}</td>
                 <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
-                <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
+                <td>${ethers.utils.formatUnits(sellAmount, sellTokenDetails?.decimals || 18)}</td>
                 <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
-                <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
-                <td>${this.formatTimestamp(order.timestamp)}</td>
-                <td>${this.formatExpiry(order.timestamp)}</td>
+                <td>${ethers.utils.formatUnits(buyAmount, buyTokenDetails?.decimals || 18)}</td>
+                <td>${this.formatTimestamp(timestamp)}</td>
+                <td>${this.formatExpiry(timestamp)}</td>
                 <td class="order-status">Active</td>
                 <td>
                     <button class="action-button cancel-button" data-order-id="${orderId}">Cancel</button>
@@ -47,49 +98,11 @@ export class MyOrders extends ViewOrders {
             `;
 
             this.tbody.appendChild(tr);
-            return order;
         } catch (error) {
-            console.warn(`[MyOrders] Error loading order ${orderId}:`, error);
-            return null;
+            console.error('[MyOrders] Error adding order to table:', error);
         }
     }
 
-    // Override setupEventListeners to handle cancel instead of fill
-    setupEventListeners() {
-        this.tbody.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('cancel-button')) {
-                const orderId = e.target.dataset.orderId;
-                await this.cancelOrder(orderId);
-            }
-        });
-    }
-
-    async cancelOrder(orderId) {
-        try {
-            console.log('[MyOrders] Canceling order:', orderId);
-            const contract = await this.getContract();
-            const signer = await this.getSigner();
-            
-            const tx = await contract.connect(signer).cancelOrder(orderId, {
-                gasLimit: 300000
-            });
-            
-            console.log('[MyOrders] Cancel transaction:', tx.hash);
-            const receipt = await tx.wait();
-            
-            if (receipt.status === 1) {
-                this.showSuccess('Order canceled successfully');
-                const row = this.tbody.querySelector(`tr[data-order-id="${orderId}"]`);
-                if (row) row.remove();
-                this.orders.delete(orderId);
-            }
-        } catch (error) {
-            console.error('[MyOrders] Cancel order error:', error);
-            this.showError('Failed to cancel order: ' + (error.message || 'Unknown error'));
-        }
-    }
-
-    // Add setupTable method if it doesn't exist
     setupTable() {
         const table = this.createElement('table', 'orders-table');
         table.innerHTML = `

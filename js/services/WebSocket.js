@@ -8,6 +8,9 @@ export class WebSocketService {
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 1000; // Start with 1 second
         this.isInitialized = false;
+        this.activeOrders = new Map();
+        this.BLOCKS_TO_SYNC = 40320;
+        this.isInitialSyncComplete = false;
     }
 
     async initialize() {
@@ -31,9 +34,14 @@ export class WebSocketService {
             const networkConfig = getNetworkConfig();
             this.provider = await this.initializeProvider(networkConfig);
 
+            // Initialize contract first
             await this.setupEventListeners();
             
+            // Then do initial sync after contract is set up
+            await this.performInitialSync();
+            
             this.isInitialized = true;
+            this.isInitialSyncComplete = true;
             console.log('[WebSocket] Connected successfully');
         } catch (error) {
             console.error('[WebSocket] Initialization error:', error);
@@ -112,34 +120,22 @@ export class WebSocketService {
 
             this.contract = wrappedContract;
 
-            // Core order events
-            contract.on('OrderCreated', (...args) => {
+            // Listen for new orders
+            this.contract.on('OrderCreated', (...args) => {
+                const orderId = args[0].toString();  // First arg is orderId
+                this.activeOrders.set(orderId, args);
                 this.notifySubscribers('orderCreated', args);
             });
 
-            contract.on('OrderFilled', (...args) => {
-                this.notifySubscribers('orderFilled', args);
+            // Listen for orders becoming inactive
+            this.contract.on('OrderFilled', (orderId) => {
+                this.activeOrders.delete(orderId.toString());
+                this.notifySubscribers('orderFilled', orderId);
             });
 
-            contract.on('OrderCanceled', (...args) => {
-                this.notifySubscribers('orderCanceled', args);
-            });
-
-            // Cleanup and retry events
-            contract.on('OrderCleanedUp', (...args) => {
-                this.notifySubscribers('orderCleanedUp', args);
-            });
-
-            contract.on('RetryOrder', (...args) => {
-                this.notifySubscribers('retryOrder', args);
-            });
-
-            contract.on('CleanupFeesDistributed', (...args) => {
-                this.notifySubscribers('cleanupFeesDistributed', args);
-            });
-
-            contract.on('CleanupError', (...args) => {
-                this.notifySubscribers('cleanupError', args);
+            this.contract.on('OrderCanceled', (orderId) => {
+                this.activeOrders.delete(orderId.toString());
+                this.notifySubscribers('orderCanceled', orderId);
             });
 
             console.log('[WebSocket] Event listeners setup complete');
@@ -243,6 +239,80 @@ export class WebSocketService {
         if (this.provider) {
             this.provider._websocket.close();
         }
+    }
+
+    async performInitialSync() {
+        try {
+            console.log('[WebSocket] Starting initial sync...');
+            
+            if (!this.contract) {
+                throw new Error('Contract not initialized before sync');
+            }
+
+            // Step 1: Get current block and calculate start block
+            const currentBlock = await this.provider.getBlockNumber();
+            const startBlock = Math.max(0, currentBlock - this.BLOCKS_TO_SYNC);
+            
+            console.log('[WebSocket] Syncing from block', startBlock, 'to', currentBlock);
+
+            // Step 2: Get all events from the last 2 weeks
+            const createdEvents = await this.contract.queryFilter(
+                this.contract.filters.OrderCreated(), 
+                startBlock,
+                currentBlock
+            );
+            
+            // Step 3: Get all events that would make an order inactive
+            const filledOrders = new Set(
+                (await this.contract.queryFilter(
+                    this.contract.filters.OrderFilled(), 
+                    startBlock,
+                    currentBlock
+                )).map(e => e.args.orderId.toString())
+            );
+
+            const canceledOrders = new Set(
+                (await this.contract.queryFilter(
+                    this.contract.filters.OrderCanceled(), 
+                    startBlock,
+                    currentBlock
+                )).map(e => e.args.orderId.toString())
+            );
+            
+            console.log('[WebSocket] Found events:', {
+                created: createdEvents.length,
+                filled: filledOrders.size,
+                canceled: canceledOrders.size
+            });
+
+            // Step 4: Process only active orders
+            for (const event of createdEvents) {
+                const orderId = event.args.orderId.toString();
+                
+                // Skip if order was filled or canceled
+                if (filledOrders.has(orderId) || canceledOrders.has(orderId)) {
+                    continue;
+                }
+                
+                // Skip if order is expired (older than 7 days)
+                if (Date.now()/1000 - event.args.timestamp > 7*24*60*60) {
+                    continue;
+                }
+                
+                // If we get here, order is active - add it to our list
+                this.activeOrders.set(orderId, event.args);
+            }
+
+            console.log('[WebSocket] Initial sync complete. Active orders:', this.activeOrders.size);
+        } catch (error) {
+            console.error('[WebSocket] Error during initial sync:', error);
+            throw error;
+        }
+    }
+
+    // Get current active orders
+    getActiveOrders() {
+        return Array.from(this.activeOrders.values());
     }
 }
 

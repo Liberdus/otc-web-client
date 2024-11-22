@@ -1,22 +1,69 @@
-import { BaseComponent } from './BaseComponent.js';
+import { ViewOrders } from './ViewOrders.js';
 import { ethers } from 'ethers';
 
-export class TakerOrders extends BaseComponent {
+export class TakerOrders extends ViewOrders {
     constructor() {
         super('taker-orders');
-        this.orders = new Map();
-        this.initialize();
+        this.userAddress = null;
     }
 
     async initialize() {
         try {
+            // Get user address first
+            const signer = await this.getSigner();
+            this.userAddress = await signer.getAddress();
+            
+            // Set up the table structure
             await this.setupTable();
+
+            // Wait for WebSocket to be ready
+            while (!window.webSocket?.isInitialSyncComplete) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            // Load initial orders from WebSocket service (filtered for taker)
+            const activeOrders = window.webSocket.getActiveOrders();
+            for (const orderData of activeOrders) {
+                if (orderData[2] === this.userAddress) { // orderData[2] is taker address
+                    await this.addOrderToTable(orderData);
+                }
+            }
+
+            // Set up WebSocket listeners
+            this.setupWebSocket();
             this.setupEventListeners();
-            // Don't load orders here - they'll be loaded in render()
+
         } catch (error) {
             console.error('[TakerOrders] Initialization error:', error);
             this.showError('Failed to initialize taker orders view');
         }
+    }
+
+    setupWebSocket() {
+        if (!window.webSocket) {
+            console.log('[TakerOrders] WebSocket not available yet, retrying in 1s...');
+            setTimeout(() => this.setupWebSocket(), 1000);
+            return;
+        }
+        
+        // Subscribe to order events (filtered for taker)
+        window.webSocket.subscribe('orderCreated', async (orderData) => {
+            if (orderData[2] === this.userAddress) { // Check if taker is current user
+                console.log('[TakerOrders] New order received:', orderData);
+                await this.addOrderToTable(orderData);
+                this.showSuccess('New order available to fill');
+            }
+        });
+        
+        window.webSocket.subscribe('orderFilled', (orderId) => {
+            console.log('[TakerOrders] Order filled:', orderId);
+            this.removeOrderFromTable(orderId);
+        });
+
+        window.webSocket.subscribe('orderCanceled', (orderId) => {
+            console.log('[TakerOrders] Order canceled:', orderId);
+            this.removeOrderFromTable(orderId);
+        });
     }
 
     setupTable() {
@@ -32,7 +79,7 @@ export class TakerOrders extends BaseComponent {
                     <th>Buy Amount</th>
                     <th>Created</th>
                     <th>Expires</th>
-                    <th></th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -42,129 +89,42 @@ export class TakerOrders extends BaseComponent {
         this.tbody = table.querySelector('tbody');
     }
 
-    render() {
-        if (!this.initialized) {
-            this.initialized = true;
-            this.loadOrders();
-        }
-    }
-
-    async loadOrders() {
+    async addOrderToTable(orderData) {
         try {
-            const contract = await this.getContract();
-            if (!contract) {
-                console.log('[TakerOrders] No contract available');
+            const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp] = orderData;
+            
+            // Skip if not for this taker
+            if (taker !== this.userAddress) {
                 return;
             }
-
-            // Clear existing orders
-            this.tbody.innerHTML = '';
-            this.orders.clear();
-
-            const firstOrderId = await contract.firstOrderId();
-            const nextOrderId = await contract.nextOrderId();
-
-            if (firstOrderId.eq(nextOrderId)) {
-                console.log('[TakerOrders] No orders exist yet');
-                this.showMessage('No orders available');
-                return;
-            }
-
-            // Load orders in batches of 10
-            for (let i = firstOrderId.toNumber(); i < nextOrderId.toNumber(); i += 10) {
-                const promises = [];
-                for (let j = 0; j < 10 && i + j < nextOrderId.toNumber(); j++) {
-                    promises.push(this.loadOrder(i + j));
-                }
-                await Promise.all(promises);
-            }
-        } catch (error) {
-            console.error('[TakerOrders] Error loading orders:', error);
-            this.showError('Failed to load orders');
-        }
-    }
-
-    async loadOrder(orderId) {
-        try {
-            const contract = await this.getContract();
-            const signer = await this.getSigner();
-            const userAddress = await signer.getAddress();
-            const order = await contract.orders(orderId);
-
-            // Skip if:
-            // 1. Order has no specific taker (taker is zero address)
-            // 2. Current user is not the designated taker
-            // 3. Order is not active (status !== 0)
-            if (order.taker === ethers.constants.AddressZero || 
-                order.taker !== userAddress ||
-                order.status !== 0) {
-                return null;
-            }
-
-            // Store order in memory
-            this.orders.set(orderId, order);
 
             // Get token details
             const [sellTokenDetails, buyTokenDetails] = await Promise.all([
-                this.getTokenDetails(order.sellToken),
-                this.getTokenDetails(order.buyToken)
+                this.getTokenDetails(sellToken),
+                this.getTokenDetails(buyToken)
             ]);
 
             const tr = this.createElement('tr');
-            tr.dataset.orderId = orderId;
+            tr.dataset.orderId = orderId.toString();
             tr.innerHTML = `
                 <td>${orderId}</td>
-                <td>${this.formatAddress(order.maker)}</td>
+                <td>${this.formatAddress(maker)}</td>
                 <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
-                <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
+                <td>${ethers.utils.formatUnits(sellAmount, sellTokenDetails?.decimals || 18)}</td>
                 <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
-                <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
-                <td>${this.formatTimestamp(order.timestamp)}</td>
-                <td>${this.formatExpiry(order.timestamp)}</td>
+                <td>${ethers.utils.formatUnits(buyAmount, buyTokenDetails?.decimals || 18)}</td>
+                <td>${this.formatTimestamp(timestamp)}</td>
+                <td>${this.formatExpiry(timestamp)}</td>
                 <td>
                     <button class="action-button fill-button" data-order-id="${orderId}">Fill Order</button>
                 </td>
             `;
 
             this.tbody.appendChild(tr);
-            return order;
         } catch (error) {
-            console.warn(`[TakerOrders] Error loading order ${orderId}:`, error);
-            return null;
+            console.error('[TakerOrders] Error adding order to table:', error);
         }
     }
 
-    setupEventListeners() {
-        this.tbody.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('fill-button')) {
-                const orderId = e.target.dataset.orderId;
-                await this.fillOrder(orderId);
-            }
-        });
-    }
-
-    formatAddress(address) {
-        return `${address.slice(0, 6)}...${address.slice(-4)}`;
-    }
-
-    formatTimestamp(timestamp) {
-        return new Date(timestamp * 1000).toLocaleString();
-    }
-
-    formatExpiry(timestamp) {
-        const expiryTime = (timestamp * 1000) + (7 * 24 * 60 * 60 * 1000); // 7 days in milliseconds
-        const now = Date.now();
-        const timeLeft = expiryTime - now;
-
-        if (timeLeft <= 0) return 'Expired';
-        
-        const days = Math.floor(timeLeft / (24 * 60 * 60 * 1000));
-        const hours = Math.floor((timeLeft % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-        return `${days}d ${hours}h`;
-    }
-
-    async fillOrder(orderId) {
-        // You can copy the fillOrder implementation from ViewOrders.js
-        // or implement your own version here
-    }
+    // Inherit other methods from ViewOrders
 }
