@@ -91,8 +91,15 @@ export class WalletUI extends BaseComponent {
                 return false;
             }
 
-            // Setup event listeners without checking connection
+            // Setup event listeners
             this.setupEventListeners();
+            
+            // Check if already connected
+            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+            if (accounts && accounts.length > 0) {
+                console.log('[WalletUI] Found existing connection, connecting...');
+                await this.connectWallet();
+            }
             
             return true;
         } catch (error) {

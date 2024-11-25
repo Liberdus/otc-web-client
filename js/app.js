@@ -94,15 +94,15 @@ class App {
 
     async initialize() {
         try {
-            // Initialize wallet manager without connecting
+            // Initialize wallet manager with autoConnect parameter
             window.walletManager = walletManager;
-            await walletManager.init(false); // Pass false to prevent auto-connect
+            await walletManager.init(true); // Changed to true to allow auto-connect
             
             // Initialize WebSocket service
             window.webSocket = new WebSocketService();
             await window.webSocket.initialize();
             
-            // Initialize components in read-only mode
+            // Initialize components in read-only mode initially
             await this.initializeComponents(true);
             
             console.log('[App] Initialization complete');
