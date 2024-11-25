@@ -69,25 +69,16 @@ export class BaseComponent {
     }
 
     // Add this method to BaseComponent.js
-    async getTokenDetails(tokenAddress, forceRefresh = false) {
+    async getTokenDetails(tokenAddress) {
+        if (this.tokenDetailsCache?.has(tokenAddress)) {
+            return this.tokenDetailsCache.get(tokenAddress);
+        }
         try {
             console.log('[BaseComponent] Getting token details for:', tokenAddress);
             
             if (!ethers.utils.isAddress(tokenAddress)) {
                 console.warn('[BaseComponent] Invalid token address format:', tokenAddress);
                 return null;
-            }
-
-            // Check cache only if not forcing refresh
-            if (!forceRefresh && this.tokenCache?.has(tokenAddress)) {
-                const cachedData = this.tokenCache.get(tokenAddress);
-                const cacheAge = Date.now() - (cachedData.timestamp || 0);
-                
-                // Invalidate cache after 30 seconds for balances
-                if (cacheAge < 30000) {
-                    console.log('[BaseComponent] Returning cached token details');
-                    return cachedData;
-                }
             }
 
             console.log('[BaseComponent] Getting signer for token contract...');

@@ -262,6 +262,9 @@ class App {
 
     // Add new method to reinitialize components
     async reinitializeComponents() {
+        if (this.isReinitializing) return;
+        this.isReinitializing = true;
+        
         try {
             console.log('[App] Reinitializing components with wallet...');
             
@@ -291,8 +294,8 @@ class App {
             this.showTab(this.currentTab);
             
             console.log('[App] Components reinitialized');
-        } catch (error) {
-            console.error('[App] Error reinitializing components:', error);
+        } finally {
+            this.isReinitializing = false;
         }
     }
 }

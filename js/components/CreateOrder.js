@@ -7,6 +7,7 @@ export class CreateOrder extends BaseComponent {
         super('create-order');
         this.contract = null;
         this.provider = null;
+        this.initialized = false;
     }
 
     async initializeContract() {
@@ -44,6 +45,7 @@ export class CreateOrder extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
+        if (this.initialized) return;
         try {
             console.log('[CreateOrder] Starting initialization...');
             
@@ -59,7 +61,11 @@ export class CreateOrder extends BaseComponent {
             await this.initializeContract();
             await this.loadOrderCreationFee();
             
+            // Setup token balance listeners
+            this.setupTokenInputListeners();
+            
             console.log('[CreateOrder] Initialization complete');
+            this.initialized = true;
         } catch (error) {
             console.error('[CreateOrder] Error in initialization:', error);
             const orderCreationFee = document.getElementById('orderCreationFee');
@@ -121,6 +127,37 @@ export class CreateOrder extends BaseComponent {
             const element = document.getElementById(id);
             if (element) element.disabled = false;
         });
+    }
+
+    async updateTokenBalance(tokenAddress, elementId) {
+        try {
+            if (!tokenAddress || !ethers.utils.isAddress(tokenAddress)) {
+                document.getElementById(elementId).textContent = '';
+                return;
+            }
+
+            const tokenDetails = await this.getTokenDetails(tokenAddress, true);
+            if (tokenDetails) {
+                const balanceElement = document.getElementById(elementId);
+                balanceElement.textContent = `Balance: ${Number(tokenDetails.formattedBalance).toFixed(4)} ${tokenDetails.symbol}`;
+            }
+        } catch (error) {
+            console.error(`Error updating token balance:`, error);
+            document.getElementById(elementId).textContent = 'Error loading balance';
+        }
+    }
+
+    setupTokenInputListeners() {
+        const sellTokenInput = document.getElementById('sellToken');
+        const buyTokenInput = document.getElementById('buyToken');
+
+        const updateBalance = async (input, balanceId) => {
+            const tokenAddress = input.value.trim();
+            await this.updateTokenBalance(tokenAddress, balanceId);
+        };
+
+        sellTokenInput.addEventListener('change', () => updateBalance(sellTokenInput, 'sellTokenBalance'));
+        buyTokenInput.addEventListener('change', () => updateBalance(buyTokenInput, 'buyTokenBalance'));
     }
 }
 
