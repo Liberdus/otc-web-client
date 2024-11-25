@@ -96,11 +96,14 @@ class App {
         try {
             // Initialize wallet manager with autoConnect parameter
             window.walletManager = walletManager;
-            await walletManager.init(true); // Changed to true to allow auto-connect
+            await walletManager.init(true);
             
             // Initialize WebSocket service
             window.webSocket = new WebSocketService();
-            await window.webSocket.initialize();
+            const wsInitialized = await window.webSocket.initialize();
+            if (!wsInitialized) {
+                console.warn('[App] WebSocket initialization failed, falling back to HTTP');
+            }
             
             // Initialize components in read-only mode initially
             await this.initializeComponents(true);
@@ -214,46 +217,33 @@ class App {
         setTimeout(() => success.remove(), 5000);
     }
 
-    showTab(tabId) {
+    async showTab(tabId) {
         try {
-            console.log('[App] Showing tab:', tabId);
+            // Hide all tab content
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.style.display = 'none';
+                tab.classList.remove('active');
+            });
             
-            // Remove active class from all tabs and contents
+            // Update tab buttons
             document.querySelectorAll('.tab-button').forEach(button => {
                 button.classList.remove('active');
             });
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
+            document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
             
-            // Add active class to selected tab
-            const activeButton = document.querySelector(`[data-tab="${tabId}"]`);
-            if (activeButton) {
-                activeButton.classList.add('active');
-            }
-            
-            const activeContent = document.getElementById(tabId);
-            if (activeContent) {
-                activeContent.classList.add('active');
+            // Show and initialize selected tab
+            const tabContent = document.getElementById(tabId);
+            if (tabContent) {
+                tabContent.style.display = 'block';
+                tabContent.classList.add('active');
                 
-                // Get component for this tab
+                // Initialize component if it exists
                 const component = this.components[tabId];
-                if (!component) {
-                    console.log(`[App] No component found for tab: ${tabId}`);
-                    return;
-                }
-
-                // Initialize with readOnlyMode if wallet is not connected
-                const readOnlyMode = !window.walletManager?.account;
-                
-                // For cleanup component, call render directly
-                if (component instanceof Cleanup) {
-                    component.render(readOnlyMode);
-                } else if (typeof component.initialize === 'function') {
-                    component.initialize(readOnlyMode);
+                if (component?.initialize) {
+                    await component.initialize(false);
                 }
             }
-
+            
             this.currentTab = tabId;
         } catch (error) {
             console.error('[App] Error showing tab:', error);

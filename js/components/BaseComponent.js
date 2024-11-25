@@ -1,5 +1,6 @@
 import { walletManager } from '../config.js';
 import { ethers } from 'ethers';
+import { erc20Abi } from '../abi/erc20.js';
 
 console.log('BaseComponent.js loaded');
 
@@ -45,11 +46,14 @@ export class BaseComponent {
     // Add method to get contract (used by CreateOrder)
     async getContract() {
         try {
-            console.log('[BaseComponent] Getting contract...');
             await window.walletInitialized;
-            return walletManager.getContract();
+            const contract = await walletManager.getContract();
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
+            return contract;
         } catch (error) {
-            console.error('[BaseComponent] Error in getContract:', error);
+            console.error('[BaseComponent] Error getting contract:', error);
             return null;
         }
     }
@@ -69,74 +73,56 @@ export class BaseComponent {
     }
 
     // Add this method to BaseComponent.js
-    async getTokenDetails(tokenAddress) {
-        if (this.tokenDetailsCache?.has(tokenAddress)) {
-            return this.tokenDetailsCache.get(tokenAddress);
-        }
+    async getTokenDetails(tokenAddresses) {
         try {
-            console.log('[BaseComponent] Getting token details for:', tokenAddress);
+            console.log('[BaseComponent] Getting token details for:', tokenAddresses);
             
-            if (!ethers.utils.isAddress(tokenAddress)) {
-                console.warn('[BaseComponent] Invalid token address format:', tokenAddress);
+            // Ensure tokenAddresses is an array of strings
+            if (!Array.isArray(tokenAddresses)) {
+                tokenAddresses = [tokenAddresses];
+            }
+
+            // Validate each address
+            const validAddresses = tokenAddresses.filter(addr => 
+                typeof addr === 'string' && 
+                ethers.utils.isAddress(addr)
+            );
+
+            if (validAddresses.length === 0) {
+                console.warn('[BaseComponent] No valid token addresses provided');
                 return null;
             }
 
-            console.log('[BaseComponent] Getting signer for token contract...');
-            const signer = await this.getSigner();
-            if (!signer) {
-                console.warn('[BaseComponent] No signer available');
-                return null;
-            }
+            const results = await Promise.all(validAddresses.map(async (tokenAddress) => {
+                if (this.tokenCache.has(tokenAddress)) {
+                    return this.tokenCache.get(tokenAddress);
+                }
 
-            const minABI = [
-                'function name() view returns (string)',
-                'function symbol() view returns (string)',
-                'function decimals() view returns (uint8)',
-                'function balanceOf(address) view returns (uint256)'
-            ];
+                try {
+                    const tokenContract = new ethers.Contract(
+                        tokenAddress,
+                        erc20Abi,
+                        this.provider
+                    );
 
-            console.log('[BaseComponent] Creating token contract instance...');
-            const tokenContract = new ethers.Contract(tokenAddress, minABI, signer);
-            const address = await signer.getAddress();
-            console.log('[BaseComponent] Signer address:', address);
+                    const [name, symbol, decimals] = await Promise.all([
+                        tokenContract.name().catch(() => 'Unknown'),
+                        tokenContract.symbol().catch(() => 'UNK'),
+                        tokenContract.decimals().catch(() => 18)
+                    ]);
 
-            console.log('[BaseComponent] Fetching token details...');
-            const [nameResult, symbolResult, decimalsResult, balanceResult] = await Promise.allSettled([
-                this.retryCall(() => tokenContract.name(), 3),
-                this.retryCall(() => tokenContract.symbol(), 3),
-                this.retryCall(() => tokenContract.decimals(), 3),
-                this.retryCall(() => tokenContract.balanceOf(address), 3)
-            ]);
+                    const details = { name, symbol, decimals };
+                    this.tokenCache.set(tokenAddress, details);
+                    return details;
+                } catch (error) {
+                    console.error(`[BaseComponent] Error getting details for token ${tokenAddress}:`, error);
+                    return null;
+                }
+            }));
 
-            console.log('[BaseComponent] Token details results:', {
-                name: nameResult,
-                symbol: symbolResult,
-                decimals: decimalsResult,
-                balance: balanceResult
-            });
-
-            const details = {
-                name: nameResult.status === 'fulfilled' ? nameResult.value : 'Unknown',
-                symbol: symbolResult.status === 'fulfilled' ? symbolResult.value : 'Unknown',
-                decimals: decimalsResult.status === 'fulfilled' ? decimalsResult.value : 18,
-                balance: balanceResult.status === 'fulfilled' ? balanceResult.value : ethers.BigNumber.from(0),
-                formattedBalance: balanceResult.status === 'fulfilled' 
-                    ? ethers.utils.formatUnits(
-                        balanceResult.value, 
-                        decimalsResult.status === 'fulfilled' ? decimalsResult.value : 18
-                    ) 
-                    : '0',
-                timestamp: Date.now()
-            };
-
-            // Cache the result
-            if (!this.tokenCache) this.tokenCache = new Map();
-            this.tokenCache.set(tokenAddress, details);
-
-            console.log('[BaseComponent] Returning token details:', details);
-            return details;
+            return results;
         } catch (error) {
-            this.logDetailedError('[BaseComponent] Error getting token details:', error);
+            console.error('[BaseComponent] Error in getTokenDetails:', error);
             return null;
         }
     }

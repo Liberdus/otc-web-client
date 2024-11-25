@@ -49,12 +49,15 @@ export class TakerOrders extends ViewOrders {
 
             // Load orders
             const account = await window.walletManager.getAccount();
-            const activeOrders = window.webSocket?.getActiveOrders() || [];
-            for (const orderData of activeOrders) {
-                if (orderData[2].toLowerCase() === account.toLowerCase()) {
-                    await this.addOrderToTable(orderData);
-                }
-            }
+            const orders = window.webSocket.getOrders('Active')
+                .filter(order => {
+                    const selectedAddress = window.ethereum.selectedAddress.toLowerCase();
+                    return order.taker === '0x0000000000000000000000000000000000000000' || 
+                           order.taker.toLowerCase() === selectedAddress;
+                });
+            
+            console.log('[TakerOrders] Loading', orders.length, 'orders from cache');
+            await this.refreshOrdersView(orders);
 
             this.setupWebSocket();
         } catch (error) {

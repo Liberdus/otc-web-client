@@ -1,197 +1,103 @@
-/* Table Styles */
+/* Table container */
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+    margin-bottom: 1.25rem;
+    border-radius: 0.75rem;
+    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+/* Table base styles */
 .orders-table {
     width: 100%;
     border-collapse: collapse;
-    margin: 20px 0;
     background: #FFFFFF;
-    border-radius: 12px;
-    overflow-x: auto;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     table-layout: fixed;
+    min-width: 64rem; /* Reduced from 1200px */
 }
 
 .orders-table thead {
     background-color: #F8F9FE;
 }
 
+/* Column widths - optimized */
+.orders-table th:nth-child(1) { width: 3rem; }   /* ID */
+.orders-table th:nth-child(2) { width: 5rem; }   /* Sell Token */
+.orders-table th:nth-child(3) { width: 6rem; }   /* Sell Amount */
+.orders-table th:nth-child(4) { width: 5rem; }   /* Buy Token */
+.orders-table th:nth-child(5) { width: 6rem; }   /* Buy Amount */
+.orders-table th:nth-child(6) { width: 8rem; }   /* Created */
+.orders-table th:nth-child(7) { width: 6rem; }   /* Expires */
+.orders-table th:nth-child(8) { width: 5rem; }   /* Status */
+.orders-table th:nth-child(9) { width: 6rem; }   /* Taker */
+.orders-table th:nth-child(10) { width: 7rem; }  /* Action */
+
+/* Cell styles */
 .orders-table th,
 .orders-table td {
-    padding: 16px 12px;
+    padding: 0.75rem;
     text-align: left;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: 0.875rem;
 }
 
-.orders-table th:nth-child(1),
-.orders-table td:nth-child(1) {
-    width: 80px;
+/* Status column specific styles */
+.order-status {
+    font-weight: 500;
 }
 
-.orders-table th:nth-child(2),
-.orders-table td:nth-child(2) {
-    width: 120px;
+/* Action column specific styles */
+.action-column {
+    text-align: center;
 }
 
-.orders-table th:nth-child(3),
-.orders-table th:nth-child(5),
-.orders-table td:nth-child(3),
-.orders-table td:nth-child(5) {
-    width: 100px;
-}
-
-.orders-table th:nth-child(4),
-.orders-table th:nth-child(6),
-.orders-table td:nth-child(4),
-.orders-table td:nth-child(6) {
-    width: 100px;
-}
-
-.orders-table th:nth-child(7),
-.orders-table td:nth-child(7) {
-    width: 150px;
-}
-
-.orders-table th:nth-child(8),
-.orders-table td:nth-child(8) {
-    width: 100px;
-}
-
-.orders-table th:nth-child(9),
-.orders-table td:nth-child(9) {
-    width: 100px;
-}
-
-.orders-table th:nth-child(10),
-.orders-table td:nth-child(10) {
-    width: 120px;
-}
-
-.orders-table tbody tr:hover {
-    background-color: #F8F9FE;
-}
-
-/* Token Info Styles */
-.token-info {
-    font-size: 0.85em;
-    color: #666666;
-    margin-top: 4px;
-}
-
-/* Action Buttons */
-.action-button {
-    padding: 10px 20px;
-    border-radius: 12px;
-    border: none;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    margin: 4px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
-.approve-button {
-    background-color: #6366F1;
-    color: white;
-}
-
-.approve-button:hover {
-    background-color: #4F46E5;
-}
-
+/* Fill button styles */
 .fill-button {
     background-color: #10B981;
     color: white;
-    transform: translateY(0);
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.875rem;
+    text-align: center;
+    min-width: 6rem;
+    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
 }
 
 .fill-button:hover {
     background-color: #059669;
     transform: translateY(-1px);
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .fill-button:active {
     transform: translateY(0);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
-.fill-button:disabled {
-    background-color: #E5E7EB;
-    color: #9CA3AF;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-}
-
-/* Status Messages */
-.status {
-    margin: 20px 0;
-    padding: 12px;
-    border-radius: 8px;
+/* Your order text style */
+.your-order {
+    color: #6B7280;
+    font-size: 0.875rem;
     font-weight: 500;
 }
 
-.status.success {
-    background-color: #D1FAE5;
-    color: #065F46;
-    border: 1px solid #A7F3D0;
+/* Open order and targeted order styles */
+.open-order, .targeted-order {
+    font-size: 0.875rem;
+    color: #6B7280;
 }
 
-.status.error {
-    background-color: #FEE2E2;
-    color: #991B1B;
-    border: 1px solid #FECACA;
+.targeted-order {
+    cursor: help;
 }
 
-/* Loading State */
-.loading {
-    opacity: 0.6;
-    pointer-events: none;
-}
-
-/* Empty State */
-.empty-state {
-    text-align: center;
-    padding: 40px;
-    color: #666666;
-}
-
-/* Responsive Design */
+/* Responsive adjustments */
 @media (max-width: 1024px) {
     .orders-table {
         font-size: 0.9em;
     }
-    
-    .action-button {
-        padding: 6px 12px;
-    }
-}
-
-@media (max-width: 768px) {
-    .orders-table {
-        display: block;
-        overflow-x: auto;
-    }
-}
-
-.connect-prompt {
-    text-align: center;
-    padding: 20px;
-    color: #666;
-    font-size: 1.1em;
-}
-
-.error-message {
-    text-align: center;
-    padding: 20px;
-    color: #ff4444;
-    font-size: 1.1em;
-}
-
-/* Add container wrapper for horizontal scroll */
-.table-container {
-    width: 100%;
-    overflow-x: auto;
-    padding-bottom: 16px;
 }

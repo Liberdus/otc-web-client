@@ -6,168 +6,124 @@ export class MyOrders extends ViewOrders {
         super('my-orders');
     }
 
-    async initialize(readOnlyMode = true) {
+    async initialize() {
         try {
-            // Clear previous content first
+            // Cleanup previous state
+            this.cleanup();
             this.container.innerHTML = '';
             
-            if (readOnlyMode) {
-                this.container.innerHTML = `
-                    <div class="tab-content-wrapper">
-                        <h2>My Orders</h2>
-                        <p class="connect-prompt">Connect wallet to view your orders</p>
-                    </div>`;
-                return;
-            }
-
-            // Set up table structure
-            const wrapper = this.createElement('div', 'tab-content-wrapper');
-            wrapper.innerHTML = `
-                <h2>My Orders</h2>
-                <div class="orders-container">
-                    <table class="orders-table">
-                        <thead>
-                            <tr>
-                                <th>Order ID</th>
-                                <th>Sell Token</th>
-                                <th>Sell Amount</th>
-                                <th>Buy Token</th>
-                                <th>Buy Amount</th>
-                                <th>Created</th>
-                                <th>Expires</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-            `;
+            await this.setupTable();
             
-            this.container.appendChild(wrapper);
-            this.tbody = wrapper.querySelector('tbody');
-
-            // Load orders
-            const account = await window.walletManager.getAccount();
-            const activeOrders = window.webSocket?.getActiveOrders() || [];
-            for (const orderData of activeOrders) {
-                if (orderData[1].toLowerCase() === account.toLowerCase()) {
-                    await this.addOrderToTable(orderData);
-                }
+            // Wait for WebSocket initialization (reusing parent class method)
+            if (!window.webSocket?.isInitialized) {
+                console.log('[MyOrders] Waiting for WebSocket initialization...');
+                await new Promise(resolve => {
+                    const checkInterval = setInterval(() => {
+                        if (window.webSocket?.isInitialized) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 100);
+                });
             }
 
+            // Subscribe to order events
             this.setupWebSocket();
+
+            // Get initial orders from cache and filter for user
+            const userAddress = await window.walletManager.getAccount();
+            const cachedOrders = window.webSocket.getOrders('Active')
+                .filter(order => order.maker.toLowerCase() === userAddress.toLowerCase());
+
+            if (cachedOrders.length > 0) {
+                console.log('[MyOrders] Loading orders from cache:', cachedOrders);
+                cachedOrders.forEach(order => {
+                    this.orders.set(order.id, order);
+                });
+                await this.refreshOrdersView();
+            }
+
         } catch (error) {
             console.error('[MyOrders] Initialization error:', error);
-            this.showError('Failed to load your orders');
-        }
-    }
-
-    // Override addOrderToTable to include cancel button
-    async addOrderToTable(orderData) {
-        try {
-            const [orderId, maker, , sellToken, sellAmount, buyToken, buyAmount, timestamp] = orderData;
-            
-            // Skip if not user's order
-            const account = await window.walletManager.getAccount();
-            if (maker.toLowerCase() !== account.toLowerCase()) {
-                return;
-            }
-
-            // Get token details
-            const [sellTokenDetails, buyTokenDetails] = await Promise.all([
-                this.getTokenDetails(sellToken),
-                this.getTokenDetails(buyToken)
-            ]);
-
-            const tr = this.createElement('tr');
-            tr.dataset.orderId = orderId.toString();
-            tr.innerHTML = `
-                <td>${orderId}</td>
-                <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
-                <td>${ethers.utils.formatUnits(sellAmount, sellTokenDetails?.decimals || 18)}</td>
-                <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
-                <td>${ethers.utils.formatUnits(buyAmount, buyTokenDetails?.decimals || 18)}</td>
-                <td>${this.formatTimestamp(timestamp)}</td>
-                <td>${this.formatExpiry(timestamp)}</td>
-                <td class="order-status">Active</td>
-                <td>
-                    <button class="action-button cancel-button" data-order-id="${orderId}">Cancel</button>
-                </td>
-            `;
-
-            this.tbody.appendChild(tr);
-        } catch (error) {
-            console.error('[MyOrders] Error adding order to table:', error);
+            throw error;
         }
     }
 
     setupWebSocket() {
-        if (!window.webSocket) {
-            console.log('[MyOrders] WebSocket not available yet, retrying in 1s...');
-            setTimeout(() => this.setupWebSocket(), 1000);
-            return;
+        // Subscribe to order sync completion with user filter
+        this.eventSubscriptions.add({
+            event: 'orderSyncComplete',
+            callback: async (orders) => {
+                const userAddress = await window.walletManager.getAccount();
+                this.orders.clear();
+                
+                Object.values(orders)
+                    .filter(order => order.maker.toLowerCase() === userAddress.toLowerCase())
+                    .forEach(order => {
+                        this.orders.set(order.id, order);
+                    });
+                
+                this.refreshOrdersView().catch(error => {
+                    console.error('[MyOrders] Error refreshing orders after sync:', error);
+                });
+            }
+        });
+
+        // Subscribe to new orders
+        this.eventSubscriptions.add({
+            event: 'OrderCreated',
+            callback: async (orderData) => {
+                const userAddress = await window.walletManager.getAccount();
+                if (orderData.maker.toLowerCase() === userAddress.toLowerCase()) {
+                    console.log('[MyOrders] New order received:', orderData);
+                    this.orders.set(orderData.id, orderData);
+                    this.refreshOrdersView().catch(error => {
+                        console.error('[MyOrders] Error refreshing after new order:', error);
+                    });
+                }
+            }
+        });
+
+        // Subscribe to filled/canceled orders
+        ['OrderFilled', 'OrderCanceled'].forEach(event => {
+            this.eventSubscriptions.add({
+                event,
+                callback: (order) => {
+                    console.log(`[MyOrders] Order ${event.toLowerCase()}:`, order);
+                    this.removeOrderFromTable(order.id);
+                }
+            });
+        });
+
+        // Register all subscriptions
+        this.eventSubscriptions.forEach(sub => {
+            window.webSocket.subscribe(sub.event, sub.callback);
+        });
+    }
+
+    async createOrderRow(order, tokenDetailsMap) {
+        const tr = await super.createOrderRow(order, tokenDetailsMap);
+        
+        // Replace the action column with cancel button for active orders
+        const actionCell = tr.querySelector('.action-column');
+        if (actionCell) {
+            const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
+            if (status === 'Active') {
+                actionCell.innerHTML = `
+                    <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
+                `;
+                
+                // Add click handler for cancel button
+                const cancelButton = actionCell.querySelector('.cancel-button');
+                if (cancelButton) {
+                    cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+                }
+            } else {
+                actionCell.innerHTML = `<span class="order-status status-${status.toLowerCase()}">${status}</span>`;
+            }
         }
-        
-        // Subscribe to order events (filtered for user)
-        window.webSocket.subscribe('orderCreated', async (orderData) => {
-            if (orderData[1] === this.userAddress) { // Check if maker is current user
-                console.log('[MyOrders] New order received:', orderData);
-                await this.addOrderToTable(orderData);
-                this.showSuccess('New order created');
-            }
-        });
-        
-        window.webSocket.subscribe('orderFilled', (orderId) => {
-            console.log('[MyOrders] Order filled:', orderId);
-            this.removeOrderFromTable(orderId);
-        });
 
-        window.webSocket.subscribe('orderCanceled', (orderId) => {
-            console.log('[MyOrders] Order canceled:', orderId);
-            this.removeOrderFromTable(orderId);
-        });
-    }
-
-    setupTable() {
-        const table = this.createElement('table', 'orders-table');
-        table.innerHTML = `
-            <thead>
-                <tr>
-                    <th>Order ID</th>
-                    <th>Sell Token</th>
-                    <th>Sell Amount</th>
-                    <th>Buy Token</th>
-                    <th>Buy Amount</th>
-                    <th>Created</th>
-                    <th>Expires</th>
-                    <th>Status</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        `;
-        
-        // Clear existing content and add table
-        this.container.innerHTML = `
-            <div class="tab-content-wrapper">
-                <h2>My Orders</h2>
-                <div class="orders-container"></div>
-            </div>`;
-        
-        const ordersContainer = this.container.querySelector('.orders-container');
-        ordersContainer.appendChild(table);
-        this.tbody = table.querySelector('tbody');
-    }
-
-    setupEventListeners() {
-        // Add click handler for cancel buttons
-        this.container.addEventListener('click', async (event) => {
-            if (event.target.classList.contains('cancel-button')) {
-                const orderId = event.target.dataset.orderId;
-                await this.cancelOrder(orderId);
-            }
-        });
+        return tr;
     }
 
     async cancelOrder(orderId) {

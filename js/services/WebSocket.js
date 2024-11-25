@@ -91,41 +91,30 @@ export class WebSocketService {
             const nextOrderId = await contract.nextOrderId();
             
             console.log('[WebSocket] Syncing orders from', firstOrderId.toString(), 'to', nextOrderId.toString());
-
-            const promises = [];
-            for (let i = firstOrderId.toNumber(); i < nextOrderId.toNumber(); i++) {
-                promises.push(contract.orders(i).then(order => ({
-                    id: i,
-                    maker: order.maker,
-                    taker: order.taker,
-                    sellToken: order.sellToken,
-                    sellAmount: order.sellAmount.toString(),
-                    buyToken: order.buyToken,
-                    buyAmount: order.buyAmount.toString(),
-                    timestamp: order.timestamp.toNumber(),
-                    status: ['Active', 'Filled', 'Canceled'][order.status],
-                    orderCreationFee: order.orderCreationFee.toString(),
-                    tries: order.tries.toNumber()
-                })));
-            }
-
-            const orders = await Promise.all(promises);
-            let activeCount = 0;
             
-            orders.forEach(order => {
+            for (let i = firstOrderId.toNumber(); i < nextOrderId.toNumber(); i++) {
+                const order = await contract.orders(i);
                 if (order.maker !== ethers.constants.AddressZero) {
-                    this.orderCache.set(order.id, order);
-                    activeCount++;
+                    const orderData = {
+                        id: i,
+                        maker: order.maker,
+                        taker: order.taker,
+                        sellToken: order.sellToken,
+                        sellAmount: order.sellAmount,
+                        buyToken: order.buyToken,
+                        buyAmount: order.buyAmount,
+                        timestamp: order.timestamp.toNumber(),
+                        status: ['Active', 'Filled', 'Canceled'][order.status],
+                        orderCreationFee: order.orderCreationFee,
+                        tries: order.tries
+                    };
+                    this.orderCache.set(i, orderData);
                 }
-            });
-
-            console.log('[WebSocket] Order sync complete:', {
-                total: orders.length,
-                active: activeCount,
-                orders: Array.from(this.orderCache.values())
-            });
-
-            return Array.from(this.orderCache.values());
+            }
+            
+            console.log('[WebSocket] Order sync complete:', Object.fromEntries(this.orderCache));
+            this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
+            
         } catch (error) {
             console.error('[WebSocket] Order sync failed:', error);
             throw error;

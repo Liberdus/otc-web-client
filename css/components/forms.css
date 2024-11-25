@@ -270,3 +270,45 @@
     color: #666;
     font-style: italic;
 }
+
+/* Order action buttons */
+.fill-button,
+.cancel-button {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: background-color 0.2s, opacity 0.2s;
+}
+
+.fill-button {
+    background-color: #4B6BFB;
+    color: white;
+}
+
+.fill-button:hover {
+    background-color: #3A54D6;
+}
+
+.cancel-button {
+    background-color: #DC2626;
+    color: white;
+}
+
+.cancel-button:hover {
+    background-color: #B91C1C;
+}
+
+.fill-button:disabled,
+.cancel-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.your-order {
+    color: #666666;
+    font-style: italic;
+    font-size: 14px;
+}
