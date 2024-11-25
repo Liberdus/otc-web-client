@@ -1,0 +1,48 @@
+.cleanup-container {
+    padding: 2rem;
+}
+
+.cleanup-section {
+    max-width: 600px;
+    margin: 0 auto;
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.cleanup-info {
+    margin: 1.5rem 0;
+    color: var(--text-secondary);
+}
+
+.cleanup-stats {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.cleanup-stats div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.cleanup-stats span {
+    font-weight: bold;
+    color: var(--text-primary);
+}
+
+#cleanup-button {
+    width: 100%;
+    margin-top: 1.5rem;
+}
+
+#cleanup-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+} 

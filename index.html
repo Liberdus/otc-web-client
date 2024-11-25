@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="css/components/orders.css" />
     <link rel="stylesheet" href="css/components/tabs.css" />
     <link rel="stylesheet" href="css/components/wallet.css" />
+    <link rel="stylesheet" href="css/components/cleanup.css" />
     <script type="importmap">
       {
         "imports": {
@@ -104,6 +105,9 @@
             <button class="tab-button" data-tab="taker-orders">
               Invited Orders
             </button>
+            <button class="tab-button" data-tab="cleanup-orders">
+              Cleanup
+            </button>
           </nav>
 
           <div id="create-order" class="tab-content active">
@@ -154,6 +158,11 @@
           <div id="view-orders" class="tab-content"></div>
           <div id="my-orders" class="tab-content"></div>
           <div id="taker-orders" class="tab-content"></div>
+          <div id="cleanup-orders" class="tab-content">
+            <div id="cleanup-container" class="cleanup-container">
+              <!-- Cleanup component will populate this -->
+            </div>
+          </div>
         </div>
       </main>
     </div>

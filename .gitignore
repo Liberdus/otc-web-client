@@ -9,3 +9,4 @@ artifacts/
 cache/
 
 delete_when_done/
+deprecated/

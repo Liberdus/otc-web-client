@@ -65,6 +65,8 @@ export class ViewOrders extends BaseComponent {
             
             // Load initial orders
             const activeOrders = window.webSocket?.getActiveOrders() || [];
+            console.log('[ViewOrders] Loading active orders:', activeOrders);
+            
             for (const orderData of activeOrders) {
                 await this.addOrderToTable(orderData);
             }
@@ -119,19 +121,8 @@ export class ViewOrders extends BaseComponent {
 
     async addOrderToTable(orderData) {
         try {
-            // orderData is the event args array from the OrderCreated event
             const [orderId, maker, , sellToken, sellAmount, buyToken, buyAmount, timestamp] = orderData;
             
-            // Store order in memory
-            this.orders.set(orderId.toString(), {
-                maker,
-                sellToken,
-                sellAmount,
-                buyToken,
-                buyAmount,
-                timestamp
-            });
-
             // Get token details
             const [sellTokenDetails, buyTokenDetails] = await Promise.all([
                 this.getTokenDetails(sellToken),
@@ -149,10 +140,12 @@ export class ViewOrders extends BaseComponent {
                 <td>${ethers.utils.formatUnits(buyAmount, buyTokenDetails?.decimals || 18)}</td>
                 <td>${this.formatTimestamp(timestamp)}</td>
                 <td>${this.formatExpiry(timestamp)}</td>
+                <td>Active</td>
                 <td>
                     <button class="action-button fill-button" data-order-id="${orderId}">Fill Order</button>
                 </td>
             `;
+
             this.tbody.appendChild(tr);
         } catch (error) {
             console.error('[ViewOrders] Error adding order to table:', error);
@@ -167,33 +160,51 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
-    setupTable() {
-        // Create wrapper and table
-        const wrapper = this.createElement('div', 'tab-content-wrapper');
-        wrapper.innerHTML = `
-            <h2>All Orders</h2>
-            <div class="orders-container">
-                <table class="orders-table">
-                    <thead>
-                        <tr>
-                            <th>Order ID</th>
-                            <th>Maker</th>
-                            <th>Sell Token</th>
-                            <th>Sell Amount</th>
-                            <th>Buy Token</th>
-                            <th>Buy Amount</th>
-                            <th>Created</th>
-                            <th>Expires</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
+    async setupTable() {
+        this.container.innerHTML = `
+            <div class="tab-content-wrapper">
+                <h2>All Orders</h2>
+                <div class="table-container">
+                    <table class="orders-table">
+                        <thead>
+                            <tr>
+                                <th>Order ID</th>
+                                <th>Maker</th>
+                                <th>Sell Token</th>
+                                <th>Sell Amount</th>
+                                <th>Buy Token</th>
+                                <th>Buy Amount</th>
+                                <th>Created</th>
+                                <th>Expires</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ordersTableBody"></tbody>
+                    </table>
+                </div>
             </div>
         `;
+
+        this.tbody = document.getElementById('ordersTableBody');
         
-        this.container.appendChild(wrapper);
-        this.tbody = wrapper.querySelector('tbody');
+        // Add click handler for fill buttons
+        this.tbody.addEventListener('click', async (e) => {
+            const fillButton = e.target.closest('.fill-button');
+            if (fillButton) {
+                const orderId = fillButton.dataset.orderId;
+                try {
+                    fillButton.disabled = true;
+                    fillButton.textContent = 'Processing...';
+                    await this.fillOrder(orderId);
+                } catch (error) {
+                    console.error('[ViewOrders] Fill order error:', error);
+                } finally {
+                    fillButton.disabled = false;
+                    fillButton.textContent = 'Fill Order';
+                }
+            }
+        });
     }
 
     formatAddress(address) {

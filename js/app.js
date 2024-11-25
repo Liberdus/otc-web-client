@@ -6,6 +6,7 @@ import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
 import { MyOrders } from './components/MyOrders.js';
 import { TakerOrders } from './components/TakerOrders.js';
+import { Cleanup } from './components/Cleanup.js';
 
 console.log('App.js loaded');
 
@@ -25,7 +26,8 @@ class App {
             'wallet-info': this.walletUI,
             'view-orders': new ViewOrders(),
             'my-orders': new MyOrders(),
-            'taker-orders': new TakerOrders()
+            'taker-orders': new TakerOrders(),
+            'cleanup-orders': new Cleanup()
         };
 
         // Render wallet UI immediately
@@ -37,7 +39,8 @@ class App {
                 !(component instanceof CreateOrder) && 
                 !(component instanceof ViewOrders) &&
                 !(component instanceof TakerOrders) &&
-                !(component instanceof WalletUI)) {
+                !(component instanceof WalletUI) &&
+                !(component instanceof Cleanup)) {
                 component.render = function() {
                     if (!this.initialized) {
                         this.container.innerHTML = `
@@ -72,6 +75,9 @@ class App {
 
         // Add tab switching event listeners
         this.initializeEventListeners();
+
+        // Initialize cleanup component
+        const cleanup = new Cleanup();
     }
 
     initializeEventListeners() {
@@ -210,20 +216,21 @@ class App {
 
     showTab(tabId) {
         try {
-            console.log(`[App] Showing tab: ${tabId}`);
+            console.log('[App] Showing tab:', tabId);
             
-            // Update tab buttons
+            // Remove active class from all tabs and contents
             document.querySelectorAll('.tab-button').forEach(button => {
                 button.classList.remove('active');
-                if (button.dataset.tab === tabId) {
-                    button.classList.add('active');
-                }
             });
-
-            // Update tab contents
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
             });
+            
+            // Add active class to selected tab
+            const activeButton = document.querySelector(`[data-tab="${tabId}"]`);
+            if (activeButton) {
+                activeButton.classList.add('active');
+            }
             
             const activeContent = document.getElementById(tabId);
             if (activeContent) {
@@ -236,15 +243,13 @@ class App {
                     return;
                 }
 
-                // Initialize component if needed
-                if (!component.initialized) {
-                    component.render();
-                    component.initialized = true;
-                }
-
                 // Initialize with readOnlyMode if wallet is not connected
                 const readOnlyMode = !window.walletManager?.account;
-                if (typeof component.initialize === 'function') {
+                
+                // For cleanup component, call render directly
+                if (component instanceof Cleanup) {
+                    component.render(readOnlyMode);
+                } else if (typeof component.initialize === 'function') {
                     component.initialize(readOnlyMode);
                 }
             }
@@ -270,7 +275,12 @@ class App {
                 if (component && typeof component.initialize === 'function' && id !== 'create-order') {
                     console.log(`[App] Reinitializing component: ${id}`);
                     try {
-                        await component.initialize(false);
+                        // For cleanup component, call render with readOnlyMode = false
+                        if (component instanceof Cleanup) {
+                            await component.render(false);
+                        } else {
+                            await component.initialize(false);
+                        }
                     } catch (error) {
                         console.error(`[App] Error reinitializing ${id}:`, error);
                     }

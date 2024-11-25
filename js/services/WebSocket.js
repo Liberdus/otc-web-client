@@ -9,7 +9,9 @@ export class WebSocketService {
         this.reconnectDelay = 1000; // Start with 1 second
         this.isInitialized = false;
         this.activeOrders = new Map();
-        this.BLOCKS_TO_SYNC = 40320;
+        this.expiredOrders = new Map();
+        this.canceledOrders = new Map();
+        this.BLOCKS_TO_SYNC = 115200; // ~20 days worth of blocks (assuming 15s block time)
         this.isInitialSyncComplete = false;
     }
 
@@ -245,74 +247,71 @@ export class WebSocketService {
         try {
             console.log('[WebSocket] Starting initial sync...');
             
-            if (!this.contract) {
-                throw new Error('Contract not initialized before sync');
-            }
-
-            // Step 1: Get current block and calculate start block
             const currentBlock = await this.provider.getBlockNumber();
             const startBlock = Math.max(0, currentBlock - this.BLOCKS_TO_SYNC);
             
-            console.log('[WebSocket] Syncing from block', startBlock, 'to', currentBlock);
+            // Get all relevant events
+            const [createdEvents, filledEvents, canceledEvents, cleanedEvents] = await Promise.all([
+                this.contract.queryFilter(this.contract.filters.OrderCreated(), startBlock, currentBlock),
+                this.contract.queryFilter(this.contract.filters.OrderFilled(), startBlock, currentBlock),
+                this.contract.queryFilter(this.contract.filters.OrderCanceled(), startBlock, currentBlock),
+                this.contract.queryFilter(this.contract.filters.OrderCleanedUp(), startBlock, currentBlock)
+            ]);
 
-            // Step 2: Get all events from the last 2 weeks
-            const createdEvents = await this.contract.queryFilter(
-                this.contract.filters.OrderCreated(), 
-                startBlock,
-                currentBlock
-            );
-            
-            // Step 3: Get all events that would make an order inactive
-            const filledOrders = new Set(
-                (await this.contract.queryFilter(
-                    this.contract.filters.OrderFilled(), 
-                    startBlock,
-                    currentBlock
-                )).map(e => e.args.orderId.toString())
-            );
+            // Create separate Sets for different inactive states
+            const filledOrderIds = new Set(filledEvents.map(e => e.args.orderId.toString()));
+            const canceledOrderIds = new Set(canceledEvents.map(e => e.args.orderId.toString()));
+            const cleanedOrderIds = new Set(cleanedEvents.map(e => e.args.orderId.toString()));
 
-            const canceledOrders = new Set(
-                (await this.contract.queryFilter(
-                    this.contract.filters.OrderCanceled(), 
-                    startBlock,
-                    currentBlock
-                )).map(e => e.args.orderId.toString())
-            );
-            
-            console.log('[WebSocket] Found events:', {
-                created: createdEvents.length,
-                filled: filledOrders.size,
-                canceled: canceledOrders.size
-            });
+            // Process created events
+            const now = Math.floor(Date.now() / 1000);
+            const EXPIRY = 7 * 24 * 60 * 60; // 7 days in seconds
 
-            // Step 4: Process only active orders
             for (const event of createdEvents) {
                 const orderId = event.args.orderId.toString();
+                const orderAge = now - event.args.timestamp;
                 
-                // Skip if order was filled or canceled
-                if (filledOrders.has(orderId) || canceledOrders.has(orderId)) {
+                // Skip if order was filled or cleaned up
+                if (filledOrderIds.has(orderId) || cleanedOrderIds.has(orderId)) {
                     continue;
                 }
-                
-                // Skip if order is expired (older than 7 days)
-                if (Date.now()/1000 - event.args.timestamp > 7*24*60*60) {
+
+                // Track cancelled orders
+                if (canceledOrderIds.has(orderId)) {
+                    this.canceledOrders.set(orderId, event.args);
                     continue;
                 }
-                
-                // If we get here, order is active - add it to our list
-                this.activeOrders.set(orderId, event.args);
+
+                // Sort into active or expired
+                if (orderAge > EXPIRY) {
+                    this.expiredOrders.set(orderId, event.args);
+                } else {
+                    this.activeOrders.set(orderId, event.args);
+                }
             }
 
-            console.log('[WebSocket] Initial sync complete. Active orders:', this.activeOrders.size);
+            console.log('[WebSocket] Sync complete:', {
+                active: this.activeOrders.size,
+                expired: this.expiredOrders.size,
+                canceled: this.canceledOrders.size
+            });
         } catch (error) {
-            console.error('[WebSocket] Error during initial sync:', error);
+            console.error('[WebSocket] Sync error:', error);
             throw error;
         }
     }
 
-    // Get current active orders
+    // Methods to access orders
     getActiveOrders() {
         return Array.from(this.activeOrders.values());
+    }
+
+    getExpiredOrders() {
+        return Array.from(this.expiredOrders.values());
+    }
+
+    getCanceledOrders() {
+        return Array.from(this.canceledOrders.values());
     }
 }
 
