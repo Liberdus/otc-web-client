@@ -72,32 +72,8 @@ export class ViewOrders extends BaseComponent {
                 });
             }
             
-            // Subscribe to order sync completion
-            window.webSocket.subscribe('orderSyncComplete', (orders) => {
-                console.log('[ViewOrders] Received order sync:', orders);
-                this.orders.clear();
-                
-                // Convert orders object to Map entries
-                Object.entries(orders).forEach(([orderId, orderData]) => {
-                    this.orders.set(Number(orderId), {
-                        id: Number(orderId),
-                        ...orderData
-                    });
-                });
-                
-                this.refreshOrdersView().catch(error => {
-                    console.error('[ViewOrders] Error refreshing orders after sync:', error);
-                });
-            });
-
-            // Subscribe to new orders
-            window.webSocket.subscribe('OrderCreated', (orderData) => {
-                console.log('[ViewOrders] New order received:', orderData);
-                this.orders.set(orderData.id, orderData);
-                this.refreshOrdersView().catch(error => {
-                    console.error('[ViewOrders] Error refreshing after new order:', error);
-                });
-            });
+            // Setup WebSocket event handlers
+            this.setupWebSocket();
 
             // Get initial orders from cache
             const cachedOrders = window.webSocket.getOrders();
@@ -115,7 +91,73 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
+    async setupWebSocket() {
+        // Subscribe to order sync completion
+        this.eventSubscriptions.add({
+            event: 'orderSyncComplete',
+            callback: (orders) => {
+                console.log('[ViewOrders] Received order sync:', orders);
+                this.orders.clear();
+                Object.entries(orders).forEach(([orderId, orderData]) => {
+                    this.orders.set(Number(orderId), {
+                        id: Number(orderId),
+                        ...orderData
+                    });
+                });
+                this.refreshOrdersView();
+            }
+        });
+
+        // Subscribe to new orders
+        this.eventSubscriptions.add({
+            event: 'OrderCreated',
+            callback: (orderData) => {
+                console.log('[ViewOrders] New order received:', orderData);
+                this.orders.set(Number(orderData.id), orderData);
+                this.refreshOrdersView();
+            }
+        });
+
+        // Add subscription for OrderCanceled events
+        this.eventSubscriptions.add({
+            event: 'OrderCanceled',
+            callback: (order) => {
+                console.log('[ViewOrders] Order canceled:', order);
+                if (this.orders.has(order.id)) {
+                    const existingOrder = this.orders.get(order.id);
+                    existingOrder.status = 'Canceled';
+                    this.orders.set(order.id, existingOrder);
+                    this.refreshOrdersView().catch(error => {
+                        console.error('[ViewOrders] Error refreshing view after cancel:', error);
+                    });
+                }
+            }
+        });
+
+        // Add subscription for OrderFilled events
+        this.eventSubscriptions.add({
+            event: 'OrderFilled',
+            callback: (order) => {
+                console.log('[ViewOrders] Order filled:', order);
+                if (this.orders.has(order.id)) {
+                    const existingOrder = this.orders.get(order.id);
+                    existingOrder.status = 'Filled';
+                    this.orders.set(order.id, existingOrder);
+                    this.refreshOrdersView().catch(error => {
+                        console.error('[ViewOrders] Error refreshing view after fill:', error);
+                    });
+                }
+            }
+        });
+
+        // Register all subscriptions
+        this.eventSubscriptions.forEach(sub => {
+            window.webSocket.subscribe(sub.event, sub.callback);
+        });
+    }
+
     async refreshOrdersView() {
+        console.log('[ViewOrders] Refreshing view with orders:', Array.from(this.orders.values()));
         try {
             // Get contract instance first
             this.contract = await this.getContract();
@@ -178,42 +220,6 @@ export class ViewOrders extends BaseComponent {
                 <h2>Orders</h2>
                 <p class="connect-prompt">Connect wallet to view orders</p>
             </div>`;
-    }
-
-    async setupWebSocket() {
-        if (!window.webSocket?.isInitialized) {
-            console.warn('[ViewOrders] WebSocket not initialized');
-            return;
-        }
-
-        // Subscribe to order sync completion
-        window.webSocket.subscribe('orderSyncComplete', (orders) => {
-            console.log('[ViewOrders] Received order sync:', orders);
-            // Clear existing orders
-            this.orders.clear();
-            
-            // Add new orders to the map
-            Object.entries(orders).forEach(([orderId, order]) => {
-                this.orders.set(Number(orderId), {
-                    id: Number(orderId),
-                    ...order
-                });
-            });
-            
-            // Refresh the view with new orders
-            this.refreshOrdersView().catch(error => {
-                console.error('[ViewOrders] Error refreshing orders after sync:', error);
-            });
-        });
-
-        // Subscribe to new orders
-        window.webSocket.subscribe('newOrder', (order) => {
-            console.log('[ViewOrders] Received new order:', order);
-            this.orders.set(Number(order.id), order);
-            this.refreshOrdersView().catch(error => {
-                console.error('[ViewOrders] Error refreshing orders after new order:', error);
-            });
-        });
     }
 
     updateOrderStatus(orderId, status) {

@@ -50,6 +50,7 @@ export class WebSocketService {
 
     async setupEventListeners(contract) {
         contract.on("OrderCreated", (orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee, event) => {
+            console.log('[WebSocket] OrderCreated event received:', { orderId: orderId.toNumber(), maker, taker });
             const orderData = {
                 id: orderId.toNumber(),
                 maker,

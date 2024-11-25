@@ -5,10 +5,10 @@ const networkConfig = {
     "80002": {
         name: "Amoy",
         displayName: "Amoy Testnet",
-        contractAddress: "0xF9D874860d5801233dd84569fad8513e0037A5d9",
+        contractAddress: "0x3e6326657B7130613c943D013EC84cE1F33027Ba", // 0x3e6326657B7130613c943D013EC84cE1F33027Ba 0xF9D874860d5801233dd84569fad8513e0037A5d9
         contractABI: CONTRACT_ABI,
         explorer: "https://www.oklink.com/amoy",
-        rpcUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
+        rpcUrl: "https://rpc.ankr.com/polygon_amoy",
         fallbackRpcUrls: [
             "https://rpc.ankr.com/polygon_amoy",
             "https://polygon-amoy.blockpi.network/v1/rpc/public",
@@ -20,7 +20,8 @@ const networkConfig = {
             name: "POLYGON Ecosystem Token",
             symbol: "POL",
             decimals: 18
-        }
+        },
+        wsUrl: 'wss://polygon-amoy-bor.publicnode.com'
     },
 };
 

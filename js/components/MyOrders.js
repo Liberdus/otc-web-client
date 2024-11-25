@@ -8,11 +8,14 @@ export class MyOrders extends ViewOrders {
 
     async initialize() {
         try {
+            console.log('[MyOrders] Starting initialization...');
             // Cleanup previous state
             this.cleanup();
+            console.log('[MyOrders] Container HTML before clear:', this.container.innerHTML);
             this.container.innerHTML = '';
             
             await this.setupTable();
+            console.log('[MyOrders] Table setup complete');
             
             // Wait for WebSocket initialization (reusing parent class method)
             if (!window.webSocket?.isInitialized) {
@@ -32,7 +35,7 @@ export class MyOrders extends ViewOrders {
 
             // Get initial orders from cache and filter for user
             const userAddress = await window.walletManager.getAccount();
-            const cachedOrders = window.webSocket.getOrders('Active')
+            const cachedOrders = window.webSocket.getOrders()
                 .filter(order => order.maker.toLowerCase() === userAddress.toLowerCase());
 
             if (cachedOrders.length > 0) {
@@ -90,7 +93,12 @@ export class MyOrders extends ViewOrders {
                 event,
                 callback: (order) => {
                     console.log(`[MyOrders] Order ${event.toLowerCase()}:`, order);
-                    this.removeOrderFromTable(order.id);
+                    if (this.orders.has(order.id)) {
+                        this.orders.get(order.id).status = event === 'OrderFilled' ? 'Filled' : 'Canceled';
+                        this.refreshOrdersView().catch(error => {
+                            console.error('[MyOrders] Error refreshing after order status change:', error);
+                        });
+                    }
                 }
             });
         });
@@ -104,10 +112,11 @@ export class MyOrders extends ViewOrders {
     async createOrderRow(order, tokenDetailsMap) {
         const tr = await super.createOrderRow(order, tokenDetailsMap);
         
-        // Replace the action column with cancel button for active orders
-        const actionCell = tr.querySelector('.action-column');
+        // Replace the action column based on order status
+        const actionCell = tr.querySelector('td.action-column');
         if (actionCell) {
             const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
+            
             if (status === 'Active') {
                 actionCell.innerHTML = `
                     <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
@@ -128,13 +137,12 @@ export class MyOrders extends ViewOrders {
 
     async cancelOrder(orderId) {
         try {
-            // Disable the cancel button and update status
-            const row = this.tbody.querySelector(`tr[data-order-id="${orderId}"]`);
-            const cancelButton = row.querySelector('.cancel-button');
-            const statusCell = row.querySelector('.order-status');
-            
-            cancelButton.disabled = true;
-            statusCell.textContent = 'Canceling...';
+            // Find the button first using container instead of tbody
+            const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Canceling...';
+            }
 
             // Get the contract instance and cancel the order
             const contract = await this.getContract();
@@ -145,18 +153,16 @@ export class MyOrders extends ViewOrders {
             this.showSuccess('Order canceled successfully');
             
             // Note: The order will be removed from the table when we receive the
-            // orderCanceled event through WebSocket
+            // OrderCanceled event through WebSocket
         } catch (error) {
             console.error('[MyOrders] Error canceling order:', error);
             this.showError('Failed to cancel order');
             
-            // Reset the button and status on error
-            const row = this.tbody.querySelector(`tr[data-order-id="${orderId}"]`);
-            if (row) {
-                const cancelButton = row.querySelector('.cancel-button');
-                const statusCell = row.querySelector('.order-status');
-                cancelButton.disabled = false;
-                statusCell.textContent = 'Active';
+            // Reset button state on error
+            const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'Cancel';
             }
         }
     }

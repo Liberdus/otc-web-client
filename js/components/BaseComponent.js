@@ -11,6 +11,11 @@ export class BaseComponent {
         if (!this.container) {
             throw new Error(`Container with id or class ${containerId} not found`);
         }
+        
+        // Initialize the token cache
+        this.tokenCache = new Map();
+        // Initialize provider from window.walletManager if available
+        this.provider = window.walletManager?.provider || null;
     }
 
     createElement(tag, className = '', textContent = '') {
@@ -77,12 +82,23 @@ export class BaseComponent {
         try {
             console.log('[BaseComponent] Getting token details for:', tokenAddresses);
             
-            // Ensure tokenAddresses is an array of strings
+            // Ensure we have a provider
+            if (!this.provider) {
+                this.provider = window.walletManager?.provider;
+                if (!this.provider) {
+                    throw new Error('Provider not available');
+                }
+            }
+
+            // Get signer for balance check
+            const signer = await this.getSigner().catch(() => null);
+            const userAddress = signer ? await signer.getAddress() : null;
+
+            // Ensure tokenAddresses is an array
             if (!Array.isArray(tokenAddresses)) {
                 tokenAddresses = [tokenAddresses];
             }
 
-            // Validate each address
             const validAddresses = tokenAddresses.filter(addr => 
                 typeof addr === 'string' && 
                 ethers.utils.isAddress(addr)
@@ -105,13 +121,23 @@ export class BaseComponent {
                         this.provider
                     );
 
-                    const [name, symbol, decimals] = await Promise.all([
+                    const [name, symbol, decimals, balance] = await Promise.all([
                         tokenContract.name().catch(() => 'Unknown'),
                         tokenContract.symbol().catch(() => 'UNK'),
-                        tokenContract.decimals().catch(() => 18)
+                        tokenContract.decimals().catch(() => 18),
+                        userAddress ? tokenContract.balanceOf(userAddress).catch(() => '0') : '0'
                     ]);
 
-                    const details = { name, symbol, decimals };
+                    const formattedBalance = ethers.utils.formatUnits(balance, decimals);
+                    
+                    const details = { 
+                        name, 
+                        symbol, 
+                        decimals, 
+                        balance,
+                        formattedBalance
+                    };
+                    
                     this.tokenCache.set(tokenAddress, details);
                     return details;
                 } catch (error) {
@@ -120,7 +146,7 @@ export class BaseComponent {
                 }
             }));
 
-            return results;
+            return results.length === 1 ? results[0] : results;
         } catch (error) {
             console.error('[BaseComponent] Error in getTokenDetails:', error);
             return null;

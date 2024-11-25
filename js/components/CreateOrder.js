@@ -8,6 +8,7 @@ export class CreateOrder extends BaseComponent {
         this.contract = null;
         this.provider = null;
         this.initialized = false;
+        this.tokenCache = new Map();
     }
 
     async initializeContract() {
@@ -134,10 +135,11 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
 
-            const tokenDetails = await this.getTokenDetails(tokenAddress, true);
-            if (tokenDetails) {
+            const tokenDetails = await this.getTokenDetails(tokenAddress);
+            if (tokenDetails && tokenDetails.symbol) {
                 const balanceElement = document.getElementById(elementId);
-                balanceElement.textContent = `Balance: ${Number(tokenDetails.formattedBalance).toFixed(4)} ${tokenDetails.symbol}`;
+                const formattedBalance = parseFloat(tokenDetails.formattedBalance).toFixed(4);
+                balanceElement.textContent = `Balance: ${formattedBalance} ${tokenDetails.symbol}`;
             }
         } catch (error) {
             console.error(`Error updating token balance:`, error);
