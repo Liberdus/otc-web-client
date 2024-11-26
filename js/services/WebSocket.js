@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { getNetworkConfig } from '../config.js';
+import { getNetworkConfig, isDebugEnabled } from '../config.js';
 
 export class WebSocketService {
     constructor() {
@@ -10,21 +10,27 @@ export class WebSocketService {
         this.reconnectDelay = 1000;
         this.orderCache = new Map();
         this.isInitialized = false;
+        
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('WEBSOCKET')) {
+                console.log('[WebSocket]', message, ...args);
+            }
+        };
     }
 
     async initialize() {
         try {
             if (this.isInitialized) return true;
-            console.log('[WebSocket] Starting initialization...');
-
+            this.debug('Starting initialization...');
+            
             const config = getNetworkConfig();
-            console.log('[WebSocket] Network config loaded, connecting to:', config.wsUrl);
+            this.debug('Network config loaded, connecting to:', config.wsUrl);
             
             this.provider = new ethers.providers.WebSocketProvider(config.wsUrl);
             
             // Wait for provider to be ready
             await this.provider.ready;
-            console.log('[WebSocket] Provider ready');
+            this.debug('Provider ready');
 
             const contract = new ethers.Contract(
                 config.contractAddress,
@@ -32,48 +38,48 @@ export class WebSocketService {
                 this.provider
             );
 
-            console.log('[WebSocket] Contract initialized, starting order sync...');
+            this.debug('Contract initialized, starting order sync...');
             await this.syncAllOrders(contract);
-            console.log('[WebSocket] Setting up event listeners...');
+            this.debug('Setting up event listeners...');
             await this.setupEventListeners(contract);
             
             this.isInitialized = true;
-            console.log('[WebSocket] Initialization complete');
+            this.debug('Initialization complete');
             this.reconnectAttempts = 0;
             
             return true;
         } catch (error) {
-            console.error('[WebSocket] Initialization failed:', error);
+            this.debug('Initialization failed:', error);
             return this.reconnect();
         }
     }
 
     async setupEventListeners(contract) {
         try {
-            console.log('[WebSocket] Setting up event listeners for contract:', contract.address);
+            this.debug('Setting up event listeners for contract:', contract.address);
             
             // Add connection state tracking
             this.provider.on("connect", () => {
-                console.log('[WebSocket] Provider connected');
+                this.debug('Provider connected');
             });
             
             this.provider.on("disconnect", (error) => {
-                console.error('[WebSocket] Provider disconnected:', error);
+                this.debug('Provider disconnected:', error);
                 this.reconnect();
             });
 
             // Test event subscription
             const filter = contract.filters.OrderCreated();
-            console.log('[WebSocket] Created filter:', filter);
+            this.debug('Created filter:', filter);
             
             // Listen for new blocks to ensure connection is alive
             this.provider.on("block", (blockNumber) => {
-                console.log('[WebSocket] New block received:', blockNumber);
+                this.debug('New block received:', blockNumber);
             });
 
             contract.on("OrderCreated", (...args) => {
                 try {
-                    console.log('[WebSocket] OrderCreated event received (raw):', args);
+                    this.debug('OrderCreated event received (raw):', args);
                     const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee, event] = args;
                     
                     const orderData = {
@@ -89,19 +95,19 @@ export class WebSocketService {
                         status: 'Active'
                     };
                     
-                    console.log('[WebSocket] Processed OrderCreated data:', orderData);
+                    this.debug('Processed OrderCreated data:', orderData);
                     
                     // Update cache
                     this.orderCache.set(orderId.toNumber(), orderData);
-                    console.log('[WebSocket] Cache updated:', Array.from(this.orderCache.entries()));
+                    this.debug('Cache updated:', Array.from(this.orderCache.entries()));
                     
                     // Log subscribers before notification
-                    console.log('[WebSocket] Current subscribers for OrderCreated:', 
+                    this.debug('Current subscribers for OrderCreated:', 
                         this.subscribers.get("OrderCreated")?.size || 0);
                     
                     this.notifySubscribers("OrderCreated", orderData);
                 } catch (error) {
-                    console.error('[WebSocket] Error in OrderCreated handler:', error);
+                    this.debug('Error in OrderCreated handler:', error);
                 }
             });
 
@@ -112,7 +118,7 @@ export class WebSocketService {
                 if (order) {
                     order.status = 'Filled';
                     this.orderCache.set(orderIdNum, order);
-                    console.log('[WebSocket] Cache updated for filled order:', order);
+                    this.debug('Cache updated for filled order:', order);
                     this.notifySubscribers("OrderFilled", order);
                 }
             });
@@ -126,52 +132,52 @@ export class WebSocketService {
                 }
             });
             
-            console.log('[WebSocket] Event listeners setup complete');
+            this.debug('Event listeners setup complete');
         } catch (error) {
-            console.error('[WebSocket] Error setting up event listeners:', error);
+            this.debug('Error setting up event listeners:', error);
         }
     }
 
     async syncAllOrders(contract) {
         try {
-            console.log('[WebSocket] Starting order sync with contract:', contract.address);
+            this.debug('Starting order sync with contract:', contract.address);
             
             // Try reading a simple view function first to verify contract access
             try {
                 const maxCleanupBatch = await contract.MAX_CLEANUP_BATCH();
-                console.log('[WebSocket] MAX_CLEANUP_BATCH:', maxCleanupBatch.toString());
+                this.debug('MAX_CLEANUP_BATCH:', maxCleanupBatch.toString());
             } catch (error) {
-                console.error('[WebSocket] Failed to read MAX_CLEANUP_BATCH:', error);
+                this.debug('Failed to read MAX_CLEANUP_BATCH:', error);
             }
 
             // Try getting firstOrderId with explicit error handling
             let firstOrderId = 0;  // Default to 0 if call fails
             try {
-                console.log('[WebSocket] Calling firstOrderId...');
+                this.debug('Calling firstOrderId...');
                 firstOrderId = await contract.firstOrderId();
-                console.log('[WebSocket] firstOrderId result:', firstOrderId.toString());
+                this.debug('firstOrderId result:', firstOrderId.toString());
             } catch (error) {
-                console.warn('[WebSocket] firstOrderId call failed, using default value:', error);
+                this.debug('firstOrderId call failed, using default value:', error);
             }
 
             // Try getting nextOrderId with explicit error handling
             let nextOrderId = 0;  // Default to 0 if call fails
             try {
-                console.log('[WebSocket] Calling nextOrderId...');
+                this.debug('Calling nextOrderId...');
                 nextOrderId = await contract.nextOrderId();
-                console.log('[WebSocket] nextOrderId result:', nextOrderId.toString());
+                this.debug('nextOrderId result:', nextOrderId.toString());
             } catch (error) {
-                console.warn('[WebSocket] nextOrderId call failed, using default value:', error);
+                this.debug('nextOrderId call failed, using default value:', error);
             }
 
             // If both calls failed, try reading a single order
             if (firstOrderId === 0 && nextOrderId === 0) {
                 try {
-                    console.log('[WebSocket] Attempting to read order 0...');
+                    this.debug('Attempting to read order 0...');
                     const order = await contract.orders(0);
-                    console.log('[WebSocket] Order 0 result:', order);
+                    this.debug('Order 0 result:', order);
                 } catch (error) {
-                    console.error('[WebSocket] Failed to read order 0:', error);
+                    this.debug('Failed to read order 0:', error);
                     // If we can't read any orders, return empty cache
                     this.orderCache.clear();
                     this.notifySubscribers('orderSyncComplete', {});
@@ -179,7 +185,7 @@ export class WebSocketService {
                 }
             }
             
-            console.log('[WebSocket] Syncing orders from', firstOrderId.toString(), 'to', nextOrderId.toString());
+            this.debug('Syncing orders from', firstOrderId.toString(), 'to', nextOrderId.toString());
             
             for (let i = firstOrderId; i < nextOrderId; i++) {
                 try {
@@ -201,16 +207,16 @@ export class WebSocketService {
                         this.orderCache.set(i, orderData);
                     }
                 } catch (error) {
-                    console.warn(`[WebSocket] Failed to read order ${i}:`, error);
+                    this.debug(`Failed to read order ${i}:`, error);
                     continue;
                 }
             }
             
-            console.log('[WebSocket] Order sync complete:', Object.fromEntries(this.orderCache));
+            this.debug('Order sync complete:', Object.fromEntries(this.orderCache));
             this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
             
         } catch (error) {
-            console.error('[WebSocket] Order sync failed:', error);
+            this.debug('Order sync failed:', error);
             // Don't throw - instead handle gracefully
             this.orderCache.clear();
             this.notifySubscribers('orderSyncComplete', {});
@@ -227,13 +233,13 @@ export class WebSocketService {
 
     async reconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error('[WebSocket] Max reconnection attempts reached');
+            this.debug('Max reconnection attempts reached');
             return false;
         }
 
         this.reconnectAttempts++;
         const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-        console.log(`[WebSocket] Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+        this.debug(`Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
         
         await new Promise(resolve => setTimeout(resolve, delay));
         return this.initialize();
@@ -276,21 +282,21 @@ export class WebSocketService {
     }
 
     notifySubscribers(eventName, data) {
-        console.log('[WebSocket] Notifying subscribers for event:', eventName);
+        this.debug('Notifying subscribers for event:', eventName);
         const subscribers = this.subscribers.get(eventName);
         if (subscribers) {
-            console.log('[WebSocket] Found', subscribers.size, 'subscribers');
+            this.debug('Found', subscribers.size, 'subscribers');
             subscribers.forEach(callback => {
                 try {
-                    console.log('[WebSocket] Calling subscriber callback');
+                    this.debug('Calling subscriber callback');
                     callback(data);
-                    console.log('[WebSocket] Subscriber callback completed');
+                    this.debug('Subscriber callback completed');
                 } catch (error) {
-                    console.error('[WebSocket] Error in subscriber callback:', error);
+                    this.debug('Error in subscriber callback:', error);
                 }
             });
         } else {
-            console.log('[WebSocket] No subscribers found for event:', eventName);
+            this.debug('No subscribers found for event:', eventName);
         }
     }
 
@@ -300,7 +306,7 @@ export class WebSocketService {
             const accounts = await window.ethereum.request({ method: 'eth_accounts' });
             const currentAccount = accounts[0];
             
-            console.log('[WebSocket] Contract state check:', {
+            this.debug('Contract state check:', {
                 address: contract.address,
                 currentAccount,
                 bytecodeExists: await contract.provider.getCode(contract.address) !== '0x'
@@ -308,7 +314,7 @@ export class WebSocketService {
             
             return true;
         } catch (error) {
-            console.error('[WebSocket] Contract state check failed:', error);
+            this.debug('Contract state check failed:', error);
             return false;
         }
     }
