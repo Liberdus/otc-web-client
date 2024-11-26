@@ -1,17 +1,27 @@
 import { ethers } from 'ethers';
 import { BaseComponent } from './BaseComponent.js';
+import { isDebugEnabled } from '../config.js';
 
 export class Cleanup extends BaseComponent {
     constructor() {
         super('cleanup-container');
+        
+        // Initialize debug logger
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('CLEANUP_ORDERS')) {
+                console.log('[Cleanup]', message, ...args);
+            }
+        };
     }
 
     async initialize(readOnlyMode = true) {
         try {
+            this.debug('Initializing cleanup component...');
             // Clear previous content first
             this.container.innerHTML = '';
             
             if (readOnlyMode) {
+                this.debug('Read-only mode, showing connect prompt');
                 this.container.innerHTML = `
                     <div class="tab-content-wrapper">
                         <h2>Cleanup Expired Orders</h2>
@@ -21,6 +31,7 @@ export class Cleanup extends BaseComponent {
             }
 
             // Set up UI
+            this.debug('Setting up UI components');
             const wrapper = this.createElement('div', 'tab-content-wrapper');
             wrapper.innerHTML = `
                 <div class="cleanup-section">
@@ -44,11 +55,12 @@ export class Cleanup extends BaseComponent {
             this.cleanupButton = document.getElementById('cleanup-button');
             this.cleanupButton.addEventListener('click', () => this.performCleanup());
 
-            // Start checking for cleanup opportunities
+            this.debug('Starting cleanup opportunities check');
             await this.checkCleanupOpportunities();
             
             // Check every 5 minutes
             this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
+            this.debug('Initialization complete');
         } catch (error) {
             console.error('[Cleanup] Initialization error:', error);
         }
@@ -56,6 +68,7 @@ export class Cleanup extends BaseComponent {
 
     cleanup() {
         if (this.intervalId) {
+            this.debug('Cleaning up interval');
             clearInterval(this.intervalId);
         }
     }
@@ -63,19 +76,22 @@ export class Cleanup extends BaseComponent {
     async checkCleanupOpportunities() {
         try {
             const contract = await this.getContract();
-            if (!contract) return;
+            if (!contract) {
+                this.debug('Contract not available');
+                return;
+            }
 
-            // Calculate potential reward
+            this.debug('Calculating cleanup reward');
             const reward = await this.calculateCleanupReward(contract);
             const rewardElement = document.getElementById('cleanup-reward');
             rewardElement.textContent = `${ethers.utils.formatEther(reward)} ETH`;
 
-            // Count ready orders
+            this.debug('Counting ready orders');
             const readyOrders = await this.countReadyOrders(contract);
             const readyElement = document.getElementById('cleanup-ready');
             readyElement.textContent = readyOrders;
 
-            // Enable button if there's work to do
+            this.debug(`Found ${readyOrders} orders ready for cleanup`);
             this.cleanupButton.disabled = readyOrders === 0;
 
         } catch (error) {
@@ -89,7 +105,11 @@ export class Cleanup extends BaseComponent {
         const nextOrderId = await contract.nextOrderId();
         let reward = ethers.BigNumber.from(0);
         
-        // Look at up to MAX_CLEANUP_BATCH orders
+        this.debug('Calculating rewards for orders:', {
+            firstOrderId: firstOrderId.toString(),
+            nextOrderId: nextOrderId.toString()
+        });
+        
         const batchEndId = Math.min(
             firstOrderId.toNumber() + 10, 
             nextOrderId.toNumber()
@@ -100,14 +120,17 @@ export class Cleanup extends BaseComponent {
             
             // Skip empty orders
             if (order.maker === '0x0000000000000000000000000000000000000000') {
+                this.debug(`Order ${orderId} is empty, skipping`);
                 continue;
             }
             
             // Check if grace period has passed
             if (currentTime > order.timestamp.toNumber() + (14 * 24 * 60 * 60)) {
                 reward = reward.add(order.orderCreationFee);
+                this.debug(`Order ${orderId} eligible for cleanup, fee:`, order.orderCreationFee.toString());
             } else {
-                break; // Stop at first non-cleanable order
+                this.debug(`Order ${orderId} not yet eligible for cleanup`);
+                break;
             }
         }
         
@@ -120,11 +143,15 @@ export class Cleanup extends BaseComponent {
         const nextOrderId = await contract.nextOrderId();
         let count = 0;
         
-        // Look at up to MAX_CLEANUP_BATCH orders
         const batchEndId = Math.min(
             firstOrderId.toNumber() + 10, 
             nextOrderId.toNumber()
         );
+        
+        this.debug('Counting ready orders in range:', {
+            firstOrderId: firstOrderId.toString(),
+            batchEndId
+        });
         
         for (let orderId = firstOrderId; orderId < batchEndId; orderId++) {
             const order = await contract.orders(orderId);
@@ -137,8 +164,10 @@ export class Cleanup extends BaseComponent {
             // Check if grace period has passed
             if (currentTime > order.timestamp.toNumber() + (14 * 24 * 60 * 60)) {
                 count++;
+                this.debug(`Order ${orderId} ready for cleanup`);
             } else {
-                break; // Stop at first non-cleanable order
+                this.debug(`Order ${orderId} not ready, stopping count`);
+                break;
             }
         }
         
@@ -152,12 +181,15 @@ export class Cleanup extends BaseComponent {
                 throw new Error('Contract not initialized');
             }
 
+            this.debug('Starting cleanup process');
             this.cleanupButton.disabled = true;
             this.cleanupButton.textContent = 'Cleaning...';
 
             // Call the cleanup function
             const tx = await contract.cleanupExpiredOrders();
+            this.debug('Cleanup transaction sent:', tx.hash);
             await tx.wait();
+            this.debug('Cleanup transaction confirmed');
 
             // Show success message
             this.showSuccess('Cleanup successful! Check your wallet for rewards.');
@@ -175,12 +207,12 @@ export class Cleanup extends BaseComponent {
     }
 
     showSuccess(message) {
+        this.debug('Success:', message);
         // Implement your success notification
-        console.log('[Cleanup] Success:', message);
     }
 
     showError(message) {
+        this.debug('Error:', message);
         // Implement your error notification
-        console.error('[Cleanup] Error:', message);
     }
 } 

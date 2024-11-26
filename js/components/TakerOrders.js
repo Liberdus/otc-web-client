@@ -1,9 +1,18 @@
 import { ViewOrders } from './ViewOrders.js';
 import { ethers } from 'ethers';
+import { isDebugEnabled } from '../config.js';
+import { erc20Abi } from '../abi/erc20.js';
 
 export class TakerOrders extends ViewOrders {
     constructor() {
         super('taker-orders');
+        
+        // Initialize debug logger
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('TAKER_ORDERS')) {
+                console.log('[TakerOrders]', message, ...args);
+            }
+        };
     }
 
     async initialize() {
@@ -16,7 +25,7 @@ export class TakerOrders extends ViewOrders {
             
             // Wait for WebSocket initialization
             if (!window.webSocket?.isInitialized) {
-                console.log('[TakerOrders] Waiting for WebSocket initialization...');
+                this.debug('Waiting for WebSocket initialization...');
                 await new Promise(resolve => {
                     const checkInterval = setInterval(() => {
                         if (window.webSocket?.isInitialized) {
@@ -33,7 +42,7 @@ export class TakerOrders extends ViewOrders {
                 .filter(order => order.taker.toLowerCase() === userAddress.toLowerCase());
 
             if (cachedOrders.length > 0) {
-                console.log('[TakerOrders] Loading orders from cache:', cachedOrders);
+                this.debug('Loading orders from cache:', cachedOrders);
                 cachedOrders.forEach(order => {
                     this.orders.set(order.id, order);
                 });
@@ -79,7 +88,7 @@ export class TakerOrders extends ViewOrders {
                     });
                 
                 this.refreshOrdersView().catch(error => {
-                    console.error('[TakerOrders] Error refreshing orders after sync:', error);
+                    this.debug('Error refreshing orders after sync:', error);
                 });
             }
         });
@@ -90,10 +99,10 @@ export class TakerOrders extends ViewOrders {
             callback: async (orderData) => {
                 const userAddress = await window.walletManager.getAccount();
                 if (orderData.taker.toLowerCase() === userAddress.toLowerCase()) {
-                    console.log('[TakerOrders] New order received:', orderData);
+                    this.debug('New order received:', orderData);
                     this.orders.set(orderData.id, orderData);
                     this.refreshOrdersView().catch(error => {
-                        console.error('[TakerOrders] Error refreshing after new order:', error);
+                        this.debug('Error refreshing after new order:', error);
                     });
                 }
             }
@@ -105,7 +114,7 @@ export class TakerOrders extends ViewOrders {
                 event,
                 callback: (order) => {
                     if (this.orders.has(order.id)) {
-                        console.log(`[TakerOrders] Order ${event.toLowerCase()}:`, order);
+                        this.debug(`Order ${event.toLowerCase()}:`, order);
                         this.removeOrderFromTable(order.id);
                     }
                 }
@@ -150,21 +159,84 @@ export class TakerOrders extends ViewOrders {
 
     // Override fillOrder to add specific handling for taker orders
     async fillOrder(orderId) {
+        const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
         try {
-            const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
             if (button) {
                 button.disabled = true;
                 button.textContent = 'Filling...';
             }
 
-            await super.fillOrder(orderId);
+            const order = this.orders.get(orderId);
+            this.debug('Order details:', order);
+
+            // Use ERC20 ABI for token contract
+            const buyToken = new ethers.Contract(
+                order.buyToken,
+                erc20Abi,
+                window.walletManager.getProvider()
+            );
+            
+            const userAddress = await window.walletManager.getAccount();
+            const balance = await buyToken.balanceOf(userAddress);
+            this.debug('Current balance:', balance.toString());
+            this.debug('Required amount:', order.buyAmount.toString());
+
+            if (balance.lt(order.buyAmount)) {
+                throw new Error(`Insufficient token balance. Have ${ethers.utils.formatEther(balance)}, need ${ethers.utils.formatEther(order.buyAmount)}`);
+            }
+
+            // Check allowance using ERC20 contract
+            const allowance = await buyToken.allowance(userAddress, this.contract.address);
+            this.debug('Current allowance:', allowance.toString());
+
+            if (allowance.lt(order.buyAmount)) {
+                throw new Error(`Insufficient token allowance. Need ${ethers.utils.formatEther(order.buyAmount.sub(allowance))} more tokens approved.`);
+            }
+
+            // Add gas buffer to estimation
+            const gasEstimate = await this.contract.estimateGas.fillOrder(orderId);
+            this.debug('Estimated gas:', gasEstimate.toString());
+            
+            // Add transaction overrides
+            const tx = await this.contract.fillOrder(orderId, {
+                gasLimit: Math.floor(gasEstimate.toNumber() * 1.2), // 20% buffer
+                gasPrice: await window.walletManager.getProvider().getGasPrice()
+            });
+            
+            this.debug('Transaction sent:', tx.hash);
+            await tx.wait();
+            this.debug('Transaction confirmed');
 
         } catch (error) {
-            console.error('[TakerOrders] Fill order error:', error);
-            this.showError('Failed to fill order');
+            this.debug('Fill order error details:', {
+                message: error.message,
+                code: error.code,
+                data: error?.error?.data, // Capture internal error data
+                reason: error?.reason,    // Capture revert reason
+                stack: error.stack
+            });
             
-            // Reset button state
-            const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
+            let errorMessage = 'Failed to fill order: ';
+            
+            // Try to decode the error
+            if (error?.error?.data) {
+                try {
+                    const decodedError = this.contract.interface.parseError(error.error.data);
+                    errorMessage += `${decodedError.name}: ${decodedError.args}`;
+                    this.debug('Decoded error:', decodedError);
+                } catch (e) {
+                    // If we can't decode the error, fall back to basic messages
+                    if (error.code === -32603) {
+                        errorMessage += 'Transaction would fail. Check order status and token approvals.';
+                    } else {
+                        errorMessage += error.message;
+                    }
+                }
+            }
+            
+            this.showError(errorMessage);
+            
+        } finally {
             if (button) {
                 button.disabled = false;
                 button.textContent = 'Fill Order';
@@ -190,7 +262,7 @@ export class TakerOrders extends ViewOrders {
 
             // Check if we have any orders
             if (!this.orders || this.orders.size === 0) {
-                console.log('[TakerOrders] No orders to display');
+                this.debug('No orders to display');
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="no-orders-message">
@@ -209,7 +281,7 @@ export class TakerOrders extends ViewOrders {
                 if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
             });
 
-            console.log('[TakerOrders] Getting details for tokens:', Array.from(tokenAddresses));
+            this.debug('Getting details for tokens:', Array.from(tokenAddresses));
             const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
             
             const tokenDetailsMap = new Map();
@@ -238,7 +310,7 @@ export class TakerOrders extends ViewOrders {
             }
 
         } catch (error) {
-            console.error('[TakerOrders] Error refreshing orders view:', error);
+            this.debug('Error refreshing orders view:', error);
             throw error;
         }
     }
