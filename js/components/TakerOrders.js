@@ -190,16 +190,59 @@ export class TakerOrders extends ViewOrders {
             this.debug('Current allowance:', allowance.toString());
 
             if (allowance.lt(order.buyAmount)) {
-                throw new Error(`Insufficient token allowance. Need ${ethers.utils.formatEther(order.buyAmount.sub(allowance))} more tokens approved.`);
+                this.showSuccess('Requesting token approval...');
+                
+                try {
+                    // Use a default gas limit for approval if estimation fails
+                    let gasLimit;
+                    try {
+                        const approveGasEstimate = await buyToken.estimateGas.approve(
+                            this.contract.address,
+                            order.buyAmount
+                        );
+                        gasLimit = Math.floor(approveGasEstimate.toNumber() * 1.2); // 20% buffer
+                    } catch (error) {
+                        this.debug('Gas estimation failed for approval, using default:', error);
+                        gasLimit = 100000; // Default gas limit for ERC20 approvals
+                    }
+
+                    const approveTx = await buyToken.connect(window.walletManager.getProvider().getSigner()).approve(
+                        this.contract.address,
+                        order.buyAmount,
+                        {
+                            gasLimit,
+                            gasPrice: await window.walletManager.getProvider().getGasPrice()
+                        }
+                    );
+                    
+                    this.debug('Approval transaction sent:', approveTx.hash);
+                    await approveTx.wait();
+                    this.showSuccess('Token approval granted');
+                } catch (error) {
+                    this.debug('Approval failed:', error);
+                    throw new Error('Token approval failed. Please try again.');
+                }
             }
 
-            // Add gas buffer to estimation
-            const gasEstimate = await this.contract.estimateGas.fillOrder(orderId);
-            this.debug('Estimated gas:', gasEstimate.toString());
-            
-            // Add transaction overrides
+            // Estimate gas for fillOrder with fallback
+            let fillGasLimit;
+            try {
+                const fillGasEstimate = await this.contract.estimateGas.fillOrder(orderId);
+                fillGasLimit = Math.floor(fillGasEstimate.toNumber() * 1.2); // 20% buffer
+                this.debug('Fill order gas estimate:', fillGasEstimate.toString());
+            } catch (error) {
+                this.debug('Gas estimation failed for fill order, using default:', error);
+                fillGasLimit = 300000; // Default gas limit for fill orders
+            }
+
+            this.debug('Sending fill order transaction with params:', {
+                orderId,
+                gasLimit: fillGasLimit,
+                gasPrice: (await window.walletManager.getProvider().getGasPrice()).toString()
+            });
+
             const tx = await this.contract.fillOrder(orderId, {
-                gasLimit: Math.floor(gasEstimate.toNumber() * 1.2), // 20% buffer
+                gasLimit: fillGasLimit,
                 gasPrice: await window.walletManager.getProvider().getGasPrice()
             });
             
@@ -211,8 +254,8 @@ export class TakerOrders extends ViewOrders {
             this.debug('Fill order error details:', {
                 message: error.message,
                 code: error.code,
-                data: error?.error?.data, // Capture internal error data
-                reason: error?.reason,    // Capture revert reason
+                data: error?.error?.data,
+                reason: error?.reason,
                 stack: error.stack
             });
             
@@ -235,7 +278,6 @@ export class TakerOrders extends ViewOrders {
             }
             
             this.showError(errorMessage);
-            
         } finally {
             if (button) {
                 button.disabled = false;

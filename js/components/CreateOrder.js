@@ -1,6 +1,7 @@
 import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, isDebugEnabled } from '../config.js';
+import { erc20Abi } from '../abi/erc20.js';
 
 export class CreateOrder extends BaseComponent {
     constructor() {
@@ -230,15 +231,15 @@ export class CreateOrder extends BaseComponent {
                 throw new Error('Invalid partner address');
             }
 
-            // Get token contracts and decimals
+            // Get token contracts with full ERC20 ABI for better interaction
             const sellTokenContract = new ethers.Contract(
                 sellToken,
-                ['function decimals() view returns (uint8)', 'function approve(address spender, uint256 amount) returns (bool)'],
+                erc20Abi, // Use full ERC20 ABI
                 this.provider
             );
             const buyTokenContract = new ethers.Contract(
                 buyToken,
-                ['function decimals() view returns (uint8)'],
+                erc20Abi, // Use full ERC20 ABI
                 this.provider
             );
             
@@ -252,31 +253,94 @@ export class CreateOrder extends BaseComponent {
             const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellDecimals);
             const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyDecimals);
 
-            // Check and request token approval if needed
+            // Check balance first
             const signer = await this.getSigner();
             const signerAddress = await signer.getAddress();
-            const allowance = await this.checkAllowance(sellToken, signerAddress, sellAmountWei);
+            const balance = await sellTokenContract.balanceOf(signerAddress);
             
-            if (!allowance) {
-                this.showSuccess('Requesting token approval...');
-                const approveTx = await sellTokenContract.connect(signer).approve(
-                    this.contract.address,
-                    sellAmountWei
+            this.debug('Balance check:', {
+                balance: balance.toString(),
+                required: sellAmountWei.toString(),
+                decimals: sellDecimals
+            });
+
+            if (balance.lt(sellAmountWei)) {
+                throw new Error(
+                    `Insufficient token balance. Have ${ethers.utils.formatUnits(balance, sellDecimals)}, ` +
+                    `need ${ethers.utils.formatUnits(sellAmountWei, sellDecimals)}`
                 );
-                await approveTx.wait();
-                this.showSuccess('Token approval granted');
+            }
+
+            // Check and request token approval if needed
+            const allowance = await sellTokenContract.allowance(signerAddress, this.contract.address);
+            this.debug('Current allowance:', allowance.toString());
+
+            if (allowance.lt(sellAmountWei)) {
+                this.showSuccess('Requesting token approval...');
+                
+                try {
+                    // Use a default gas limit for approval if estimation fails
+                    let approvalGasLimit;
+                    try {
+                        const approveGasEstimate = await sellTokenContract.estimateGas.approve(
+                            this.contract.address,
+                            sellAmountWei
+                        );
+                        this.debug('Approve gas estimate:', approveGasEstimate.toString());
+                        approvalGasLimit = Math.floor(approveGasEstimate.toNumber() * 1.2); // 20% buffer
+                    } catch (error) {
+                        this.debug('Gas estimation failed for approval, using default:', error);
+                        approvalGasLimit = 100000; // Default gas limit for ERC20 approvals
+                    }
+
+                    const approveTx = await sellTokenContract.connect(signer).approve(
+                        this.contract.address,
+                        sellAmountWei,
+                        {
+                            gasLimit: approvalGasLimit,
+                            gasPrice: await this.provider.getGasPrice()
+                        }
+                    );
+                    
+                    this.debug('Approval transaction sent:', approveTx.hash);
+                    await approveTx.wait();
+                    this.showSuccess('Token approval granted');
+                } catch (error) {
+                    this.debug('Approval failed:', error);
+                    throw new Error('Token approval failed. Please try again.');
+                }
             }
 
             // Get the order creation fee
             const fee = await this.contract.orderCreationFee();
 
+            // Estimate gas for createOrder with fallback
+            let createOrderGasLimit;
+            try {
+                const createOrderGasEstimate = await this.contract.estimateGas.createOrder(
+                    partner || ethers.constants.AddressZero,
+                    sellToken,
+                    sellAmountWei,
+                    buyToken,
+                    buyAmountWei,
+                    { value: fee }
+                );
+                this.debug('Create order gas estimate:', createOrderGasEstimate.toString());
+                createOrderGasLimit = Math.floor(createOrderGasEstimate.toNumber() * 1.2); // 20% buffer
+            } catch (error) {
+                this.debug('Gas estimation failed for create order, using default:', error);
+                createOrderGasLimit = 300000; // Default gas limit for order creation
+            }
+
             this.debug('Sending create order transaction with params:', {
                 taker: partner || ethers.constants.AddressZero,
                 sellToken,
-                sellAmount,
+                sellAmount: sellAmountWei.toString(),
                 buyToken,
-                buyAmount,
-                value: fee
+                buyAmount: buyAmountWei.toString(),
+                fee: fee.toString(),
+                gasLimit: createOrderGasLimit,
+                gasPrice: (await this.provider.getGasPrice()).toString()
             });
 
             const tx = await this.contract.createOrder(
@@ -285,7 +349,11 @@ export class CreateOrder extends BaseComponent {
                 sellAmountWei,
                 buyToken,
                 buyAmountWei,
-                { value: fee }
+                {
+                    value: fee,
+                    gasLimit: createOrderGasLimit,
+                    gasPrice: await this.provider.getGasPrice()
+                }
             );
 
             this.debug('Transaction sent:', tx.hash);
@@ -309,16 +377,30 @@ export class CreateOrder extends BaseComponent {
             this.resetForm();
             
         } catch (error) {
-            console.error('[CreateOrder] Detailed error:', {
-                code: error.code,
+            this.debug('Create order error details:', {
                 message: error.message,
-                data: error.data,
-                transaction: error.transaction,
-                receipt: error.receipt,
+                code: error.code,
+                data: error?.error?.data,
+                reason: error?.reason,
                 stack: error.stack
             });
             
-            const errorMessage = this.getReadableError(error);
+            let errorMessage = 'Failed to create order: ';
+            
+            // Try to decode the error
+            if (error?.error?.data) {
+                try {
+                    const decodedError = this.contract.interface.parseError(error.error.data);
+                    errorMessage += `${decodedError.name}: ${decodedError.args}`;
+                    this.debug('Decoded error:', decodedError);
+                } catch (e) {
+                    // If we can't decode the error, fall back to basic messages
+                    errorMessage += this.getReadableError(error);
+                }
+            } else {
+                errorMessage += this.getReadableError(error);
+            }
+            
             this.showError(errorMessage);
         } finally {
             this.isSubmitting = false;

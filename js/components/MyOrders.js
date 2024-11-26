@@ -132,32 +132,75 @@ export class MyOrders extends ViewOrders {
     }
 
     async cancelOrder(orderId) {
+        const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
         try {
-            // Find the button first using container instead of tbody
-            const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
             if (button) {
                 button.disabled = true;
                 button.textContent = 'Canceling...';
             }
 
-            this.debug('Canceling order:', orderId);
-            // Get the contract instance and cancel the order
+            this.debug('Starting cancel order process for orderId:', orderId);
             const contract = await this.getContract();
-            const tx = await contract.cancelOrder(orderId);
-            this.debug('Cancel transaction submitted:', tx.hash);
-            await tx.wait();
+            
+            // Estimate gas for cancelOrder with fallback
+            let cancelGasLimit;
+            try {
+                const cancelGasEstimate = await contract.estimateGas.cancelOrder(orderId);
+                cancelGasLimit = Math.floor(cancelGasEstimate.toNumber() * 1.2); // 20% buffer
+                this.debug('Cancel order gas estimate:', cancelGasEstimate.toString());
+            } catch (error) {
+                this.debug('Gas estimation failed for cancel order, using default:', error);
+                cancelGasLimit = 100000; // Default gas limit for cancel orders
+            }
 
-            // Success message
+            this.debug('Sending cancel order transaction with params:', {
+                orderId,
+                gasLimit: cancelGasLimit,
+                gasPrice: (await this.provider.getGasPrice()).toString()
+            });
+
+            const tx = await contract.cancelOrder(orderId, {
+                gasLimit: cancelGasLimit,
+                gasPrice: await this.provider.getGasPrice()
+            });
+            
+            this.debug('Cancel transaction sent:', tx.hash);
+            await tx.wait();
+            this.debug('Transaction confirmed');
+
             this.showSuccess('Order canceled successfully');
             
             // Note: The order will be removed from the table when we receive the
             // OrderCanceled event through WebSocket
         } catch (error) {
-            console.error('[MyOrders] Error canceling order:', error);
-            this.showError('Failed to cancel order');
+            this.debug('Cancel order error details:', {
+                message: error.message,
+                code: error.code,
+                data: error?.error?.data,
+                reason: error?.reason,
+                stack: error.stack
+            });
             
-            // Reset button state on error
-            const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
+            let errorMessage = 'Failed to cancel order: ';
+            
+            // Try to decode the error
+            if (error?.error?.data) {
+                try {
+                    const decodedError = this.contract.interface.parseError(error.error.data);
+                    errorMessage += `${decodedError.name}: ${decodedError.args}`;
+                    this.debug('Decoded error:', decodedError);
+                } catch (e) {
+                    // If we can't decode the error, fall back to basic messages
+                    if (error.code === -32603) {
+                        errorMessage += 'Transaction would fail. Please try again.';
+                    } else {
+                        errorMessage += error.message;
+                    }
+                }
+            }
+            
+            this.showError(errorMessage);
+        } finally {
             if (button) {
                 button.disabled = false;
                 button.textContent = 'Cancel';

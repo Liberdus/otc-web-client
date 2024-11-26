@@ -381,39 +381,91 @@ export class ViewOrders extends BaseComponent {
             }
 
             this.debug('Starting fill order process for orderId:', orderId);
-            const order = await this.getOrderDetails(orderId);
-            const contract = await this.getContract();
-            
-            // Check and handle token approval
-            const signer = await this.provider.getSigner();
-            const signerAddress = await signer.getAddress();
-            
-            // Create token contract instance
-            const buyTokenContract = new ethers.Contract(
+            const order = this.orders.get(orderId);
+            this.debug('Order details:', order);
+
+            // Create token contract instance with full ERC20 ABI
+            const buyToken = new ethers.Contract(
                 order.buyToken,
-                ['function decimals() view returns (uint8)', 'function approve(address spender, uint256 amount) returns (bool)'],
+                erc20Abi,
                 this.provider
             );
+            
+            const userAddress = await window.walletManager.getAccount();
+            
+            // Check balance first
+            const balance = await buyToken.balanceOf(userAddress);
+            this.debug('Current balance:', balance.toString());
+            this.debug('Required amount:', order.buyAmount.toString());
+
+            if (balance.lt(order.buyAmount)) {
+                throw new Error(`Insufficient token balance. Have ${ethers.utils.formatEther(balance)}, need ${ethers.utils.formatEther(order.buyAmount)}`);
+            }
 
             // Check allowance
-            const hasAllowance = await this.checkAllowance(order.buyToken, signerAddress, order.buyAmount);
-            
-            if (!hasAllowance) {
+            const allowance = await buyToken.allowance(userAddress, this.contract.address);
+            this.debug('Current allowance:', allowance.toString());
+
+            if (allowance.lt(order.buyAmount)) {
                 this.showSuccess('Requesting token approval...');
-                const approveTx = await buyTokenContract.connect(signer).approve(
-                    contract.address,
-                    order.buyAmount
-                );
-                await approveTx.wait();
-                this.showSuccess('Token approval granted');
+                
+                try {
+                    // Use a default gas limit for approval if estimation fails
+                    let gasLimit;
+                    try {
+                        const approveGasEstimate = await buyToken.estimateGas.approve(
+                            this.contract.address,
+                            order.buyAmount
+                        );
+                        gasLimit = Math.floor(approveGasEstimate.toNumber() * 1.2); // 20% buffer
+                    } catch (error) {
+                        this.debug('Gas estimation failed for approval, using default:', error);
+                        gasLimit = 100000; // Default gas limit for ERC20 approvals
+                    }
+
+                    const approveTx = await buyToken.connect(this.provider.getSigner()).approve(
+                        this.contract.address,
+                        order.buyAmount,
+                        {
+                            gasLimit,
+                            gasPrice: await this.provider.getGasPrice()
+                        }
+                    );
+                    
+                    this.debug('Approval transaction sent:', approveTx.hash);
+                    await approveTx.wait();
+                    this.showSuccess('Token approval granted');
+                } catch (error) {
+                    this.debug('Approval failed:', error);
+                    throw new Error('Token approval failed. Please try again.');
+                }
             }
+
+            // Estimate gas for fillOrder with fallback
+            let fillGasLimit;
+            try {
+                const fillGasEstimate = await this.contract.estimateGas.fillOrder(orderId);
+                fillGasLimit = Math.floor(fillGasEstimate.toNumber() * 1.2); // 20% buffer
+                this.debug('Fill order gas estimate:', fillGasEstimate.toString());
+            } catch (error) {
+                this.debug('Gas estimation failed for fill order, using default:', error);
+                fillGasLimit = 300000; // Default gas limit for fill orders
+            }
+
+            this.debug('Sending fill order transaction with params:', {
+                orderId,
+                gasLimit: fillGasLimit,
+                gasPrice: (await this.provider.getGasPrice()).toString()
+            });
+
+            const tx = await this.contract.fillOrder(orderId, {
+                gasLimit: fillGasLimit,
+                gasPrice: await this.provider.getGasPrice()
+            });
             
-            // Execute the fill transaction
-            const tx = await contract.fillOrder(orderId);
-            this.debug('Fill transaction submitted:', tx.hash);
-            
-            const receipt = await tx.wait();
-            this.debug('Fill transaction receipt:', receipt);
+            this.debug('Transaction sent:', tx.hash);
+            await tx.wait();
+            this.debug('Transaction confirmed');
 
             // Update order status in memory
             const orderToUpdate = this.orders.get(Number(orderId));
@@ -425,8 +477,32 @@ export class ViewOrders extends BaseComponent {
 
             this.showSuccess(`Order ${orderId} filled successfully!`);
         } catch (error) {
-            this.debug('Fill order error:', error);
-            const errorMessage = this.getReadableError(error);
+            this.debug('Fill order error details:', {
+                message: error.message,
+                code: error.code,
+                data: error?.error?.data,
+                reason: error?.reason,
+                stack: error.stack
+            });
+            
+            let errorMessage = 'Failed to fill order: ';
+            
+            // Try to decode the error
+            if (error?.error?.data) {
+                try {
+                    const decodedError = this.contract.interface.parseError(error.error.data);
+                    errorMessage += `${decodedError.name}: ${decodedError.args}`;
+                    this.debug('Decoded error:', decodedError);
+                } catch (e) {
+                    // If we can't decode the error, fall back to basic messages
+                    if (error.code === -32603) {
+                        errorMessage += 'Transaction would fail. Check order status and token approvals.';
+                    } else {
+                        errorMessage += error.message;
+                    }
+                }
+            }
+            
             this.showError(errorMessage);
         } finally {
             if (button) {
