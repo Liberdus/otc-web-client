@@ -18,7 +18,7 @@
         position: fixed;
         bottom: 0;
         right: 0;
-        background: rgba(0,0,0,0.8);
+        background: rgba(0, 0, 0, 0.8);
         color: #fff;
         padding: 10px;
         border-radius: 5px 0 0 0;
@@ -111,13 +111,39 @@
           </div>
         </div>
       </header>
-      <div class="debug-panel" style="display: none;">
+      <div class="debug-panel" style="display: none">
         <div class="debug-controls">
           <h3>Debug Settings</h3>
-          <label><input type="checkbox" data-debug="APP"> App</label>
-          <label><input type="checkbox" data-debug="WEBSOCKET"> WebSocket</label>
-          <label><input type="checkbox" data-debug="COMPONENTS"> Components</label>
-          <label><input type="checkbox" data-debug="WALLET"> Wallet</label>
+          <label><input type="checkbox" data-debug="APP" /> App</label>
+          <label
+            ><input type="checkbox" data-debug="WEBSOCKET" /> WebSocket</label
+          >
+          <label
+            ><input type="checkbox" data-debug="COMPONENTS" /> Components</label
+          >
+          <label><input type="checkbox" data-debug="WALLET" /> Wallet</label>
+          <label
+            ><input type="checkbox" data-debug="VIEW_ORDERS" /> View
+            Orders</label
+          >
+          <label
+            ><input type="checkbox" data-debug="CREATE_ORDER" /> Create
+            Order</label
+          >
+          <label
+            ><input type="checkbox" data-debug="MY_ORDERS" /> My Orders</label
+          >
+          <label
+            ><input type="checkbox" data-debug="TAKER_ORDERS" /> Taker
+            Orders</label
+          >
+          <label
+            ><input type="checkbox" data-debug="CLEANUP_ORDERS" /> Cleanup
+            Orders</label
+          >
+          <label
+            ><input type="checkbox" data-debug="WALLET_UI" /> Wallet UI</label
+          >
           <button id="applyDebug">Apply</button>
         </div>
       </div>
@@ -176,7 +202,9 @@
                 </div>
                 <div class="form-group">
                   <label>Order Creation Fee:</label>
-                  <span id="orderCreationFee" class="placeholder-text">Connect wallet to view fee and average gas</span>
+                  <span id="orderCreationFee" class="placeholder-text"
+                    >Connect wallet to view fee and average gas</span
+                  >
                 </div>
                 <button class="action-button" id="createOrderBtn" disabled>
                   Connect Wallet to Create Order

@@ -35,6 +35,8 @@ export const DEBUG_CONFIG = {
     VIEW_ORDERS: false,
     CREATE_ORDER: false,
     MY_ORDERS: false,
+    TAKER_ORDERS: false,
+    CLEANUP_ORDERS: false,
     WALLET_UI: false,
     // Add more specific flags as needed
 };
