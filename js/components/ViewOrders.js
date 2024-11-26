@@ -555,7 +555,7 @@ export class ViewOrders extends BaseComponent {
 
     async canFillOrder(order) {
         try {
-            // Use eth_accounts instead of selectedAddress
+            // Get current account
             const accounts = await window.ethereum.request({ 
                 method: 'eth_accounts' 
             });
@@ -574,13 +574,31 @@ export class ViewOrders extends BaseComponent {
                 console.log('[ViewOrders] Order not active:', orderStatus);
                 return false;
             }
-            
-            const expiryTime = this.getExpiryTime(order.timestamp);
-            
-            // TEMPORARY: Allow filling own orders for testing
-            const canFill = Date.now() < expiryTime; // Only check expiry
 
-            console.log('[ViewOrders] Can fill order:', canFill);
+            // Check if order is expired
+            const expiryTime = this.getExpiryTime(order.timestamp);
+            if (Date.now() >= expiryTime) {
+                console.log('[ViewOrders] Order expired');
+                return false;
+            }
+
+            // Check if user is the maker (can't fill own orders)
+            if (order.maker?.toLowerCase() === currentAccount) {
+                console.log('[ViewOrders] User is maker of order');
+                return false;
+            }
+
+            // Check if order is open to all or if user is the specified taker
+            const isOpenOrder = order.taker === ethers.constants.AddressZero;
+            const isSpecifiedTaker = order.taker?.toLowerCase() === currentAccount;
+            const canFill = isOpenOrder || isSpecifiedTaker;
+
+            console.log('[ViewOrders] Can fill order:', {
+                isOpenOrder,
+                isSpecifiedTaker,
+                canFill
+            });
+            
             return canFill;
         } catch (error) {
             console.error('[ViewOrders] Error in canFillOrder:', error);
