@@ -197,14 +197,27 @@ export class ViewOrders extends BaseComponent {
             }
             tbody.innerHTML = '';
 
-            // Check if we have any orders
-            if (!this.orders || this.orders.size === 0) {
-                this.debug('No orders to display');
+            // Get fillable filter state
+            const showOnlyFillable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+
+            // Filter orders if necessary
+            let ordersToDisplay = Array.from(this.orders.values());
+            if (showOnlyFillable) {
+                ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
+                    const canFill = await this.canFillOrder(order);
+                    return canFill ? order : null;
+                }));
+                ordersToDisplay = ordersToDisplay.filter(order => order !== null);
+            }
+
+            // Check if we have any orders after filtering
+            if (!ordersToDisplay || ordersToDisplay.length === 0) {
+                this.debug('No orders to display after filtering');
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="no-orders-message">
                             <div class="placeholder-text">
-                                No orders found
+                                ${showOnlyFillable ? 'No fillable orders found' : 'No orders found'}
                             </div>
                         </td>
                     </tr>`;
@@ -213,7 +226,7 @@ export class ViewOrders extends BaseComponent {
 
             // Get token details for all orders
             const tokenAddresses = new Set();
-            this.orders.forEach(order => {
+            ordersToDisplay.forEach(order => {
                 if (order?.sellToken) tokenAddresses.add(order.sellToken);
                 if (order?.buyToken) tokenAddresses.add(order.buyToken);
             });
@@ -228,8 +241,8 @@ export class ViewOrders extends BaseComponent {
                 }
             });
 
-            // Sort orders before adding to table
-            const sortedOrders = Array.from(this.orders.values()).sort((a, b) => {
+            // Sort the filtered orders
+            const sortedOrders = ordersToDisplay.sort((a, b) => {
                 const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
                 
                 switch (this.sortConfig.column) {
@@ -338,6 +351,22 @@ export class ViewOrders extends BaseComponent {
 
     async setupTable() {
         const tableContainer = this.createElement('div', 'table-container');
+        
+        // Add filter controls
+        const filterControls = this.createElement('div', 'filter-controls');
+        filterControls.innerHTML = `
+            <label class="filter-toggle">
+                <input type="checkbox" id="fillable-orders-toggle">
+                <span>Show only fillable orders</span>
+            </label>
+        `;
+        
+        // Add event listener for the toggle
+        const toggle = filterControls.querySelector('#fillable-orders-toggle');
+        toggle.addEventListener('change', () => this.refreshOrdersView());
+        
+        tableContainer.appendChild(filterControls);
+        
         const table = this.createElement('table', 'orders-table');
         
         const thead = this.createElement('thead');

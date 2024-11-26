@@ -302,30 +302,40 @@ export class TakerOrders extends ViewOrders {
             }
             tbody.innerHTML = '';
 
-            // Check if we have any orders
-            if (!this.orders || this.orders.size === 0) {
-                this.debug('No orders to display');
+            // Get filter state
+            const showOnlyFillable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+
+            // Filter orders if necessary
+            let ordersToDisplay = Array.from(this.orders.values());
+            if (showOnlyFillable) {
+                ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
+                    const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
+                    return status === 'Active' ? order : null;
+                }));
+                ordersToDisplay = ordersToDisplay.filter(order => order !== null);
+            }
+
+            // Check if we have any orders after filtering
+            if (!ordersToDisplay || ordersToDisplay.length === 0) {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="no-orders-message">
                             <div class="placeholder-text">
-                                No orders found where you are the designated taker
+                                ${showOnlyFillable ? 'No fillable orders found' : 'No orders found where you are the designated taker'}
                             </div>
                         </td>
                     </tr>`;
                 return;
             }
 
-            // Get token details for all tokens in orders
+            // Rest of your existing refreshOrdersView code...
             const tokenAddresses = new Set();
-            this.orders.forEach(order => {
+            ordersToDisplay.forEach(order => {
                 if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
                 if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
             });
 
-            this.debug('Getting details for tokens:', Array.from(tokenAddresses));
             const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
-            
             const tokenDetailsMap = new Map();
             Array.from(tokenAddresses).forEach((address, index) => {
                 if (tokenDetails[index]) {
@@ -334,9 +344,8 @@ export class TakerOrders extends ViewOrders {
             });
 
             // Create and append order rows
-            for (const order of this.orders.values()) {
+            for (const order of ordersToDisplay) {
                 try {
-                    // Ensure order token addresses are lowercase when looking up details
                     const orderWithLowercase = {
                         ...order,
                         sellToken: order.sellToken.toLowerCase(),
@@ -358,26 +367,44 @@ export class TakerOrders extends ViewOrders {
     }
 
     async setupTable() {
-        this.container.innerHTML = `
-            <div class="table-container">
-                <table class="orders-table">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Sell</th>
-                            <th>Amount</th>
-                            <th>Buy</th>
-                            <th>Amount</th>
-                            <th>Created</th>
-                            <th>Expires</th>
-                            <th>Status</th>
-                            <th>Taker</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
+        const tableContainer = this.createElement('div', 'table-container');
+        
+        // Add filter controls
+        const filterControls = this.createElement('div', 'filter-controls');
+        filterControls.innerHTML = `
+            <label class="filter-toggle">
+                <input type="checkbox" id="fillable-orders-toggle">
+                <span>Show only fillable orders</span>
+            </label>
         `;
+        
+        // Add event listener for the toggle
+        const toggle = filterControls.querySelector('#fillable-orders-toggle');
+        toggle.addEventListener('change', () => this.refreshOrdersView());
+        
+        tableContainer.appendChild(filterControls);
+        
+        // Add table
+        const table = this.createElement('table', 'orders-table');
+        table.innerHTML = `
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Sell</th>
+                    <th>Amount</th>
+                    <th>Buy</th>
+                    <th>Amount</th>
+                    <th>Created</th>
+                    <th>Expires</th>
+                    <th>Status</th>
+                    <th>Taker</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        `;
+        
+        tableContainer.appendChild(table);
+        this.container.appendChild(tableContainer);
     }
 }

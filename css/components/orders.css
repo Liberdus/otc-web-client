@@ -150,3 +150,34 @@ th[data-sort].active-sort .sort-icon {
   opacity: 1;
   color: #10B981; /* Using your existing green color */
 }
+
+/* Filter controls */
+.filter-controls {
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background-color: #f8f9fe;
+    border-radius: 0.75rem;
+    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+.filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: #6b7280;
+}
+
+.filter-toggle input[type="checkbox"] {
+    cursor: pointer;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 0.25rem;
+    border: 2px solid #10b981;
+    accent-color: #10b981;
+}
+
+.filter-toggle:hover {
+    color: #4b5563;
+}

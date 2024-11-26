@@ -247,4 +247,74 @@ export class MyOrders extends ViewOrders {
 
         return tr;
     }
+
+    async refreshOrdersView() {
+        this.debug('Refreshing orders view');
+        try {
+            // Get contract instance first
+            this.contract = await this.getContract();
+            if (!this.contract) {
+                throw new Error('Contract not initialized');
+            }
+
+            // Clear existing orders from table
+            const tbody = this.container.querySelector('tbody');
+            if (!tbody) {
+                this.debug('Table body not found');
+                return;
+            }
+            tbody.innerHTML = '';
+
+            // Get filter state
+            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
+
+            // Filter orders if necessary
+            let ordersToDisplay = Array.from(this.orders.values());
+            if (showOnlyActive) {
+                ordersToDisplay = ordersToDisplay.filter(order => 
+                    this.getOrderStatus(order, this.getExpiryTime(order.timestamp)) === 'Active'
+                );
+            }
+
+            // Check if we have any orders after filtering
+            if (!ordersToDisplay || ordersToDisplay.length === 0) {
+                this.debug('No orders to display after filtering');
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="no-orders-message">
+                            <div class="placeholder-text">
+                                ${showOnlyActive ? 'No active orders found' : 'No orders found'}
+                            </div>
+                        </td>
+                    </tr>`;
+                return;
+            }
+
+            // Get token details and display orders
+            const tokenAddresses = new Set();
+            ordersToDisplay.forEach(order => {
+                if (order?.sellToken) tokenAddresses.add(order.sellToken);
+                if (order?.buyToken) tokenAddresses.add(order.buyToken);
+            });
+
+            const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
+            const tokenDetailsMap = new Map();
+            tokenDetails.forEach((details, index) => {
+                if (details) {
+                    tokenDetailsMap.set(Array.from(tokenAddresses)[index], details);
+                }
+            });
+
+            // Add orders to table
+            for (const order of ordersToDisplay) {
+                if (order) {
+                    const row = await this.createOrderRow(order, tokenDetailsMap);
+                    tbody.appendChild(row);
+                }
+            }
+        } catch (error) {
+            console.error('[MyOrders] Error refreshing orders view:', error);
+            throw error;
+        }
+    }
 }
