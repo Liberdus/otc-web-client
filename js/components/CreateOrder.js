@@ -82,13 +82,14 @@ export class CreateOrder extends BaseComponent {
                 throw new Error('Contract not initialized');
             }
             const fee = await this.contract.orderCreationFee();
+            const averageGas = await this.contract.averageGasUsed();
             const feeInEth = ethers.utils.formatEther(fee);
             const orderCreationFee = document.getElementById('orderCreationFee');
             if (orderCreationFee) {
-                orderCreationFee.textContent = `${feeInEth} POL`;
+                orderCreationFee.textContent = `${feeInEth} POL (Avg Gas: ${averageGas})`;
                 orderCreationFee.classList.remove('placeholder-text');
             }
-            console.log('[CreateOrder] Fee loaded:', feeInEth);
+            console.log('[CreateOrder] Fee loaded:', feeInEth, 'Average Gas:', averageGas);
         } catch (error) {
             console.error('[CreateOrder] Error loading fee:', error);
             const orderCreationFee = document.getElementById('orderCreationFee');
@@ -268,6 +269,9 @@ export class CreateOrder extends BaseComponent {
             const receipt = await tx.wait();
             console.log('[CreateOrder] Transaction confirmed:', receipt);
             
+            // Refresh the fee after order creation
+            await this.loadOrderCreationFee();
+
             // Look for OrderCreated event
             const orderCreatedEvent = receipt.events?.find(e => e.event === 'OrderCreated');
             if (orderCreatedEvent) {
