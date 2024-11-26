@@ -171,7 +171,21 @@
               <div class="swap-box">
                 <h2>Create OTC Swap Order</h2>
                 <div class="form-group">
-                  <label for="partner">Partner Address (optional):</label>
+                  <label>
+                    Partner Address (optional):
+                    <span class="info-tooltip">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <circle cx="12" cy="12" r="10" stroke-width="2"/>
+                        <path d="M12 16v-4" stroke-width="2" stroke-linecap="round"/>
+                        <circle cx="12" cy="8" r="1" fill="currentColor"/>
+                      </svg>
+                      <span class="tooltip-text">
+                        <strong>Partner Address:</strong> If you want only a specific address to be able to fill this order, enter their wallet address here. Leave empty to allow anyone to fill the order.
+                        <br><br>
+                        💡 Use this for private trades with a specific trading partner.
+                      </span>
+                    </span>
+                  </label>
                   <input type="text" id="partner" placeholder="0x..." />
                 </div>
                 <div class="form-group">
@@ -200,10 +214,42 @@
                     placeholder="Enter amount"
                   />
                 </div>
-                <div class="form-group">
-                  <label>Order Creation Fee:</label>
+                <div class="form-group fee-group">
+                  <label>
+                    Order Creation Fee:
+                    <span class="info-tooltip">
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                      >
+                        <circle cx="12" cy="12" r="10" stroke-width="2" />
+                        <path
+                          d="M12 16v-4"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                        />
+                        <circle cx="12" cy="8" r="1" fill="currentColor" />
+                      </svg>
+                      <span class="tooltip-text">
+                        <strong>Order Creation Fee:</strong> A small fee in POL
+                        is required to create an order. This prevents spam and
+                        rewards users who help clean up expired orders.
+                        <br /><br />
+                        <strong>Average Gas:</strong> This number represents the
+                        typical computational cost to process an order on the
+                        blockchain. The creation fee is automatically adjusted
+                        based on this value to ensure fair pricing regardless of
+                        network conditions. <br /><br />
+                        💡 For example: If gas is 100,000, the fee will be
+                        approximately 0.00001 POL.
+                      </span>
+                    </span>
+                  </label>
                   <span id="orderCreationFee" class="placeholder-text"
-                    >Connect wallet to view fee and average gas</span
+                    >Connect wallet to view fee</span
                   >
                 </div>
                 <button class="action-button" id="createOrderBtn" disabled>
