@@ -78,6 +78,22 @@ class App {
 
         // Initialize cleanup component
         const cleanup = new Cleanup();
+
+        // Add WebSocket event handlers for order updates
+        window.webSocket?.subscribe('OrderCreated', () => {
+            console.log('[App] Order created, refreshing components...');
+            this.refreshActiveComponent();
+        });
+
+        window.webSocket?.subscribe('OrderFilled', () => {
+            console.log('[App] Order filled, refreshing components...');
+            this.refreshActiveComponent();
+        });
+
+        window.webSocket?.subscribe('OrderCanceled', () => {
+            console.log('[App] Order canceled, refreshing components...');
+            this.refreshActiveComponent();
+        });
     }
 
     initializeEventListeners() {
@@ -219,32 +235,36 @@ class App {
 
     async showTab(tabId) {
         try {
+            console.log('[App] Switching to tab:', tabId);
+            
             // Hide all tab content
             document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.style.display = 'none';
                 tab.classList.remove('active');
             });
             
             // Update tab buttons
             document.querySelectorAll('.tab-button').forEach(button => {
                 button.classList.remove('active');
+                if (button.dataset.tab === tabId) {
+                    button.classList.add('active');
+                }
             });
-            document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
             
-            // Show and initialize selected tab
+            // Show selected tab
             const tabContent = document.getElementById(tabId);
             if (tabContent) {
-                tabContent.style.display = 'block';
                 tabContent.classList.add('active');
                 
                 // Initialize component if it exists
                 const component = this.components[tabId];
                 if (component?.initialize) {
-                    await component.initialize(false);
+                    const readOnlyMode = !window.walletManager?.provider;
+                    await component.initialize(readOnlyMode);
                 }
             }
             
             this.currentTab = tabId;
+            console.log('[App] Tab switch complete:', tabId);
         } catch (error) {
             console.error('[App] Error showing tab:', error);
         }
@@ -252,7 +272,10 @@ class App {
 
     // Add new method to reinitialize components
     async reinitializeComponents() {
-        if (this.isReinitializing) return;
+        if (this.isReinitializing) {
+            console.log('[App] Already reinitializing, skipping...');
+            return;
+        }
         this.isReinitializing = true;
         
         try {
@@ -263,29 +286,32 @@ class App {
             this.components['create-order'] = createOrderComponent;
             await createOrderComponent.initialize(false);
             
-            // Reinitialize all other components with readOnlyMode = false
-            for (const [id, component] of Object.entries(this.components)) {
-                if (component && typeof component.initialize === 'function' && id !== 'create-order') {
-                    console.log(`[App] Reinitializing component: ${id}`);
-                    try {
-                        // For cleanup component, call render with readOnlyMode = false
-                        if (component instanceof Cleanup) {
-                            await component.render(false);
-                        } else {
-                            await component.initialize(false);
-                        }
-                    } catch (error) {
-                        console.error(`[App] Error reinitializing ${id}:`, error);
-                    }
+            // Reinitialize only the current tab's component
+            const currentComponent = this.components[this.currentTab];
+            if (currentComponent && typeof currentComponent.initialize === 'function') {
+                console.log(`[App] Reinitializing current component: ${this.currentTab}`);
+                try {
+                    await currentComponent.initialize(false);
+                } catch (error) {
+                    console.error(`[App] Error reinitializing ${this.currentTab}:`, error);
                 }
             }
 
             // Re-show the current tab
-            this.showTab(this.currentTab);
+            await this.showTab(this.currentTab);
             
             console.log('[App] Components reinitialized');
         } finally {
             this.isReinitializing = false;
+        }
+    }
+
+    // Add method to refresh active component
+    async refreshActiveComponent() {
+        const activeComponent = this.components[this.currentTab];
+        if (activeComponent?.initialize) {
+            console.log('[App] Refreshing active component:', this.currentTab);
+            await activeComponent.initialize(false);
         }
     }
 }

@@ -82,6 +82,12 @@ export class BaseComponent {
         try {
             console.log('[BaseComponent] Getting token details for:', tokenAddresses);
             
+            // Cache verification
+            if (!this.tokenCache) {
+                console.warn('[BaseComponent] Token cache not initialized');
+                this.tokenCache = new Map();
+            }
+
             // Ensure we have a provider
             if (!this.provider) {
                 this.provider = window.walletManager?.provider;
@@ -145,6 +151,10 @@ export class BaseComponent {
                     return null;
                 }
             }));
+
+            // Log cache updates
+            console.log('[BaseComponent] Token cache after update:', 
+                Array.from(this.tokenCache.entries()));
 
             return results.length === 1 ? results[0] : results;
         } catch (error) {

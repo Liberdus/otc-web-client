@@ -6,7 +6,7 @@ export class Cleanup extends BaseComponent {
         super('cleanup-container');
     }
 
-    async render(readOnlyMode = true) {
+    async initialize(readOnlyMode = true) {
         try {
             // Clear previous content first
             this.container.innerHTML = '';
@@ -46,10 +46,17 @@ export class Cleanup extends BaseComponent {
 
             // Start checking for cleanup opportunities
             await this.checkCleanupOpportunities();
+            
             // Check every 5 minutes
-            setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
+            this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
         } catch (error) {
             console.error('[Cleanup] Initialization error:', error);
+        }
+    }
+
+    cleanup() {
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
         }
     }
 

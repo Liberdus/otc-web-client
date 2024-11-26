@@ -9,6 +9,7 @@ export class CreateOrder extends BaseComponent {
         this.provider = null;
         this.initialized = false;
         this.tokenCache = new Map();
+        this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
     }
 
     async initializeContract() {
@@ -162,14 +163,23 @@ export class CreateOrder extends BaseComponent {
 
     setupCreateOrderListener() {
         const createOrderBtn = document.getElementById('createOrderBtn');
-        createOrderBtn.addEventListener('click', () => this.handleCreateOrder());
+        // Remove existing listener
+        createOrderBtn.removeEventListener('click', this.boundCreateOrderHandler);
+        // Add new listener
+        createOrderBtn.addEventListener('click', this.boundCreateOrderHandler);
     }
 
-    async handleCreateOrder() {
+    async handleCreateOrder(event) {
+        event.preventDefault();
         try {
             const createOrderBtn = document.getElementById('createOrderBtn');
             createOrderBtn.disabled = true;
             
+            // Add provider check
+            if (!this.provider || !this.contract) {
+                throw new Error('Contract or provider not initialized');
+            }
+
             // Get form values
             const partner = document.getElementById('partner').value.trim();
             const sellToken = document.getElementById('sellToken').value.trim();
@@ -234,8 +244,15 @@ export class CreateOrder extends BaseComponent {
             // Get the order creation fee
             const fee = await this.contract.orderCreationFee();
 
-            // Create the order
-            this.showSuccess('Creating order...');
+            console.log('[CreateOrder] Sending create order transaction with params:', {
+                taker: partner || ethers.constants.AddressZero,
+                sellToken,
+                sellAmount,
+                buyToken,
+                buyAmount,
+                value: fee
+            });
+
             const tx = await this.contract.createOrder(
                 partner || ethers.constants.AddressZero,
                 sellToken,
@@ -245,18 +262,36 @@ export class CreateOrder extends BaseComponent {
                 { value: fee }
             );
 
-            this.showSuccess('Transaction submitted. Waiting for confirmation...');
-            await tx.wait();
-            this.showSuccess('Order created successfully!');
+            console.log('[CreateOrder] Transaction sent:', tx.hash);
+            this.showSuccess('Order creation transaction submitted');
+
+            const receipt = await tx.wait();
+            console.log('[CreateOrder] Transaction confirmed:', receipt);
             
-            // Reset form
+            // Look for OrderCreated event
+            const orderCreatedEvent = receipt.events?.find(e => e.event === 'OrderCreated');
+            if (orderCreatedEvent) {
+                console.log('[CreateOrder] OrderCreated event found:', orderCreatedEvent);
+            } else {
+                console.warn('[CreateOrder] No OrderCreated event found in receipt');
+            }
+
+            this.showSuccess('Order created successfully!');
             this.resetForm();
             
         } catch (error) {
-            console.error('[CreateOrder] Error creating order:', error);
-            this.showError(this.getReadableError(error));
+            console.error('[CreateOrder] Detailed error:', {
+                code: error.code,
+                message: error.message,
+                data: error.data,
+                transaction: error.transaction,
+                receipt: error.receipt,
+                stack: error.stack
+            });
+            
+            const errorMessage = this.getReadableError(error);
+            this.showError(errorMessage);
         } finally {
-            // Re-enable button
             const createOrderBtn = document.getElementById('createOrderBtn');
             createOrderBtn.disabled = false;
         }
@@ -278,13 +313,19 @@ export class CreateOrder extends BaseComponent {
     }
 
     getReadableError(error) {
-        if (error.code === 'ACTION_REJECTED') {
-            return 'Transaction was rejected by user';
+        // Add more specific error cases
+        switch (error.code) {
+            case 'ACTION_REJECTED':
+                return 'Transaction was rejected by user';
+            case 'INSUFFICIENT_FUNDS':
+                return 'Insufficient funds for transaction';
+            case -32603:
+                return 'Network error. Please check your connection';
+            case 'UNPREDICTABLE_GAS_LIMIT':
+                return 'Error estimating gas. The transaction may fail';
+            default:
+                return error.reason || error.message || 'Error creating order';
         }
-        if (error.code === 'INSUFFICIENT_FUNDS') {
-            return 'Insufficient funds for transaction';
-        }
-        return error.message || 'Error creating order';
     }
 
     resetForm() {

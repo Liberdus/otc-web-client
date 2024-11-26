@@ -15,10 +15,14 @@ export class ViewOrders extends BaseComponent {
 
     setupErrorHandling() {
         if (!window.webSocket) {
-            console.log('[ViewOrders] WebSocket not available for error handling, retrying in 1s...');
+            if (!this._retryAttempt) {
+                console.log('[ViewOrders] WebSocket not available, waiting for initialization...');
+                this._retryAttempt = true;
+            }
             setTimeout(() => this.setupErrorHandling(), 1000);
             return;
         }
+        this._retryAttempt = false;
 
         window.webSocket.subscribe('error', (error) => {
             let userMessage = 'An error occurred';
@@ -73,12 +77,14 @@ export class ViewOrders extends BaseComponent {
             }
             
             // Setup WebSocket event handlers
-            this.setupWebSocket();
+            await this.setupWebSocket();
 
             // Get initial orders from cache
             const cachedOrders = window.webSocket.getOrders();
             if (cachedOrders && cachedOrders.length > 0) {
                 console.log('[ViewOrders] Loading orders from cache:', cachedOrders);
+                // Clear existing orders before adding new ones
+                this.orders.clear();
                 cachedOrders.forEach(order => {
                     this.orders.set(order.id, order);
                 });
@@ -92,7 +98,17 @@ export class ViewOrders extends BaseComponent {
     }
 
     async setupWebSocket() {
-        // Subscribe to order sync completion
+        console.log('[ViewOrders] Setting up WebSocket subscriptions');
+        
+        // Clear existing subscriptions
+        this.eventSubscriptions.clear();
+        if (window.webSocket) {
+            window.webSocket.subscribers.forEach((_, event) => {
+                window.webSocket.unsubscribe(event, this);
+            });
+        }
+        
+        // Add new subscriptions
         this.eventSubscriptions.add({
             event: 'orderSyncComplete',
             callback: (orders) => {
@@ -104,56 +120,66 @@ export class ViewOrders extends BaseComponent {
                         ...orderData
                     });
                 });
-                this.refreshOrdersView();
+                this.refreshOrdersView().catch(console.error);
             }
         });
 
-        // Subscribe to new orders
         this.eventSubscriptions.add({
             event: 'OrderCreated',
             callback: (orderData) => {
                 console.log('[ViewOrders] New order received:', orderData);
                 this.orders.set(Number(orderData.id), orderData);
-                this.refreshOrdersView();
+                this.refreshOrdersView().catch(error => {
+                    console.error('[ViewOrders] Error refreshing view after new order:', error);
+                });
             }
         });
 
-        // Add subscription for OrderCanceled events
-        this.eventSubscriptions.add({
-            event: 'OrderCanceled',
-            callback: (order) => {
-                console.log('[ViewOrders] Order canceled:', order);
-                if (this.orders.has(order.id)) {
-                    const existingOrder = this.orders.get(order.id);
-                    existingOrder.status = 'Canceled';
-                    this.orders.set(order.id, existingOrder);
-                    this.refreshOrdersView().catch(error => {
-                        console.error('[ViewOrders] Error refreshing view after cancel:', error);
-                    });
-                }
-            }
-        });
-
-        // Add subscription for OrderFilled events
+        // Add OrderFilled subscription
         this.eventSubscriptions.add({
             event: 'OrderFilled',
-            callback: (order) => {
-                console.log('[ViewOrders] Order filled:', order);
-                if (this.orders.has(order.id)) {
-                    const existingOrder = this.orders.get(order.id);
-                    existingOrder.status = 'Filled';
-                    this.orders.set(order.id, existingOrder);
+            callback: (orderData) => {
+                console.log('[ViewOrders] Order filled:', orderData);
+                const order = this.orders.get(Number(orderData.id));
+                if (order) {
+                    order.status = 'Filled';
+                    this.orders.set(Number(orderData.id), order);
                     this.refreshOrdersView().catch(error => {
-                        console.error('[ViewOrders] Error refreshing view after fill:', error);
+                        console.error('[ViewOrders] Error refreshing view after order fill:', error);
                     });
                 }
             }
         });
 
-        // Register all subscriptions
-        this.eventSubscriptions.forEach(sub => {
-            window.webSocket.subscribe(sub.event, sub.callback);
+        // Add OrderCanceled subscription
+        this.eventSubscriptions.add({
+            event: 'OrderCanceled',
+            callback: (orderData) => {
+                console.log('[ViewOrders] Order canceled:', orderData);
+                this.removeOrderFromTable(orderData.id);
+                this.refreshOrdersView().catch(error => {
+                    console.error('[ViewOrders] Error refreshing view after order cancel:', error);
+                });
+            }
         });
+
+        // Register subscriptions
+        if (window.webSocket) {
+            console.log('[ViewOrders] Current subscribers before registration:', 
+                Array.from(window.webSocket.subscribers.entries())
+                    .map(([event, subs]) => `${event}: ${subs.size} subscribers`)
+            );
+            
+            this.eventSubscriptions.forEach(sub => {
+                console.log('[ViewOrders] Registering subscription for event:', sub.event);
+                window.webSocket.subscribe(sub.event, sub.callback);
+            });
+            
+            console.log('[ViewOrders] Subscribers after registration:', 
+                Array.from(window.webSocket.subscribers.entries())
+                    .map(([event, subs]) => `${event}: ${subs.size} subscribers`)
+            );
+        }
     }
 
     async refreshOrdersView() {
@@ -171,7 +197,7 @@ export class ViewOrders extends BaseComponent {
                 console.warn('[ViewOrders] Table body not found');
                 return;
             }
-            tbody.innerHTML = '';
+            tbody.innerHTML = ''; // Clear existing rows
 
             // Check if we have any orders
             if (!this.orders || this.orders.size === 0) {
@@ -330,11 +356,50 @@ export class ViewOrders extends BaseComponent {
         // Will implement filtering in next iteration
     }
 
+    async checkAllowance(tokenAddress, owner, amount) {
+        try {
+            const tokenContract = new ethers.Contract(
+                tokenAddress,
+                ['function allowance(address owner, address spender) view returns (uint256)'],
+                this.provider
+            );
+            const allowance = await tokenContract.allowance(owner, this.contract.address);
+            return allowance.gte(amount);
+        } catch (error) {
+            console.error('[ViewOrders] Error checking allowance:', error);
+            return false;
+        }
+    }
+
     async fillOrder(orderId) {
         try {
             console.log('[ViewOrders] Starting fill order process for orderId:', orderId);
             const order = await this.getOrderDetails(orderId);
             const contract = await this.getContract();
+            
+            // Check and handle token approval
+            const signer = await this.provider.getSigner();
+            const signerAddress = await signer.getAddress();
+            
+            // Create token contract instance
+            const buyTokenContract = new ethers.Contract(
+                order.buyToken,
+                ['function decimals() view returns (uint8)', 'function approve(address spender, uint256 amount) returns (bool)'],
+                this.provider
+            );
+
+            // Check allowance
+            const hasAllowance = await this.checkAllowance(order.buyToken, signerAddress, order.buyAmount);
+            
+            if (!hasAllowance) {
+                this.showSuccess('Requesting token approval...');
+                const approveTx = await buyTokenContract.connect(signer).approve(
+                    contract.address,
+                    order.buyAmount
+                );
+                await approveTx.wait();
+                this.showSuccess('Token approval granted');
+            }
             
             // Execute the fill transaction
             const tx = await contract.fillOrder(orderId);
@@ -343,13 +408,28 @@ export class ViewOrders extends BaseComponent {
             const receipt = await tx.wait();
             console.log('[ViewOrders] Fill transaction receipt:', receipt);
 
-            // Refresh the orders display
-            await this.initialize(false); // Use initialize instead of loadOrders
-            
+            await this.initialize(false);
             this.showSuccess(`Order ${orderId} filled successfully!`);
         } catch (error) {
             console.error('[ViewOrders] Fill order error:', error);
-            this.showError(`Failed to fill order: ${error.message}`);
+            const errorMessage = this.getReadableError(error);
+            this.showError(errorMessage);
+        }
+    }
+
+    getReadableError(error) {
+        // Reuse the same error handling from CreateOrder
+        switch (error.code) {
+            case 'ACTION_REJECTED':
+                return 'Transaction was rejected by user';
+            case 'INSUFFICIENT_FUNDS':
+                return 'Insufficient funds for transaction';
+            case -32603:
+                return 'Network error. Please check your connection';
+            case 'UNPREDICTABLE_GAS_LIMIT':
+                return 'Error estimating gas. The transaction may fail';
+            default:
+                return error.reason || error.message || 'Error filling order';
         }
     }
 
@@ -381,10 +461,24 @@ export class ViewOrders extends BaseComponent {
     }
 
     cleanup() {
+        // Clear existing subscriptions
         this.eventSubscriptions.forEach(sub => {
-            window.webSocket.unsubscribe(sub.event, sub.callback);
+            if (window.webSocket) {
+                window.webSocket.unsubscribe(sub.event, sub.callback);
+            }
         });
         this.eventSubscriptions.clear();
+        
+        // Clear orders map
+        this.orders.clear();
+        
+        // Clear the table
+        if (this.container) {
+            const tbody = this.container.querySelector('tbody');
+            if (tbody) {
+                tbody.innerHTML = '';
+            }
+        }
     }
 
     async createOrderRow(order, tokenDetailsMap) {
@@ -442,14 +536,20 @@ export class ViewOrders extends BaseComponent {
 
     async canFillOrder(order) {
         try {
-            if (!window.ethereum?.selectedAddress) {
+            // Use eth_accounts instead of selectedAddress
+            const accounts = await window.ethereum.request({ 
+                method: 'eth_accounts' 
+            });
+            if (!accounts || accounts.length === 0) {
                 console.log('[ViewOrders] No wallet connected');
                 return false;
             }
+            const currentAccount = accounts[0].toLowerCase();
 
             // Convert status from number to string if needed
             const statusMap = ['Active', 'Filled', 'Canceled'];
-            const orderStatus = typeof order.status === 'number' ? statusMap[order.status] : order.status;
+            const orderStatus = typeof order.status === 'number' ? 
+                statusMap[order.status] : order.status;
             
             if (orderStatus !== 'Active') {
                 console.log('[ViewOrders] Order not active:', orderStatus);
