@@ -384,13 +384,15 @@ export class ViewOrders extends BaseComponent {
             this.sortConfig.direction = 'asc';
         }
 
-        // Update sort icons
+        // Update sort icons and active states
         const headers = this.container.querySelectorAll('th[data-sort]');
         headers.forEach(header => {
             const icon = header.querySelector('.sort-icon');
             if (header.dataset.sort === column) {
+                header.classList.add('active-sort');
                 icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
             } else {
+                header.classList.remove('active-sort');
                 icon.textContent = '↕';
             }
         });
@@ -664,7 +666,7 @@ export class ViewOrders extends BaseComponent {
         // Format taker display
         const takerDisplay = order.taker === ethers.constants.AddressZero 
             ? '<span class="open-order">Open to All</span>'
-            : `<span class="targeted-order" title="${order.taker}">Specific Taker</span>`;
+            : `<span class="targeted-order" title="${order.taker}">Private</span>`;
 
         tr.innerHTML = `
             <td>${order.id}</td>

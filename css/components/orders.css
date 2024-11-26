@@ -124,24 +124,29 @@
 }
 
 /* Sorting styles */
-.orders-table th[data-sort] {
+th[data-sort] {
   cursor: pointer;
   user-select: none;
   position: relative;
-  padding-right: 1.5rem; /* Make room for sort icon */
 }
 
-.orders-table th[data-sort]:hover {
+th[data-sort]:hover {
   background-color: rgba(0, 0, 0, 0.05);
 }
 
-.orders-table .sort-icon {
+.sort-icon {
   display: inline-block;
   margin-left: 4px;
   opacity: 0.5;
-  position: absolute;
-  right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 0.75rem;
+  font-size: 1rem;
+}
+
+/* Active sort state */
+th[data-sort].active-sort {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+th[data-sort].active-sort .sort-icon {
+  opacity: 1;
+  color: #10B981; /* Using your existing green color */
 }
