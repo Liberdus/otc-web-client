@@ -302,8 +302,9 @@ export class TakerOrders extends ViewOrders {
             }
             tbody.innerHTML = '';
 
-            // Get filter state
+            // Get filter and pagination state
             const showOnlyFillable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
 
             // Filter orders if necessary
             let ordersToDisplay = Array.from(this.orders.values());
@@ -314,6 +315,16 @@ export class TakerOrders extends ViewOrders {
                 }));
                 ordersToDisplay = ordersToDisplay.filter(order => order !== null);
             }
+
+            // Apply pagination if not viewing all
+            const totalOrders = ordersToDisplay.length;
+            if (pageSize !== -1) {
+                const startIndex = (this.currentPage - 1) * pageSize;
+                ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
+            }
+
+            // Update pagination controls
+            this.updatePaginationControls(totalOrders);
 
             // Check if we have any orders after filtering
             if (!ordersToDisplay || ordersToDisplay.length === 0) {
@@ -328,7 +339,7 @@ export class TakerOrders extends ViewOrders {
                 return;
             }
 
-            // Rest of your existing refreshOrdersView code...
+            // Get token details and create rows
             const tokenAddresses = new Set();
             ordersToDisplay.forEach(order => {
                 if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
@@ -367,44 +378,13 @@ export class TakerOrders extends ViewOrders {
     }
 
     async setupTable() {
-        const tableContainer = this.createElement('div', 'table-container');
+        // Call parent's setupTable to get pagination
+        await super.setupTable();
         
-        // Add filter controls
-        const filterControls = this.createElement('div', 'filter-controls');
-        filterControls.innerHTML = `
-            <label class="filter-toggle">
-                <input type="checkbox" id="fillable-orders-toggle">
-                <span>Show only fillable orders</span>
-            </label>
-        `;
-        
-        // Add event listener for the toggle
-        const toggle = filterControls.querySelector('#fillable-orders-toggle');
-        toggle.addEventListener('change', () => this.refreshOrdersView());
-        
-        tableContainer.appendChild(filterControls);
-        
-        // Add table
-        const table = this.createElement('table', 'orders-table');
-        table.innerHTML = `
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Sell</th>
-                    <th>Amount</th>
-                    <th>Buy</th>
-                    <th>Amount</th>
-                    <th>Created</th>
-                    <th>Expires</th>
-                    <th>Status</th>
-                    <th>Taker</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        `;
-        
-        tableContainer.appendChild(table);
-        this.container.appendChild(tableContainer);
+        // Replace the filter toggle text
+        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
+        if (filterToggleSpan) {
+            filterToggleSpan.textContent = 'Show only fillable orders';
+        }
     }
 }

@@ -10,6 +10,7 @@ export class ViewOrders extends BaseComponent {
         this.orders = new Map();
         this.tokenCache = new Map();
         this.provider = new ethers.providers.Web3Provider(window.ethereum);
+        this.currentPage = 1;
         this.setupErrorHandling();
         this.eventSubscriptions = new Set();
         
@@ -197,11 +198,16 @@ export class ViewOrders extends BaseComponent {
             }
             tbody.innerHTML = '';
 
-            // Get fillable filter state
+            // Get filter and pagination state
             const showOnlyFillable = this.container.querySelector('#fillable-orders-toggle')?.checked;
-
+            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+            
             // Filter orders if necessary
             let ordersToDisplay = Array.from(this.orders.values());
+            
+            // Debug log the orders
+            this.debug('Orders before filtering:', ordersToDisplay);
+
             if (showOnlyFillable) {
                 ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
                     const canFill = await this.canFillOrder(order);
@@ -210,9 +216,20 @@ export class ViewOrders extends BaseComponent {
                 ordersToDisplay = ordersToDisplay.filter(order => order !== null);
             }
 
+            this.debug('Orders after filtering:', ordersToDisplay);
+
+            // Apply pagination if not viewing all
+            const totalOrders = ordersToDisplay.length;
+            if (pageSize !== -1) {
+                const startIndex = (this.currentPage - 1) * pageSize;
+                ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
+            }
+
+            // Update pagination controls
+            this.updatePaginationControls(totalOrders);
+
             // Check if we have any orders after filtering
             if (!ordersToDisplay || ordersToDisplay.length === 0) {
-                this.debug('No orders to display after filtering');
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="no-orders-message">
@@ -352,18 +369,60 @@ export class ViewOrders extends BaseComponent {
     async setupTable() {
         const tableContainer = this.createElement('div', 'table-container');
         
-        // Add filter controls
+        // Add filter controls with pagination
         const filterControls = this.createElement('div', 'filter-controls');
         filterControls.innerHTML = `
-            <label class="filter-toggle">
-                <input type="checkbox" id="fillable-orders-toggle">
-                <span>Show only fillable orders</span>
-            </label>
+            <div class="filter-row">
+                <label class="filter-toggle">
+                    <input type="checkbox" id="fillable-orders-toggle">
+                    <span>Show only fillable orders</span>
+                </label>
+                
+                <div class="pagination-controls">
+                    <select id="page-size-select" class="page-size-select">
+                        <option value="10">10 per page</option>
+                        <option value="25">25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="-1">View all</option>
+                    </select>
+                    
+                    <div class="pagination-buttons">
+                        <button id="prev-page" class="pagination-button" disabled>Previous</button>
+                        <span id="page-info" class="page-info">Page 1 of 1</span>
+                        <button id="next-page" class="pagination-button" disabled>Next</button>
+                    </div>
+                </div>
+            </div>
         `;
         
-        // Add event listener for the toggle
+        // Add event listeners
         const toggle = filterControls.querySelector('#fillable-orders-toggle');
         toggle.addEventListener('change', () => this.refreshOrdersView());
+        
+        const pageSizeSelect = filterControls.querySelector('#page-size-select');
+        pageSizeSelect.addEventListener('change', () => {
+            this.currentPage = 1; // Reset to first page when changing page size
+            this.refreshOrdersView();
+        });
+        
+        const prevButton = filterControls.querySelector('#prev-page');
+        const nextButton = filterControls.querySelector('#next-page');
+        
+        prevButton.addEventListener('click', () => {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.refreshOrdersView();
+            }
+        });
+        
+        nextButton.addEventListener('click', () => {
+            const totalPages = this.getTotalPages();
+            if (this.currentPage < totalPages) {
+                this.currentPage++;
+                this.refreshOrdersView();
+            }
+        });
         
         tableContainer.appendChild(filterControls);
         
@@ -791,5 +850,33 @@ export class ViewOrders extends BaseComponent {
             console.error('[ViewOrders] Error in canFillOrder:', error);
             return false;
         }
+    }
+
+    getTotalPages() {
+        const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+        if (pageSize === -1) return 1; // View all
+        return Math.ceil(this.orders.size / pageSize);
+    }
+
+    updatePaginationControls(filteredOrdersCount) {
+        const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+        const prevButton = this.container.querySelector('#prev-page');
+        const nextButton = this.container.querySelector('#next-page');
+        const pageInfo = this.container.querySelector('#page-info');
+        
+        if (pageSize === -1) {
+            // View all mode
+            prevButton.disabled = true;
+            nextButton.disabled = true;
+            pageInfo.textContent = `Showing all ${filteredOrdersCount} orders`;
+            return;
+        }
+        
+        const totalPages = Math.ceil(filteredOrdersCount / pageSize);
+        
+        prevButton.disabled = this.currentPage === 1;
+        nextButton.disabled = this.currentPage === totalPages;
+        
+        pageInfo.textContent = `Page ${this.currentPage} of ${totalPages}`;
     }
 }
