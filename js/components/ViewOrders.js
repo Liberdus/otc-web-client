@@ -88,8 +88,10 @@ export class ViewOrders extends BaseComponent {
                 cachedOrders.forEach(order => {
                     this.orders.set(order.id, order);
                 });
-                await this.refreshOrdersView();
             }
+
+            // Always call refreshOrdersView to show orders or empty state
+            await this.refreshOrdersView();
 
         } catch (error) {
             console.error('[ViewOrders] Initialization error:', error);
@@ -197,11 +199,19 @@ export class ViewOrders extends BaseComponent {
                 console.warn('[ViewOrders] Table body not found');
                 return;
             }
-            tbody.innerHTML = ''; // Clear existing rows
+            tbody.innerHTML = '';
 
             // Check if we have any orders
             if (!this.orders || this.orders.size === 0) {
                 console.log('[ViewOrders] No orders to display');
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="no-orders-message">
+                            <div class="placeholder-text">
+                                No orders found
+                            </div>
+                        </td>
+                    </tr>`;
                 return;
             }
 

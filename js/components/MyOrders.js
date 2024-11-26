@@ -43,6 +43,20 @@ export class MyOrders extends ViewOrders {
                 cachedOrders.forEach(order => {
                     this.orders.set(order.id, order);
                 });
+            }
+
+            // Always call refreshOrdersView to either show orders or empty state
+            const tbody = this.container.querySelector('tbody');
+            if (!cachedOrders.length) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="no-orders-message">
+                            <div class="placeholder-text">
+                                No orders found where you are the maker
+                            </div>
+                        </td>
+                    </tr>`;
+            } else {
                 await this.refreshOrdersView();
             }
 
