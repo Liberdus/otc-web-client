@@ -373,8 +373,14 @@ export class ViewOrders extends BaseComponent {
     }
 
     async fillOrder(orderId) {
+        const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
         try {
-            console.log('[ViewOrders] Starting fill order process for orderId:', orderId);
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Filling...';
+            }
+
+            this.debug('Starting fill order process for orderId:', orderId);
             const order = await this.getOrderDetails(orderId);
             const contract = await this.getContract();
             
@@ -404,17 +410,29 @@ export class ViewOrders extends BaseComponent {
             
             // Execute the fill transaction
             const tx = await contract.fillOrder(orderId);
-            console.log('[ViewOrders] Fill transaction submitted:', tx.hash);
+            this.debug('Fill transaction submitted:', tx.hash);
             
             const receipt = await tx.wait();
-            console.log('[ViewOrders] Fill transaction receipt:', receipt);
+            this.debug('Fill transaction receipt:', receipt);
 
-            await this.initialize(false);
+            // Update order status in memory
+            const orderToUpdate = this.orders.get(Number(orderId));
+            if (orderToUpdate) {
+                orderToUpdate.status = 'Filled';
+                this.orders.set(Number(orderId), orderToUpdate);
+                await this.refreshOrdersView();
+            }
+
             this.showSuccess(`Order ${orderId} filled successfully!`);
         } catch (error) {
-            console.error('[ViewOrders] Fill order error:', error);
+            this.debug('Fill order error:', error);
             const errorMessage = this.getReadableError(error);
             this.showError(errorMessage);
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = 'Fill Order';
+            }
         }
     }
 
