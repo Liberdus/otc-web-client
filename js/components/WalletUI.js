@@ -1,17 +1,23 @@
 import { ethers } from 'ethers';
 import { BaseComponent } from './BaseComponent.js';
-import { walletManager } from '../config.js';
-
-console.log('WalletUI module loaded');
+import { walletManager, isDebugEnabled } from '../config.js';
 
 export class WalletUI extends BaseComponent {
     constructor() {
         try {
-            console.log('[WalletUI] Constructor starting...');
             super('wallet-container');
-            console.log('[WalletUI] BaseComponent initialized');
+            
+            // Initialize debug logger
+            this.debug = (message, ...args) => {
+                if (isDebugEnabled('WALLET_UI')) {
+                    console.log('[WalletUI]', message, ...args);
+                }
+            };
+            
+            this.debug('Constructor starting...');
             this.initializeElements();
             this.init();
+            this.debug('Constructor completed');
         } catch (error) {
             console.error('[WalletUI] Error in constructor:', error);
         }
@@ -19,20 +25,20 @@ export class WalletUI extends BaseComponent {
 
     initializeElements() {
         try {
-            console.log('Initializing elements...');
+            this.debug('Initializing elements...');
             
             // Initialize DOM elements with error checking
             this.connectButton = document.getElementById('walletConnect');
-            console.log('Connect button found:', this.connectButton);
+            this.debug('Connect button found:', this.connectButton);
             
             this.disconnectButton = document.getElementById('walletDisconnect');
-            console.log('Disconnect button found:', this.disconnectButton);
+            this.debug('Disconnect button found:', this.disconnectButton);
             
             this.walletInfo = document.getElementById('walletInfo');
-            console.log('Wallet info found:', this.walletInfo);
+            this.debug('Wallet info found:', this.walletInfo);
             
             this.accountAddress = document.getElementById('accountAddress');
-            console.log('Account address found:', this.accountAddress);
+            this.debug('Account address found:', this.accountAddress);
 
             if (!this.connectButton || !this.disconnectButton || !this.walletInfo || !this.accountAddress) {
                 throw new Error('Required wallet UI elements not found');
@@ -40,12 +46,12 @@ export class WalletUI extends BaseComponent {
 
             // Add click listener with explicit binding
             const handleClick = (e) => {
-                console.log('Connect button clicked!', e);
+                this.debug('Connect button clicked!', e);
                 this.handleConnectClick(e);
             };
 
             this.connectButton.addEventListener('click', handleClick);
-            console.log('Click listener added to connect button');
+            this.debug('Click listener added to connect button');
 
         } catch (error) {
             console.error('Error in initializeElements:', error);
@@ -54,10 +60,10 @@ export class WalletUI extends BaseComponent {
 
     async handleConnectClick(e) {
         try {
-            console.log('[WalletUI] Handle connect click called');
+            this.debug('Handle connect click called');
             e.preventDefault();
             const result = await this.connectWallet();
-            console.log('[WalletUI] Connect result:', result);
+            this.debug('Connect result:', result);
             if (result && result.account) {
                 this.updateUI(result.account);
                 // Trigger app-level wallet connection handler
@@ -72,7 +78,7 @@ export class WalletUI extends BaseComponent {
 
     async connectWallet() {
         try {
-            console.log('[WalletUI] Connecting wallet...');
+            this.debug('Connecting wallet...');
             const result = await walletManager.connect();
             return result;
         } catch (error) {
@@ -84,7 +90,7 @@ export class WalletUI extends BaseComponent {
 
     async init() {
         try {
-            console.log('[WalletUI] Starting init...');
+            this.debug('Starting init...');
             
             if (typeof window.ethereum === 'undefined') {
                 console.error('[WalletUI] MetaMask is not installed!');
@@ -97,7 +103,7 @@ export class WalletUI extends BaseComponent {
             // Check if already connected
             const accounts = await window.ethereum.request({ method: 'eth_accounts' });
             if (accounts && accounts.length > 0) {
-                console.log('[WalletUI] Found existing connection, connecting...');
+                this.debug('Found existing connection, connecting...');
                 await this.connectWallet();
             }
             
@@ -112,7 +118,7 @@ export class WalletUI extends BaseComponent {
         // Update disconnect button handler
         this.disconnectButton.addEventListener('click', async (e) => {
             e.preventDefault();
-            console.log('[WalletUI] Disconnect button clicked');
+            this.debug('Disconnect button clicked');
             try {
                 // Clear our app's connection state
                 await walletManager.disconnect();
@@ -138,26 +144,25 @@ export class WalletUI extends BaseComponent {
 
         // Setup wallet manager listeners
         walletManager.addListener((event, data) => {
-            console.log('[WalletUI] Wallet event:', event, data);
+            this.debug('Wallet event:', event, data);
             switch (event) {
                 case 'connect':
-                    console.log('[WalletUI] Connect event received');
+                    this.debug('Connect event received');
                     this.updateUI(data.account);
-                    // Trigger app-level wallet connection handler
                     if (window.app && typeof window.app.handleWalletConnect === 'function') {
                         window.app.handleWalletConnect(data.account);
                     }
                     break;
                 case 'disconnect':
-                    console.log('[WalletUI] Disconnect event received');
+                    this.debug('Disconnect event received');
                     this.showConnectButton();
                     break;
                 case 'accountsChanged':
-                    console.log('[WalletUI] Account change event received');
+                    this.debug('Account change event received');
                     this.updateUI(data.account);
                     break;
                 case 'chainChanged':
-                    console.log('[WalletUI] Chain change event received');
+                    this.debug('Chain change event received');
                     this.updateNetworkBadge(data.chainId);
                     break;
             }
@@ -166,27 +171,25 @@ export class WalletUI extends BaseComponent {
 
     updateUI(account) {
         try {
-            console.log('[WalletUI] Updating UI with account:', account);
+            this.debug('Updating UI with account:', account);
             if (!account) {
-                console.log('[WalletUI] No account provided, showing connect button');
+                this.debug('No account provided, showing connect button');
                 this.showConnectButton();
                 return;
             }
 
             const shortAddress = `${account.slice(0, 6)}...${account.slice(-4)}`;
-            console.log('[WalletUI] Setting short address:', shortAddress);
+            this.debug('Setting short address:', shortAddress);
             
-            // Use classList instead of style.display
             this.connectButton.classList.add('hidden');
             this.walletInfo.classList.remove('hidden');
-            
             this.accountAddress.textContent = shortAddress;
             
             if (walletManager.chainId) {
                 this.updateNetworkBadge(walletManager.chainId);
             }
             
-            console.log('[WalletUI] UI updated successfully');
+            this.debug('UI updated successfully');
         } catch (error) {
             console.error('[WalletUI] Error in updateUI:', error);
         }
@@ -194,13 +197,10 @@ export class WalletUI extends BaseComponent {
 
     showConnectButton() {
         try {
-            console.log('[WalletUI] Showing connect button');
-            
-            // Use classList instead of style.display
+            this.debug('Showing connect button');
             this.connectButton.classList.remove('hidden');
             this.walletInfo.classList.add('hidden');
-            
-            console.log('[WalletUI] Connect button shown');
+            this.debug('Connect button shown');
         } catch (error) {
             console.error('[WalletUI] Error in showConnectButton:', error);
         }
@@ -208,7 +208,7 @@ export class WalletUI extends BaseComponent {
 
     updateNetworkBadge(chainId) {
         try {
-            console.log('[WalletUI] Updating network badge for chain:', chainId);
+            this.debug('Updating network badge for chain:', chainId);
             const networkBadge = document.querySelector('.network-badge');
             if (!networkBadge) {
                 console.error('[WalletUI] Network badge element not found');
@@ -216,7 +216,7 @@ export class WalletUI extends BaseComponent {
             }
 
             const decimalChainId = parseInt(chainId, 16).toString();
-            console.log('[WalletUI] Decimal chain ID:', decimalChainId);
+            this.debug('Decimal chain ID:', decimalChainId);
 
             if (decimalChainId === "80002") {
                 networkBadge.textContent = "Amoy";
@@ -227,7 +227,7 @@ export class WalletUI extends BaseComponent {
                 networkBadge.classList.add('wrong-network');
                 networkBadge.classList.remove('connected');
             }
-            console.log('[WalletUI] Network badge updated');
+            this.debug('Network badge updated');
         } catch (error) {
             console.error('[WalletUI] Error updating network badge:', error);
         }

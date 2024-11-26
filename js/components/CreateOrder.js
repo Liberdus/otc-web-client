@@ -1,6 +1,6 @@
 import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
-import { getNetworkConfig } from '../config.js';
+import { getNetworkConfig, isDebugEnabled } from '../config.js';
 
 export class CreateOrder extends BaseComponent {
     constructor() {
@@ -10,15 +10,21 @@ export class CreateOrder extends BaseComponent {
         this.initialized = false;
         this.tokenCache = new Map();
         this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
+        
+        // Initialize debug logger
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('CREATE_ORDER')) {
+                console.log('[CreateOrder]', message, ...args);
+            }
+        };
     }
 
     async initializeContract() {
         try {
-            console.log('[CreateOrder] Initializing contract...');
+            this.debug('Initializing contract...');
             const networkConfig = getNetworkConfig();
             
-            // Debug log to check network config
-            console.log('[CreateOrder] Network config:', {
+            this.debug('Network config:', {
                 address: networkConfig.contractAddress,
                 abiLength: networkConfig.contractABI?.length
             });
@@ -38,7 +44,7 @@ export class CreateOrder extends BaseComponent {
                 signer
             );
             
-            console.log('[CreateOrder] Contract initialized successfully');
+            this.debug('Contract initialized successfully');
             return this.contract;
         } catch (error) {
             console.error('[CreateOrder] Contract initialization error:', error);
@@ -49,7 +55,7 @@ export class CreateOrder extends BaseComponent {
     async initialize(readOnlyMode = true) {
         if (this.initialized) return;
         try {
-            console.log('[CreateOrder] Starting initialization...');
+            this.debug('Starting initialization...');
             
             if (readOnlyMode) {
                 this.setReadOnlyMode();
@@ -67,7 +73,7 @@ export class CreateOrder extends BaseComponent {
             this.setupTokenInputListeners();
             this.setupCreateOrderListener();
             
-            console.log('[CreateOrder] Initialization complete');
+            this.debug('Initialization complete');
             this.initialized = true;
         } catch (error) {
             console.error('[CreateOrder] Error in initialization:', error);
@@ -77,7 +83,7 @@ export class CreateOrder extends BaseComponent {
 
     async loadOrderCreationFee() {
         try {
-            console.log('[CreateOrder] Loading order creation fee...');
+            this.debug('Loading order creation fee...');
             if (!this.contract) {
                 throw new Error('Contract not initialized');
             }
@@ -89,7 +95,7 @@ export class CreateOrder extends BaseComponent {
                 orderCreationFee.textContent = `${feeInEth} POL (Avg Gas: ${averageGas})`;
                 orderCreationFee.classList.remove('placeholder-text');
             }
-            console.log('[CreateOrder] Fee loaded:', feeInEth, 'Average Gas:', averageGas);
+            this.debug('Fee loaded:', feeInEth, 'Average Gas:', averageGas);
         } catch (error) {
             console.error('[CreateOrder] Error loading fee:', error);
             const orderCreationFee = document.getElementById('orderCreationFee');
@@ -176,7 +182,6 @@ export class CreateOrder extends BaseComponent {
             const createOrderBtn = document.getElementById('createOrderBtn');
             createOrderBtn.disabled = true;
             
-            // Add provider check
             if (!this.provider || !this.contract) {
                 throw new Error('Contract or provider not initialized');
             }
@@ -245,7 +250,7 @@ export class CreateOrder extends BaseComponent {
             // Get the order creation fee
             const fee = await this.contract.orderCreationFee();
 
-            console.log('[CreateOrder] Sending create order transaction with params:', {
+            this.debug('Sending create order transaction with params:', {
                 taker: partner || ethers.constants.AddressZero,
                 sellToken,
                 sellAmount,
@@ -263,11 +268,11 @@ export class CreateOrder extends BaseComponent {
                 { value: fee }
             );
 
-            console.log('[CreateOrder] Transaction sent:', tx.hash);
+            this.debug('Transaction sent:', tx.hash);
             this.showSuccess('Order creation transaction submitted');
 
             const receipt = await tx.wait();
-            console.log('[CreateOrder] Transaction confirmed:', receipt);
+            this.debug('Transaction confirmed:', receipt);
             
             // Refresh the fee after order creation
             await this.loadOrderCreationFee();
@@ -275,7 +280,7 @@ export class CreateOrder extends BaseComponent {
             // Look for OrderCreated event
             const orderCreatedEvent = receipt.events?.find(e => e.event === 'OrderCreated');
             if (orderCreatedEvent) {
-                console.log('[CreateOrder] OrderCreated event found:', orderCreatedEvent);
+                this.debug('OrderCreated event found:', orderCreatedEvent);
             } else {
                 console.warn('[CreateOrder] No OrderCreated event found in receipt');
             }

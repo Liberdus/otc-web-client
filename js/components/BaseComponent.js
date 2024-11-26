@@ -1,6 +1,7 @@
 import { walletManager } from '../config.js';
 import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
+import { isDebugEnabled } from '../config.js';
 
 console.log('BaseComponent.js loaded');
 
@@ -16,6 +17,12 @@ export class BaseComponent {
         this.tokenCache = new Map();
         // Initialize provider from window.walletManager if available
         this.provider = window.walletManager?.provider || null;
+
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('COMPONENTS')) {
+                console.log(`[${this.constructor.name}]`, message, ...args);
+            }
+        };
     }
 
     createElement(tag, className = '', textContent = '') {
@@ -235,7 +242,7 @@ export class BaseComponent {
             stack: error.stack,
         };
 
-        console.error(prefix, JSON.stringify(errorDetails, null, 2));
+        this.debug('Detailed error:', prefix, errorDetails);
         return errorDetails;
     }
 

@@ -2,6 +2,7 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
+import { isDebugEnabled } from '../config.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -11,12 +12,19 @@ export class ViewOrders extends BaseComponent {
         this.provider = new ethers.providers.Web3Provider(window.ethereum);
         this.setupErrorHandling();
         this.eventSubscriptions = new Set();
+        
+        // Initialize debug logger with VIEW_ORDERS flag
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('VIEW_ORDERS')) {
+                console.log('[ViewOrders]', message, ...args);
+            }
+        };
     }
 
     setupErrorHandling() {
         if (!window.webSocket) {
             if (!this._retryAttempt) {
-                console.log('[ViewOrders] WebSocket not available, waiting for initialization...');
+                this.debug('WebSocket not available, waiting for initialization...');
                 this._retryAttempt = true;
             }
             setTimeout(() => this.setupErrorHandling(), 1000);
@@ -57,6 +65,7 @@ export class ViewOrders extends BaseComponent {
 
     async initialize(readOnlyMode = true) {
         try {
+            this.debug('Initializing ViewOrders component');
             // Cleanup previous state
             this.cleanup();
             this.container.innerHTML = '';
@@ -65,7 +74,7 @@ export class ViewOrders extends BaseComponent {
             
             // Wait for WebSocket to be initialized
             if (!window.webSocket?.isInitialized) {
-                console.log('[ViewOrders] Waiting for WebSocket initialization...');
+                this.debug('Waiting for WebSocket initialization...');
                 await new Promise(resolve => {
                     const checkInterval = setInterval(() => {
                         if (window.webSocket?.isInitialized) {
@@ -82,7 +91,7 @@ export class ViewOrders extends BaseComponent {
             // Get initial orders from cache
             const cachedOrders = window.webSocket.getOrders();
             if (cachedOrders && cachedOrders.length > 0) {
-                console.log('[ViewOrders] Loading orders from cache:', cachedOrders);
+                this.debug('Loading orders from cache:', cachedOrders);
                 // Clear existing orders before adding new ones
                 this.orders.clear();
                 cachedOrders.forEach(order => {
@@ -100,7 +109,7 @@ export class ViewOrders extends BaseComponent {
     }
 
     async setupWebSocket() {
-        console.log('[ViewOrders] Setting up WebSocket subscriptions');
+        this.debug('Setting up WebSocket subscriptions');
         
         // Clear existing subscriptions
         this.eventSubscriptions.clear();
@@ -114,7 +123,7 @@ export class ViewOrders extends BaseComponent {
         this.eventSubscriptions.add({
             event: 'orderSyncComplete',
             callback: (orders) => {
-                console.log('[ViewOrders] Received order sync:', orders);
+                this.debug('Received order sync:', orders);
                 this.orders.clear();
                 Object.entries(orders).forEach(([orderId, orderData]) => {
                     this.orders.set(Number(orderId), {
@@ -129,7 +138,7 @@ export class ViewOrders extends BaseComponent {
         this.eventSubscriptions.add({
             event: 'OrderCreated',
             callback: (orderData) => {
-                console.log('[ViewOrders] New order received:', orderData);
+                this.debug('New order received:', orderData);
                 this.orders.set(Number(orderData.id), orderData);
                 this.refreshOrdersView().catch(error => {
                     console.error('[ViewOrders] Error refreshing view after new order:', error);
@@ -137,11 +146,10 @@ export class ViewOrders extends BaseComponent {
             }
         });
 
-        // Add OrderFilled subscription
         this.eventSubscriptions.add({
             event: 'OrderFilled',
             callback: (orderData) => {
-                console.log('[ViewOrders] Order filled:', orderData);
+                this.debug('Order filled:', orderData);
                 const order = this.orders.get(Number(orderData.id));
                 if (order) {
                     order.status = 'Filled';
@@ -153,11 +161,10 @@ export class ViewOrders extends BaseComponent {
             }
         });
 
-        // Add OrderCanceled subscription
         this.eventSubscriptions.add({
             event: 'OrderCanceled',
             callback: (orderData) => {
-                console.log('[ViewOrders] Order canceled:', orderData);
+                this.debug('Order canceled:', orderData);
                 this.removeOrderFromTable(orderData.id);
                 this.refreshOrdersView().catch(error => {
                     console.error('[ViewOrders] Error refreshing view after order cancel:', error);
@@ -165,27 +172,16 @@ export class ViewOrders extends BaseComponent {
             }
         });
 
-        // Register subscriptions
         if (window.webSocket) {
-            console.log('[ViewOrders] Current subscribers before registration:', 
-                Array.from(window.webSocket.subscribers.entries())
-                    .map(([event, subs]) => `${event}: ${subs.size} subscribers`)
-            );
-            
+            this.debug('Registering WebSocket subscriptions');
             this.eventSubscriptions.forEach(sub => {
-                console.log('[ViewOrders] Registering subscription for event:', sub.event);
                 window.webSocket.subscribe(sub.event, sub.callback);
             });
-            
-            console.log('[ViewOrders] Subscribers after registration:', 
-                Array.from(window.webSocket.subscribers.entries())
-                    .map(([event, subs]) => `${event}: ${subs.size} subscribers`)
-            );
         }
     }
 
     async refreshOrdersView() {
-        console.log('[ViewOrders] Refreshing view with orders:', Array.from(this.orders.values()));
+        this.debug('Refreshing orders view');
         try {
             // Get contract instance first
             this.contract = await this.getContract();
@@ -196,14 +192,14 @@ export class ViewOrders extends BaseComponent {
             // Clear existing orders from table
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
-                console.warn('[ViewOrders] Table body not found');
+                this.debug('Table body not found');
                 return;
             }
             tbody.innerHTML = '';
 
             // Check if we have any orders
             if (!this.orders || this.orders.size === 0) {
-                console.log('[ViewOrders] No orders to display');
+                this.debug('No orders to display');
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="no-orders-message">
@@ -222,12 +218,7 @@ export class ViewOrders extends BaseComponent {
                 if (order?.buyToken) tokenAddresses.add(order.buyToken);
             });
 
-            if (tokenAddresses.size === 0) {
-                console.log('[ViewOrders] No token addresses found');
-                return;
-            }
-
-            console.log('[ViewOrders] Getting details for tokens:', Array.from(tokenAddresses));
+            this.debug('Getting token details for addresses:', Array.from(tokenAddresses));
             const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
             
             const tokenDetailsMap = new Map();

@@ -1,6 +1,6 @@
 import { BaseComponent } from './components/BaseComponent.js';
 import { CreateOrder } from './components/CreateOrder.js';
-import { walletManager, WalletManager, getNetworkConfig, getAllNetworks } from './config.js';
+import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled } from './config.js';
 import { WalletUI } from './components/WalletUI.js';
 import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
@@ -68,7 +68,7 @@ class App {
         // Add wallet connection state handler
         walletManager.addListener((event, data) => {
             if (event === 'connect') {
-                console.log('[App] Wallet connected, reinitializing components...');
+                this.debug('Wallet connected, reinitializing components...');
                 this.reinitializeComponents();
             }
         });
@@ -81,19 +81,28 @@ class App {
 
         // Add WebSocket event handlers for order updates
         window.webSocket?.subscribe('OrderCreated', () => {
-            console.log('[App] Order created, refreshing components...');
+            this.debug('Order created, refreshing components...');
             this.refreshActiveComponent();
         });
 
         window.webSocket?.subscribe('OrderFilled', () => {
-            console.log('[App] Order filled, refreshing components...');
+            this.debug('Order filled, refreshing components...');
             this.refreshActiveComponent();
         });
 
         window.webSocket?.subscribe('OrderCanceled', () => {
-            console.log('[App] Order canceled, refreshing components...');
+            this.debug('Order canceled, refreshing components...');
             this.refreshActiveComponent();
         });
+
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('APP')) {
+                console.log('[App]', message, ...args);
+            }
+        };
+
+        // Initialize debug panel
+        this.initializeDebugPanel();
     }
 
     initializeEventListeners() {
@@ -108,8 +117,38 @@ class App {
         });
     }
 
+    initializeDebugPanel() {
+        // Show debug panel with keyboard shortcut (Ctrl+Shift+D)
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+                const panel = document.querySelector('.debug-panel');
+                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            }
+        });
+
+        // Initialize checkboxes from localStorage
+        const savedDebug = localStorage.getItem('debug');
+        if (savedDebug) {
+            const settings = JSON.parse(savedDebug);
+            document.querySelectorAll('[data-debug]').forEach(checkbox => {
+                checkbox.checked = settings[checkbox.dataset.debug] ?? false;
+            });
+        }
+
+        // Handle apply button
+        document.getElementById('applyDebug')?.addEventListener('click', () => {
+            const settings = {};
+            document.querySelectorAll('[data-debug]').forEach(checkbox => {
+                settings[checkbox.dataset.debug] = checkbox.checked;
+            });
+            localStorage.setItem('debug', JSON.stringify(settings));
+            location.reload(); // Reload to apply new debug settings
+        });
+    }
+
     async initialize() {
         try {
+            this.debug('Starting initialization...');
             // Initialize wallet manager with autoConnect parameter
             window.walletManager = walletManager;
             await walletManager.init(true);
@@ -126,7 +165,7 @@ class App {
             
             console.log('[App] Initialization complete');
         } catch (error) {
-            console.error('[App] Initialization error:', error);
+            this.debug('Initialization error:', error);
         }
     }
 
@@ -235,7 +274,7 @@ class App {
 
     async showTab(tabId) {
         try {
-            console.log('[App] Switching to tab:', tabId);
+            this.debug('Switching to tab:', tabId);
             
             // Hide all tab content
             document.querySelectorAll('.tab-content').forEach(tab => {
@@ -264,7 +303,7 @@ class App {
             }
             
             this.currentTab = tabId;
-            console.log('[App] Tab switch complete:', tabId);
+            this.debug('Tab switch complete:', tabId);
         } catch (error) {
             console.error('[App] Error showing tab:', error);
         }
@@ -273,13 +312,13 @@ class App {
     // Add new method to reinitialize components
     async reinitializeComponents() {
         if (this.isReinitializing) {
-            console.log('[App] Already reinitializing, skipping...');
+            this.debug('Already reinitializing, skipping...');
             return;
         }
         this.isReinitializing = true;
         
         try {
-            console.log('[App] Reinitializing components with wallet...');
+            this.debug('Reinitializing components with wallet...');
             
             // Create and initialize CreateOrder component when wallet is connected
             const createOrderComponent = new CreateOrder();
@@ -289,7 +328,7 @@ class App {
             // Reinitialize only the current tab's component
             const currentComponent = this.components[this.currentTab];
             if (currentComponent && typeof currentComponent.initialize === 'function') {
-                console.log(`[App] Reinitializing current component: ${this.currentTab}`);
+                this.debug(`Reinitializing current component: ${this.currentTab}`);
                 try {
                     await currentComponent.initialize(false);
                 } catch (error) {
@@ -300,7 +339,7 @@ class App {
             // Re-show the current tab
             await this.showTab(this.currentTab);
             
-            console.log('[App] Components reinitialized');
+            this.debug('Components reinitialized');
         } finally {
             this.isReinitializing = false;
         }
@@ -310,7 +349,7 @@ class App {
     async refreshActiveComponent() {
         const activeComponent = this.components[this.currentTab];
         if (activeComponent?.initialize) {
-            console.log('[App] Refreshing active component:', this.currentTab);
+            this.debug('Refreshing active component:', this.currentTab);
             await activeComponent.initialize(false);
         }
     }
@@ -329,7 +368,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw error;
         });
         
-        console.log('[App] Initialization complete');
+        window.app.debug('Initialization complete');
     } catch (error) {
         console.error('[App] App initialization error:', error);
     }

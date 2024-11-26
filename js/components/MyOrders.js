@@ -1,25 +1,33 @@
 import { ViewOrders } from './ViewOrders.js';
 import { ethers } from 'ethers';
+import { isDebugEnabled } from '../config.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
+        
+        // Initialize debug logger
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('MY_ORDERS')) {
+                console.log('[MyOrders]', message, ...args);
+            }
+        };
     }
 
     async initialize() {
         try {
-            console.log('[MyOrders] Starting initialization...');
+            this.debug('Starting initialization...');
             // Cleanup previous state
             this.cleanup();
-            console.log('[MyOrders] Container HTML before clear:', this.container.innerHTML);
+            this.debug('Container HTML before clear:', this.container.innerHTML);
             this.container.innerHTML = '';
             
             await this.setupTable();
-            console.log('[MyOrders] Table setup complete');
+            this.debug('Table setup complete');
             
             // Wait for WebSocket initialization (reusing parent class method)
             if (!window.webSocket?.isInitialized) {
-                console.log('[MyOrders] Waiting for WebSocket initialization...');
+                this.debug('Waiting for WebSocket initialization...');
                 await new Promise(resolve => {
                     const checkInterval = setInterval(() => {
                         if (window.webSocket?.isInitialized) {
@@ -39,7 +47,7 @@ export class MyOrders extends ViewOrders {
                 .filter(order => order.maker.toLowerCase() === userAddress.toLowerCase());
 
             if (cachedOrders.length > 0) {
-                console.log('[MyOrders] Loading orders from cache:', cachedOrders);
+                this.debug('Loading orders from cache:', cachedOrders);
                 cachedOrders.forEach(order => {
                     this.orders.set(order.id, order);
                 });
@@ -92,7 +100,7 @@ export class MyOrders extends ViewOrders {
             callback: async (orderData) => {
                 const userAddress = await window.walletManager.getAccount();
                 if (orderData.maker.toLowerCase() === userAddress.toLowerCase()) {
-                    console.log('[MyOrders] New order received:', orderData);
+                    this.debug('New order received:', orderData);
                     this.orders.set(orderData.id, orderData);
                     this.refreshOrdersView().catch(error => {
                         console.error('[MyOrders] Error refreshing after new order:', error);
@@ -106,7 +114,7 @@ export class MyOrders extends ViewOrders {
             this.eventSubscriptions.add({
                 event,
                 callback: (order) => {
-                    console.log(`[MyOrders] Order ${event.toLowerCase()}:`, order);
+                    this.debug(`Order ${event.toLowerCase()}:`, order);
                     if (this.orders.has(order.id)) {
                         this.orders.get(order.id).status = event === 'OrderFilled' ? 'Filled' : 'Canceled';
                         this.refreshOrdersView().catch(error => {
@@ -123,32 +131,6 @@ export class MyOrders extends ViewOrders {
         });
     }
 
-    async createOrderRow(order, tokenDetailsMap) {
-        const tr = await super.createOrderRow(order, tokenDetailsMap);
-        
-        // Replace the action column based on order status
-        const actionCell = tr.querySelector('td.action-column');
-        if (actionCell) {
-            const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
-            
-            if (status === 'Active') {
-                actionCell.innerHTML = `
-                    <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
-                `;
-                
-                // Add click handler for cancel button
-                const cancelButton = actionCell.querySelector('.cancel-button');
-                if (cancelButton) {
-                    cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
-                }
-            } else {
-                actionCell.innerHTML = `<span class="order-status status-${status.toLowerCase()}">${status}</span>`;
-            }
-        }
-
-        return tr;
-    }
-
     async cancelOrder(orderId) {
         try {
             // Find the button first using container instead of tbody
@@ -158,9 +140,11 @@ export class MyOrders extends ViewOrders {
                 button.textContent = 'Canceling...';
             }
 
+            this.debug('Canceling order:', orderId);
             // Get the contract instance and cancel the order
             const contract = await this.getContract();
             const tx = await contract.cancelOrder(orderId);
+            this.debug('Cancel transaction submitted:', tx.hash);
             await tx.wait();
 
             // Success message
@@ -179,5 +163,45 @@ export class MyOrders extends ViewOrders {
                 button.textContent = 'Cancel';
             }
         }
+    }
+
+    async createOrderRow(order, tokenDetailsMap) {
+        const tr = this.createElement('tr');
+        tr.dataset.orderId = order.id.toString();
+
+        const sellTokenDetails = tokenDetailsMap.get(order.sellToken);
+        const buyTokenDetails = tokenDetailsMap.get(order.buyToken);
+        const expiryTime = this.getExpiryTime(order.timestamp);
+        const status = this.getOrderStatus(order, expiryTime);
+
+        // Format taker display
+        const takerDisplay = order.taker === ethers.constants.AddressZero 
+            ? '<span class="open-order">Open to All</span>'
+            : `<span class="targeted-order" title="${order.taker}">Specific Taker</span>`;
+
+        tr.innerHTML = `
+            <td>${order.id}</td>
+            <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
+            <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
+            <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
+            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
+            <td>${this.formatTimestamp(order.timestamp)}</td>
+            <td>${this.formatExpiry(order.timestamp)}</td>
+            <td class="order-status">${status}</td>
+            <td class="taker-column">${takerDisplay}</td>
+            <td class="action-column">
+                ${status === 'Active' ? 
+                    `<button class="cancel-button" data-order-id="${order.id}">Cancel</button>` : 
+                    '<span class="order-completed">Completed</span>'
+                }
+            </td>`;
+
+        // Add click handler for cancel button
+        const cancelButton = tr.querySelector('.cancel-button');
+        if (cancelButton) {
+            cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+        }
+
+        return tr;
     }
 }
