@@ -23,10 +23,26 @@ body {
     border-bottom: 1px solid #e9ecef;
 }
 
+.header-left .logo-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo-image {
+    height: 32px;
+    width: auto;
+    object-fit: contain;
+}
+
 .header-left h1 {
     margin: 0;
-    font-size: 1.5rem;
-    color: #333;
+    font-size: 32px;
+    color: #1a1a1a;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    line-height: 32px;
 }
 
 .header-right {
@@ -97,3 +113,6 @@ body {
 @-moz-document url-prefix() {
     /* Add Firefox-specific rules here */
 }
+
+/* Add Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
