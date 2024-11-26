@@ -10,6 +10,7 @@ export class CreateOrder extends BaseComponent {
         this.initialized = false;
         this.tokenCache = new Map();
         this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
+        this.isSubmitting = false;
         
         // Initialize debug logger
         this.debug = (message, ...args) => {
@@ -90,9 +91,18 @@ export class CreateOrder extends BaseComponent {
             const fee = await this.contract.orderCreationFee();
             const averageGas = await this.contract.averageGasUsed();
             const feeInEth = ethers.utils.formatEther(fee);
+            
+            // Format the fee to be more readable
+            const formattedFee = parseFloat(feeInEth).toFixed(6); // Show 6 decimal places
+            const formattedGas = averageGas.toNumber().toLocaleString(); // Add thousands separator
+            
             const orderCreationFee = document.getElementById('orderCreationFee');
             if (orderCreationFee) {
-                orderCreationFee.textContent = `${feeInEth} POL (Avg Gas: ${averageGas})`;
+                orderCreationFee.innerHTML = `
+                    <div class="fee-details">
+                        <div class="fee-amount">${formattedFee} POL</div>
+                        <div class="fee-gas">Average Gas: ${formattedGas}</div>
+                    </div>`;
                 orderCreationFee.classList.remove('placeholder-text');
             }
             this.debug('Fee loaded:', feeInEth, 'Average Gas:', averageGas);
@@ -170,17 +180,27 @@ export class CreateOrder extends BaseComponent {
 
     setupCreateOrderListener() {
         const createOrderBtn = document.getElementById('createOrderBtn');
-        // Remove existing listener
-        createOrderBtn.removeEventListener('click', this.boundCreateOrderHandler);
-        // Add new listener
-        createOrderBtn.addEventListener('click', this.boundCreateOrderHandler);
+        // Remove ALL existing listeners using clone technique
+        const newButton = createOrderBtn.cloneNode(true);
+        createOrderBtn.parentNode.replaceChild(newButton, createOrderBtn);
+        // Add single new listener
+        newButton.addEventListener('click', this.boundCreateOrderHandler);
     }
 
     async handleCreateOrder(event) {
         event.preventDefault();
+        
+        // Prevent double submission
+        if (this.isSubmitting) {
+            this.debug('Order submission already in progress');
+            return;
+        }
+
+        const createOrderBtn = document.getElementById('createOrderBtn');
         try {
-            const createOrderBtn = document.getElementById('createOrderBtn');
+            this.isSubmitting = true;
             createOrderBtn.disabled = true;
+            createOrderBtn.textContent = 'Processing...';
             
             if (!this.provider || !this.contract) {
                 throw new Error('Contract or provider not initialized');
@@ -301,8 +321,9 @@ export class CreateOrder extends BaseComponent {
             const errorMessage = this.getReadableError(error);
             this.showError(errorMessage);
         } finally {
-            const createOrderBtn = document.getElementById('createOrderBtn');
+            this.isSubmitting = false;
             createOrderBtn.disabled = false;
+            createOrderBtn.textContent = 'Create Order';
         }
     }
 

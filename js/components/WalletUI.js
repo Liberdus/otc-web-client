@@ -127,8 +127,20 @@ export class WalletUI extends BaseComponent {
                 this.showConnectButton();
                 this.accountAddress.textContent = '';
                 
-                // Show message to user
-                const message = "Note: To fully disconnect MetaMask, please lock your wallet manually through the MetaMask extension.";
+                // Clear any cached provider state
+                if (window.ethereum) {
+                    // Remove all listeners to ensure clean slate
+                    window.ethereum.removeAllListeners();
+                    // Re-initialize necessary listeners
+                    this.setupEventListeners();
+                }
+                
+                // Show more detailed message to user
+                const message = "Wallet disconnected from this site. For complete security:\n" +
+                              "1. Open MetaMask extension\n" +
+                              "2. Click on your account icon\n" +
+                              "3. Select 'Lock' or 'Disconnect this site'";
+                
                 if (window.app && typeof window.app.showSuccess === 'function') {
                     window.app.showSuccess(message);
                 }
