@@ -14,6 +14,26 @@
         padding: 0;
         box-sizing: border-box;
       }
+      .debug-panel {
+        position: fixed;
+        bottom: 0;
+        right: 0;
+        background: rgba(0,0,0,0.8);
+        color: #fff;
+        padding: 10px;
+        border-radius: 5px 0 0 0;
+        z-index: 9999;
+      }
+      .debug-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .debug-controls label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
     </style>
     <link rel="stylesheet" href="css/styles.css" />
     <link rel="stylesheet" href="css/components/forms.css" />
@@ -91,6 +111,16 @@
           </div>
         </div>
       </header>
+      <div class="debug-panel" style="display: none;">
+        <div class="debug-controls">
+          <h3>Debug Settings</h3>
+          <label><input type="checkbox" data-debug="APP"> App</label>
+          <label><input type="checkbox" data-debug="WEBSOCKET"> WebSocket</label>
+          <label><input type="checkbox" data-debug="COMPONENTS"> Components</label>
+          <label><input type="checkbox" data-debug="WALLET"> Wallet</label>
+          <button id="applyDebug">Apply</button>
+        </div>
+      </div>
 
       <main class="main-content">
         <div class="content-wrapper">

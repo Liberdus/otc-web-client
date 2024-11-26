@@ -27,6 +27,28 @@ const networkConfig = {
 
 export const getAllNetworks = () => Object.values(networkConfig);
 
+export const DEBUG_CONFIG = {
+    APP: false,
+    WEBSOCKET: false,
+    COMPONENTS: false,
+    WALLET: false,
+    VIEW_ORDERS: false,
+    CREATE_ORDER: false,
+    MY_ORDERS: false,
+    WALLET_UI: false,
+    // Add more specific flags as needed
+};
+
+export const isDebugEnabled = (component) => {
+    // Check if debug mode is forced via localStorage
+    const localDebug = localStorage.getItem('debug');
+    if (localDebug) {
+        const debugSettings = JSON.parse(localDebug);
+        return debugSettings[component] ?? DEBUG_CONFIG[component];
+    }
+    return DEBUG_CONFIG[component];
+};
+
 export class WalletManager {
     constructor() {
         this.listeners = new Set();
