@@ -662,6 +662,11 @@ export class ViewOrders extends BaseComponent {
         const canFill = await this.canFillOrder(order);
         const expiryTime = this.getExpiryTime(order.timestamp);
         const status = this.getOrderStatus(order, expiryTime);
+        
+        // Get current account first
+        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+        const currentAccount = accounts[0]?.toLowerCase();
+        const isUserOrder = order.maker?.toLowerCase() === currentAccount;
 
         // Format taker display
         const takerDisplay = order.taker === ethers.constants.AddressZero 
@@ -680,7 +685,7 @@ export class ViewOrders extends BaseComponent {
             <td class="taker-column">${takerDisplay}</td>
             <td class="action-column">${canFill ? 
                 `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>` : 
-                order.maker?.toLowerCase() === window.ethereum?.selectedAddress?.toLowerCase() ?
+                isUserOrder ?
                 '<span class="your-order">Your Order</span>' : 
                 ''
             }</td>`;
