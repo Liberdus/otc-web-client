@@ -369,7 +369,45 @@ export class ViewOrders extends BaseComponent {
     async setupTable() {
         const tableContainer = this.createElement('div', 'table-container');
         
-        // Add filter controls with pagination
+        // Create top pagination controls with dropdown
+        const createTopControls = () => `
+            <div class="pagination-controls">
+                <select id="page-size-select" class="page-size-select">
+                    <option value="10">10 per page</option>
+                    <option value="25">25 per page</option>
+                    <option value="50">50 per page</option>
+                    <option value="100">100 per page</option>
+                    <option value="-1">View all</option>
+                </select>
+                
+                <div class="pagination-buttons">
+                    <button class="pagination-button prev-page" title="Previous page">
+                        ←
+                    </button>
+                    <span class="page-info">Page 1 of 1</span>
+                    <button class="pagination-button next-page" title="Next page">
+                        →
+                    </button>
+                </div>
+            </div>
+        `;
+
+        // Create bottom pagination controls without dropdown
+        const createBottomControls = () => `
+            <div class="pagination-controls">
+                <div class="pagination-buttons">
+                    <button class="pagination-button prev-page" title="Previous page">
+                        ←
+                    </button>
+                    <span class="page-info">Page 1 of 1</span>
+                    <button class="pagination-button next-page" title="Next page">
+                        →
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Add top filter controls with pagination
         const filterControls = this.createElement('div', 'filter-controls');
         filterControls.innerHTML = `
             <div class="filter-row">
@@ -377,55 +415,13 @@ export class ViewOrders extends BaseComponent {
                     <input type="checkbox" id="fillable-orders-toggle">
                     <span>Show only fillable orders</span>
                 </label>
-                
-                <div class="pagination-controls">
-                    <select id="page-size-select" class="page-size-select">
-                        <option value="10">10 per page</option>
-                        <option value="25">25 per page</option>
-                        <option value="50">50 per page</option>
-                        <option value="100">100 per page</option>
-                        <option value="-1">View all</option>
-                    </select>
-                    
-                    <div class="pagination-buttons">
-                        <button id="prev-page" class="pagination-button" disabled>Previous</button>
-                        <span id="page-info" class="page-info">Page 1 of 1</span>
-                        <button id="next-page" class="pagination-button" disabled>Next</button>
-                    </div>
-                </div>
+                ${createTopControls()}
             </div>
         `;
         
-        // Add event listeners
-        const toggle = filterControls.querySelector('#fillable-orders-toggle');
-        toggle.addEventListener('change', () => this.refreshOrdersView());
-        
-        const pageSizeSelect = filterControls.querySelector('#page-size-select');
-        pageSizeSelect.addEventListener('change', () => {
-            this.currentPage = 1; // Reset to first page when changing page size
-            this.refreshOrdersView();
-        });
-        
-        const prevButton = filterControls.querySelector('#prev-page');
-        const nextButton = filterControls.querySelector('#next-page');
-        
-        prevButton.addEventListener('click', () => {
-            if (this.currentPage > 1) {
-                this.currentPage--;
-                this.refreshOrdersView();
-            }
-        });
-        
-        nextButton.addEventListener('click', () => {
-            const totalPages = this.getTotalPages();
-            if (this.currentPage < totalPages) {
-                this.currentPage++;
-                this.refreshOrdersView();
-            }
-        });
-        
         tableContainer.appendChild(filterControls);
         
+        // Add table
         const table = this.createElement('table', 'orders-table');
         
         const thead = this.createElement('thead');
@@ -452,6 +448,58 @@ export class ViewOrders extends BaseComponent {
         table.appendChild(thead);
         table.appendChild(this.createElement('tbody'));
         tableContainer.appendChild(table);
+        
+        // Add bottom pagination
+        const bottomControls = this.createElement('div', 'filter-controls bottom-controls');
+        bottomControls.innerHTML = `
+            <div class="filter-row">
+                ${createBottomControls()}
+            </div>
+        `;
+        tableContainer.appendChild(bottomControls);
+        
+        // Add event listeners
+        const addPaginationListeners = (container, isTop) => {
+            if (isTop) {
+                const pageSizeSelect = container.querySelector('.page-size-select');
+                if (pageSizeSelect) {
+                    pageSizeSelect.addEventListener('change', () => {
+                        this.currentPage = 1;
+                        this.refreshOrdersView();
+                    });
+                }
+            }
+            
+            const prevButton = container.querySelector('.prev-page');
+            const nextButton = container.querySelector('.next-page');
+            
+            if (prevButton) {
+                prevButton.addEventListener('click', () => {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+            
+            if (nextButton) {
+                nextButton.addEventListener('click', () => {
+                    const totalPages = this.getTotalPages();
+                    if (this.currentPage < totalPages) {
+                        this.currentPage++;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+        };
+        
+        // Add listeners to both top and bottom controls
+        addPaginationListeners(filterControls, true);
+        addPaginationListeners(bottomControls, false);
+        
+        const toggle = filterControls.querySelector('#fillable-orders-toggle');
+        toggle.addEventListener('change', () => this.refreshOrdersView());
+        
         this.container.appendChild(tableContainer);
 
         // Initialize sorting state
@@ -859,24 +907,35 @@ export class ViewOrders extends BaseComponent {
     }
 
     updatePaginationControls(filteredOrdersCount) {
-        const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-        const prevButton = this.container.querySelector('#prev-page');
-        const nextButton = this.container.querySelector('#next-page');
-        const pageInfo = this.container.querySelector('#page-info');
+        const pageSize = parseInt(this.container.querySelector('.page-size-select').value);
+        const updateControls = (container) => {
+            const prevButton = container.querySelector('.prev-page');
+            const nextButton = container.querySelector('.next-page');
+            const pageInfo = container.querySelector('.page-info');
+            const pageSizeSelect = container.querySelector('.page-size-select');
+            
+            if (pageSize === -1) {
+                prevButton.disabled = true;
+                nextButton.disabled = true;
+                pageInfo.textContent = `Showing all ${filteredOrdersCount} orders`;
+                return;
+            }
+            
+            const totalPages = Math.ceil(filteredOrdersCount / pageSize);
+            
+            prevButton.disabled = this.currentPage === 1;
+            nextButton.disabled = this.currentPage === totalPages;
+            
+            pageInfo.textContent = `Page ${this.currentPage} of ${totalPages}`;
+            
+            // Keep page size selects in sync
+            if (pageSizeSelect) {
+                pageSizeSelect.value = pageSize;
+            }
+        };
         
-        if (pageSize === -1) {
-            // View all mode
-            prevButton.disabled = true;
-            nextButton.disabled = true;
-            pageInfo.textContent = `Showing all ${filteredOrdersCount} orders`;
-            return;
-        }
-        
-        const totalPages = Math.ceil(filteredOrdersCount / pageSize);
-        
-        prevButton.disabled = this.currentPage === 1;
-        nextButton.disabled = this.currentPage === totalPages;
-        
-        pageInfo.textContent = `Page ${this.currentPage} of ${totalPages}`;
+        // Update both top and bottom controls
+        const controls = this.container.querySelectorAll('.filter-controls');
+        controls.forEach(updateControls);
     }
 }

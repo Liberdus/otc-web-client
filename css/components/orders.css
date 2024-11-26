@@ -154,17 +154,22 @@ th[data-sort].active-sort .sort-icon {
 /* Filter and Pagination Controls */
 .filter-controls {
     margin-bottom: 1rem;
-    padding: 0.75rem;
+    padding: 1rem;
     background-color: #f8f9fe;
     border-radius: 0.75rem;
     box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+.filter-controls.bottom-controls {
+    margin-top: 1rem;
+    margin-bottom: 0;
 }
 
 .filter-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 1rem;
+    gap: 1.5rem;
 }
 
 /* Filter Toggle */
@@ -194,12 +199,13 @@ th[data-sort].active-sort .sort-icon {
 .pagination-controls {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 1.5rem;
+    margin-left: auto;
 }
 
 /* Page Size Select */
 .page-size-select {
-    padding: 0.375rem 0.75rem;
+    padding: 0.5rem 2rem 0.5rem 1rem;
     border-radius: 0.5rem;
     border: 1px solid #e5e7eb;
     background-color: white;
@@ -207,6 +213,11 @@ th[data-sort].active-sort .sort-icon {
     font-size: 0.875rem;
     cursor: pointer;
     transition: all 0.2s ease;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236B7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem;
 }
 
 .page-size-select:hover {
@@ -216,7 +227,7 @@ th[data-sort].active-sort .sort-icon {
 .page-size-select:focus {
     outline: none;
     border-color: #10b981;
-    ring: 2px solid rgba(16, 185, 129, 0.2);
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
 }
 
 /* Pagination Buttons */
@@ -227,14 +238,19 @@ th[data-sort].active-sort .sort-icon {
 }
 
 .pagination-button {
-    padding: 0.375rem 0.75rem;
-    border-radius: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.375rem;
     border: 1px solid #e5e7eb;
     background-color: white;
     color: #374151;
-    font-size: 0.875rem;
+    font-size: 1rem;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
+    padding: 0;
 }
 
 .pagination-button:hover:not(:disabled) {
@@ -250,12 +266,18 @@ th[data-sort].active-sort .sort-icon {
     border-color: #e5e7eb;
 }
 
+.pagination-arrow {
+    font-size: 1rem;
+    line-height: 1;
+}
+
 /* Page Info */
 .page-info {
     font-size: 0.875rem;
     color: #6b7280;
-    min-width: 8rem;
+    min-width: 5rem;
     text-align: center;
+    font-weight: 500;
 }
 
 /* Responsive adjustments */
@@ -267,10 +289,14 @@ th[data-sort].active-sort .sort-icon {
 
     .pagination-controls {
         flex-direction: column;
-        gap: 0.75rem;
+        gap: 1rem;
     }
 
     .pagination-buttons {
         justify-content: center;
+    }
+    
+    .page-size-select {
+        width: 100%;
     }
 }

@@ -57,7 +57,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: #4B6BFB;
+  background: #4b6bfb;
   border: none;
   border-radius: 12px;
   color: white;
@@ -67,7 +67,7 @@
 }
 
 .wallet-button:hover {
-  background: #3A54D6;
+  background: #3a54d6;
 }
 
 .wallet-info {
@@ -142,4 +142,50 @@
 .network-button.single-network .chevron-down {
   display: none;
 }
- 
+
+.network-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  margin-right: 8px;
+  transition: all 0.2s ease;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: normal;
+  border-radius: 20px;
+  position: relative;
+}
+
+.network-badge::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background-color: currentColor;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+}
+
+.network-badge.connected {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.network-badge.wrong-network {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.network-button:hover .network-badge {
+  transform: none;
+  box-shadow: none;
+}
+
+.network-button.single-network {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
