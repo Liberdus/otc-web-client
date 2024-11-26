@@ -1,103 +1,147 @@
 /* Table container */
 .table-container {
-    width: 100%;
-    overflow-x: auto;
-    margin-bottom: 1.25rem;
-    border-radius: 0.75rem;
-    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
+  width: 100%;
+  overflow-x: auto;
+  margin-bottom: 1.25rem;
+  border-radius: 0.75rem;
+  box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
 }
 
 /* Table base styles */
 .orders-table {
-    width: 100%;
-    border-collapse: collapse;
-    background: #FFFFFF;
-    table-layout: fixed;
-    min-width: 64rem; /* Reduced from 1200px */
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  table-layout: fixed;
+  min-width: 64rem; /* Reduced from 1200px */
 }
 
 .orders-table thead {
-    background-color: #F8F9FE;
+  background-color: #f8f9fe;
 }
 
 /* Column widths - optimized */
-.orders-table th:nth-child(1) { width: 3rem; }   /* ID */
-.orders-table th:nth-child(2) { width: 5rem; }   /* Sell Token */
-.orders-table th:nth-child(3) { width: 6rem; }   /* Sell Amount */
-.orders-table th:nth-child(4) { width: 5rem; }   /* Buy Token */
-.orders-table th:nth-child(5) { width: 6rem; }   /* Buy Amount */
-.orders-table th:nth-child(6) { width: 8rem; }   /* Created */
-.orders-table th:nth-child(7) { width: 6rem; }   /* Expires */
-.orders-table th:nth-child(8) { width: 5rem; }   /* Status */
-.orders-table th:nth-child(9) { width: 6rem; }   /* Taker */
-.orders-table th:nth-child(10) { width: 7rem; }  /* Action */
+.orders-table th:nth-child(1) {
+  width: 3rem;
+} /* ID */
+.orders-table th:nth-child(2) {
+  width: 5rem;
+} /* Sell Token */
+.orders-table th:nth-child(3) {
+  width: 6rem;
+} /* Sell Amount */
+.orders-table th:nth-child(4) {
+  width: 5rem;
+} /* Buy Token */
+.orders-table th:nth-child(5) {
+  width: 6rem;
+} /* Buy Amount */
+.orders-table th:nth-child(6) {
+  width: 8rem;
+} /* Created */
+.orders-table th:nth-child(7) {
+  width: 6rem;
+} /* Expires */
+.orders-table th:nth-child(8) {
+  width: 5rem;
+} /* Status */
+.orders-table th:nth-child(9) {
+  width: 6rem;
+} /* Taker */
+.orders-table th:nth-child(10) {
+  width: 7rem;
+} /* Action */
 
 /* Cell styles */
 .orders-table th,
 .orders-table td {
-    padding: 0.75rem;
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 0.875rem;
+  padding: 0.75rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.875rem;
 }
 
 /* Status column specific styles */
 .order-status {
-    font-weight: 500;
+  font-weight: 500;
 }
 
 /* Action column specific styles */
 .action-column {
-    text-align: center;
+  text-align: center;
 }
 
 /* Fill button styles */
 .fill-button {
-    background-color: #10B981;
-    color: white;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 0.5rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 0.875rem;
-    text-align: center;
-    min-width: 6rem;
-    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+  background-color: #10b981;
+  color: white;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.875rem;
+  text-align: center;
+  min-width: 6rem;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
 }
 
 .fill-button:hover {
-    background-color: #059669;
-    transform: translateY(-1px);
+  background-color: #059669;
+  transform: translateY(-1px);
 }
 
 .fill-button:active {
-    transform: translateY(0);
+  transform: translateY(0);
 }
 
 /* Your order text style */
 .your-order {
-    color: #6B7280;
-    font-size: 0.875rem;
-    font-weight: 500;
+  color: #6b7280;
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
 /* Open order and targeted order styles */
-.open-order, .targeted-order {
-    font-size: 0.875rem;
-    color: #6B7280;
+.open-order,
+.targeted-order {
+  font-size: 0.875rem;
+  color: #6b7280;
 }
 
 .targeted-order {
-    cursor: help;
+  cursor: help;
 }
 
 /* Responsive adjustments */
 @media (max-width: 1024px) {
-    .orders-table {
-        font-size: 0.9em;
-    }
+  .orders-table {
+    font-size: 0.9em;
+  }
+}
+
+/* Sorting styles */
+.orders-table th[data-sort] {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 1.5rem; /* Make room for sort icon */
+}
+
+.orders-table th[data-sort]:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.orders-table .sort-icon {
+  display: inline-block;
+  margin-left: 4px;
+  opacity: 0.5;
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.75rem;
 }

@@ -228,8 +228,46 @@ export class ViewOrders extends BaseComponent {
                 }
             });
 
-            // Add orders to table
-            for (const order of this.orders.values()) {
+            // Sort orders before adding to table
+            const sortedOrders = Array.from(this.orders.values()).sort((a, b) => {
+                const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
+                
+                switch (this.sortConfig.column) {
+                    case 'id':
+                        return (Number(a.id) - Number(b.id)) * direction;
+                    case 'sell':
+                        const sellTokenA = tokenDetailsMap.get(a.sellToken)?.symbol || '';
+                        const sellTokenB = tokenDetailsMap.get(b.sellToken)?.symbol || '';
+                        return sellTokenA.localeCompare(sellTokenB) * direction;
+                    case 'sellAmount':
+                        const sellAmountA = ethers.utils.formatUnits(a.sellAmount, tokenDetailsMap.get(a.sellToken)?.decimals || 18);
+                        const sellAmountB = ethers.utils.formatUnits(b.sellAmount, tokenDetailsMap.get(b.sellToken)?.decimals || 18);
+                        return (Number(sellAmountA) - Number(sellAmountB)) * direction;
+                    case 'buy':
+                        const buyTokenA = tokenDetailsMap.get(a.buyToken)?.symbol || '';
+                        const buyTokenB = tokenDetailsMap.get(b.buyToken)?.symbol || '';
+                        return buyTokenA.localeCompare(buyTokenB) * direction;
+                    case 'buyAmount':
+                        const buyAmountA = ethers.utils.formatUnits(a.buyAmount, tokenDetailsMap.get(a.buyToken)?.decimals || 18);
+                        const buyAmountB = ethers.utils.formatUnits(b.buyAmount, tokenDetailsMap.get(b.buyToken)?.decimals || 18);
+                        return (Number(buyAmountA) - Number(buyAmountB)) * direction;
+                    case 'created':
+                        return (Number(a.timestamp) - Number(b.timestamp)) * direction;
+                    case 'expires':
+                        const expiryA = this.getExpiryTime(a.timestamp);
+                        const expiryB = this.getExpiryTime(b.timestamp);
+                        return (expiryA - expiryB) * direction;
+                    case 'status':
+                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
+                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
+                        return statusA.localeCompare(statusB) * direction;
+                    default:
+                        return 0;
+                }
+            });
+
+            // Add sorted orders to table
+            for (const order of sortedOrders) {
                 if (order) {
                     const row = await this.createOrderRow(order, tokenDetailsMap);
                     tbody.appendChild(row);
@@ -305,23 +343,60 @@ export class ViewOrders extends BaseComponent {
         const thead = this.createElement('thead');
         thead.innerHTML = `
             <tr>
-                <th>ID</th>
-                <th>Sell</th>
-                <th>Amount</th>
-                <th>Buy</th>
-                <th>Amount</th>
-                <th>Created</th>
-                <th>Expires</th>
-                <th>Status</th>
+                <th data-sort="id">ID <span class="sort-icon">↕</span></th>
+                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
+                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
+                <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="created">Created <span class="sort-icon">↕</span></th>
+                <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
+                <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
                 <th>Action</th>
             </tr>
         `;
         
+        // Add click handlers for sorting
+        thead.querySelectorAll('th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => this.handleSort(th.dataset.sort));
+        });
+        
         table.appendChild(thead);
         table.appendChild(this.createElement('tbody'));
         tableContainer.appendChild(table);
         this.container.appendChild(tableContainer);
+
+        // Initialize sorting state
+        this.sortConfig = {
+            column: 'id',
+            direction: 'asc'
+        };
+    }
+
+    handleSort(column) {
+        this.debug('Sorting by column:', column);
+        
+        // Toggle direction if clicking same column
+        if (this.sortConfig.column === column) {
+            this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.sortConfig.column = column;
+            this.sortConfig.direction = 'asc';
+        }
+
+        // Update sort icons
+        const headers = this.container.querySelectorAll('th[data-sort]');
+        headers.forEach(header => {
+            const icon = header.querySelector('.sort-icon');
+            if (header.dataset.sort === column) {
+                icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
+            } else {
+                icon.textContent = '↕';
+            }
+        });
+
+        // Refresh the view with new sort
+        this.refreshOrdersView();
     }
 
     formatAddress(address) {
