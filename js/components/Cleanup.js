@@ -37,7 +37,7 @@ export class Cleanup extends BaseComponent {
                 <div class="cleanup-section">
                     <h2>Cleanup Expired Orders</h2>
                     <div class="cleanup-info">
-                        <p>Earn fees by cleaning up old orders (14+ days old)</p>
+                        <p>Earn fees by cleaning up expired orders (14+ minutes old)</p>
                         <div class="cleanup-stats">
                             <div>Potential Reward: <span id="cleanup-reward">Loading...</span></div>
                             <div>Orders Ready: <span id="cleanup-ready">Loading...</span></div>
@@ -77,83 +77,58 @@ export class Cleanup extends BaseComponent {
         try {
             const contract = await this.getContract();
             if (!contract) {
-                this.debug('Contract not available');
-                return;
+                throw new Error('Contract not initialized');
             }
 
-            this.debug('Calculating cleanup reward');
-            const reward = await this.calculateCleanupReward(contract);
-            const rewardElement = document.getElementById('cleanup-reward');
-            rewardElement.textContent = `${ethers.utils.formatEther(reward)} ETH`;
+            // Get expiry times from contract
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
+            const totalExpiry = orderExpiry.add(gracePeriod);
+            
+            this.debug('Checking cleanup opportunities with timings:', {
+                orderExpiry: orderExpiry.toString(),
+                gracePeriod: gracePeriod.toString(),
+                totalExpiry: totalExpiry.toString()
+            });
 
-            this.debug('Counting ready orders');
-            const readyOrders = await this.countReadyOrders(contract);
-            const readyElement = document.getElementById('cleanup-ready');
-            readyElement.textContent = readyOrders;
+            // Count ready orders and calculate potential reward
+            const readyOrders = await this.countReadyOrders(contract, totalExpiry);
+            const reward = await this.calculateCleanupReward(contract, totalExpiry);
 
-            this.debug(`Found ${readyOrders} orders ready for cleanup`);
-            this.cleanupButton.disabled = readyOrders === 0;
+            // Update UI
+            const rewardSpan = document.getElementById('cleanup-reward');
+            const readySpan = document.getElementById('cleanup-ready');
+            const cleanupButton = document.getElementById('cleanup-button');
+
+            if (rewardSpan) {
+                rewardSpan.textContent = ethers.utils.formatEther(reward) + ' POL';
+            }
+            if (readySpan) {
+                readySpan.textContent = readyOrders.toString();
+            }
+            if (cleanupButton) {
+                cleanupButton.disabled = readyOrders === 0;
+            }
 
         } catch (error) {
-            console.error('[Cleanup] Error checking opportunities:', error);
+            console.error('[Cleanup] Error checking cleanup opportunities:', error);
+            this.showError('Failed to check cleanup opportunities');
         }
     }
 
-    async calculateCleanupReward(contract) {
-        const currentTime = Math.floor(Date.now() / 1000);
-        const firstOrderId = await contract.firstOrderId();
-        const nextOrderId = await contract.nextOrderId();
-        let reward = ethers.BigNumber.from(0);
-        
-        this.debug('Calculating rewards for orders:', {
-            firstOrderId: firstOrderId.toString(),
-            nextOrderId: nextOrderId.toString()
-        });
-        
-        const batchEndId = Math.min(
-            firstOrderId.toNumber() + 10, 
-            nextOrderId.toNumber()
-        );
-        
-        for (let orderId = firstOrderId; orderId < batchEndId; orderId++) {
-            const order = await contract.orders(orderId);
-            
-            // Skip empty orders
-            if (order.maker === '0x0000000000000000000000000000000000000000') {
-                this.debug(`Order ${orderId} is empty, skipping`);
-                continue;
-            }
-            
-            // Check if grace period has passed
-            if (currentTime > order.timestamp.toNumber() + (14 * 24 * 60 * 60)) {
-                reward = reward.add(order.orderCreationFee);
-                this.debug(`Order ${orderId} eligible for cleanup, fee:`, order.orderCreationFee.toString());
-            } else {
-                this.debug(`Order ${orderId} not yet eligible for cleanup`);
-                break;
-            }
-        }
-        
-        return reward;
-    }
-
-    async countReadyOrders(contract) {
+    async countReadyOrders(contract, totalExpiry) {
         const currentTime = Math.floor(Date.now() / 1000);
         const firstOrderId = await contract.firstOrderId();
         const nextOrderId = await contract.nextOrderId();
         let count = 0;
-        
-        const batchEndId = Math.min(
-            firstOrderId.toNumber() + 10, 
-            nextOrderId.toNumber()
-        );
-        
-        this.debug('Counting ready orders in range:', {
+
+        this.debug('Counting ready orders:', {
             firstOrderId: firstOrderId.toString(),
-            batchEndId
+            nextOrderId: nextOrderId.toString(),
+            currentTime
         });
-        
-        for (let orderId = firstOrderId; orderId < batchEndId; orderId++) {
+
+        for (let orderId = firstOrderId; orderId < nextOrderId; orderId++) {
             const order = await contract.orders(orderId);
             
             // Skip empty orders
@@ -161,8 +136,8 @@ export class Cleanup extends BaseComponent {
                 continue;
             }
             
-            // Check if grace period has passed
-            if (currentTime > order.timestamp.toNumber() + (14 * 24 * 60 * 60)) {
+            // Check if both expiry AND grace period have passed
+            if (currentTime > order.timestamp.toNumber() + totalExpiry.toNumber()) {
                 count++;
                 this.debug(`Order ${orderId} ready for cleanup`);
             } else {
@@ -172,6 +147,32 @@ export class Cleanup extends BaseComponent {
         }
         
         return count;
+    }
+
+    async calculateCleanupReward(contract, totalExpiry) {
+        const currentTime = Math.floor(Date.now() / 1000);
+        const firstOrderId = await contract.firstOrderId();
+        const nextOrderId = await contract.nextOrderId();
+        let reward = ethers.BigNumber.from(0);
+
+        for (let orderId = firstOrderId; orderId < nextOrderId; orderId++) {
+            const order = await contract.orders(orderId);
+            
+            // Skip empty orders
+            if (order.maker === '0x0000000000000000000000000000000000000000') {
+                continue;
+            }
+            
+            // Check if both expiry AND grace period have passed
+            if (currentTime > order.timestamp.toNumber() + totalExpiry.toNumber()) {
+                reward = reward.add(order.orderCreationFee);
+                this.debug(`Order ${orderId} cleanup reward:`, order.orderCreationFee.toString());
+            } else {
+                break;
+            }
+        }
+        
+        return reward;
     }
 
     async performCleanup() {

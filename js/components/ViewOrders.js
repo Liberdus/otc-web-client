@@ -565,20 +565,26 @@ export class ViewOrders extends BaseComponent {
         });
     }
 
-    formatExpiry(timestamp) {
-        const expiryTime = this.getExpiryTime(timestamp);
-        const now = Date.now();
-        const timeLeft = expiryTime - now;
+    async formatExpiry(timestamp) {
+        try {
+            const expiryTime = await this.getExpiryTime(timestamp);
+            const now = Date.now();
+            const timeLeft = expiryTime - now;
 
-        if (timeLeft <= 0) {
-            return 'Expired';
+            if (timeLeft <= 0) {
+                return 'Expired';
+            }
+
+            // Convert to minutes, hours, days
+            const minutes = Math.floor((timeLeft / 1000 / 60) % 60);
+            const hours = Math.floor((timeLeft / 1000 / 60 / 60) % 24);
+            const days = Math.floor(timeLeft / 1000 / 60 / 60 / 24);
+
+            return `${days}d ${hours}h ${minutes}m`;
+        } catch (error) {
+            console.error('[ViewOrders] Error formatting expiry:', error);
+            return 'Error';
         }
-
-        const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-
-        return `${days}d ${hours}h ${minutes}m`;
     }
 
     setupEventListeners() {
@@ -787,8 +793,9 @@ export class ViewOrders extends BaseComponent {
         const sellTokenDetails = tokenDetailsMap.get(order.sellToken);
         const buyTokenDetails = tokenDetailsMap.get(order.buyToken);
         const canFill = await this.canFillOrder(order);
-        const expiryTime = this.getExpiryTime(order.timestamp);
+        const expiryTime = await this.getExpiryTime(order.timestamp);
         const status = this.getOrderStatus(order, expiryTime);
+        const formattedExpiry = await this.formatExpiry(order.timestamp);
         
         // Get current account first
         const accounts = await window.ethereum.request({ method: 'eth_accounts' });
@@ -806,7 +813,7 @@ export class ViewOrders extends BaseComponent {
             <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
             <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
             <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
-            <td>${this.formatExpiry(order.timestamp)}</td>
+            <td>${formattedExpiry}</td>
             <td class="order-status">${status}</td>
             <td class="taker-column">${takerDisplay}</td>
             <td class="action-column">${canFill ? 
@@ -825,9 +832,32 @@ export class ViewOrders extends BaseComponent {
         return tr;
     }
 
-    getExpiryTime(timestamp) {
-        const ORDER_EXPIRY = 7 * 24 * 60 * 60; // 7 days in seconds
-        return (Number(timestamp) + ORDER_EXPIRY) * 1000; // Convert to milliseconds
+    async getContractExpiryTimes() {
+        try {
+            const contract = await this.getContract();
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
+            return {
+                orderExpiry: orderExpiry.toNumber(),
+                gracePeriod: gracePeriod.toNumber()
+            };
+        } catch (error) {
+            console.error('[ViewOrders] Error fetching expiry times:', error);
+            throw error;
+        }
+    }
+
+    async getExpiryTime(timestamp) {
+        try {
+            const { orderExpiry, gracePeriod } = await this.getContractExpiryTimes();
+            return (Number(timestamp) + orderExpiry + gracePeriod) * 1000; // Convert to milliseconds
+        } catch (error) {
+            console.error('[ViewOrders] Error calculating expiry time:', error);
+            return Number(timestamp) * 1000; // Fallback to original timestamp
+        }
     }
 
     getOrderStatus(order, expiryTime) {

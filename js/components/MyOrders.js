@@ -227,37 +227,63 @@ export class MyOrders extends ViewOrders {
 
     async createOrderRow(order, tokenDetailsMap) {
         const tr = await super.createOrderRow(order, tokenDetailsMap);
-        
-        // Get the cells
-        const cells = tr.querySelectorAll('td');
-        
-        // Swap back the Buy and Sell columns for MyOrders view
-        const buySymbol = cells[1].textContent;
-        const buyAmount = cells[2].textContent;
-        const sellSymbol = cells[3].textContent;
-        const sellAmount = cells[4].textContent;
-        
-        cells[1].textContent = sellSymbol;
-        cells[2].textContent = sellAmount;
-        cells[3].textContent = buySymbol;
-        cells[4].textContent = buyAmount;
-
-        // Update the action column
         const actionCell = tr.querySelector('.action-column');
+        
         if (actionCell) {
-            const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
-            if (status === 'Active') {
-                actionCell.innerHTML = `
-                    <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
-                `;
+            try {
+                const currentTime = Math.floor(Date.now() / 1000);
+                const orderTime = Number(order.timestamp);
+                const contract = await this.getContract();
                 
-                // Add click handler for cancel button
-                const cancelButton = actionCell.querySelector('.cancel-button');
-                if (cancelButton) {
-                    cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+                // Get expiry times directly from contract
+                const orderExpiry = await contract.ORDER_EXPIRY();
+                const gracePeriod = await contract.GRACE_PERIOD();
+                
+                // Debug logs
+                this.debug('Order timing:', {
+                    currentTime,
+                    orderTime,
+                    orderExpiry: orderExpiry.toNumber(),
+                    gracePeriod: gracePeriod.toNumber(),
+                    timeSinceOrder: currentTime - orderTime
+                });
+
+                const isExpired = currentTime > orderTime + orderExpiry.toNumber();
+                const isInGracePeriod = currentTime <= (orderTime + orderExpiry.toNumber() + gracePeriod.toNumber());
+                
+                this.debug('Order status:', {
+                    isExpired,
+                    isInGracePeriod,
+                    orderId: order.id
+                });
+
+                if (isExpired && isInGracePeriod) {
+                    // Show cancel button during grace period
+                    actionCell.innerHTML = `
+                        <button class="cancel-button warning" data-order-id="${order.id}">
+                            Cancel (Grace Period)
+                        </button>
+                    `;
+                    
+                    const cancelButton = actionCell.querySelector('.cancel-button');
+                    if (cancelButton) {
+                        cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+                    }
+                } else if (isExpired) {
+                    actionCell.innerHTML = '<span class="order-status">Awaiting Cleanup</span>';
+                } else {
+                    actionCell.innerHTML = `
+                        <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
+                    `;
+                    
+                    const cancelButton = actionCell.querySelector('.cancel-button');
+                    if (cancelButton) {
+                        cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+                    }
                 }
-            } else {
-                actionCell.innerHTML = `<span class="order-completed">Completed</span>`;
+            } catch (error) {
+                console.error('[MyOrders] Error in createOrderRow:', error);
+                actionCell.innerHTML = '<span class="order-status error">Error</span>';
             }
         }
 
