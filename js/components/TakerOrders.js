@@ -15,42 +15,69 @@ export class TakerOrders extends ViewOrders {
         };
     }
 
-    async initialize() {
+    async initialize(readOnlyMode = true) {
         try {
+            this.debug('Initializing TakerOrders component');
+            
+            // Show connect wallet message if in read-only mode
+            if (readOnlyMode || !window.walletManager?.provider) {
+                this.container.innerHTML = `
+                    <div class="tab-content-wrapper">
+                        <h2>Orders for Me</h2>
+                        <p class="connect-prompt">Connect wallet to view orders targeted to you</p>
+                    </div>`;
+                return;
+            }
+
             // Cleanup previous state
             this.cleanup();
             this.container.innerHTML = '';
             
             await this.setupTable();
-            
-            // Wait for WebSocket initialization
-            if (!window.webSocket?.isInitialized) {
-                this.debug('Waiting for WebSocket initialization...');
-                await new Promise(resolve => {
-                    const checkInterval = setInterval(() => {
-                        if (window.webSocket?.isInitialized) {
-                            clearInterval(checkInterval);
-                            resolve();
-                        }
-                    }, 100);
-                });
+
+            // Get current account
+            let userAddress;
+            try {
+                userAddress = await window.walletManager.getAccount();
+            } catch (error) {
+                this.debug('Error getting account:', error);
+                userAddress = null;
+            }
+
+            if (!userAddress) {
+                this.debug('No account connected');
+                this.container.innerHTML = `
+                    <div class="tab-content-wrapper">
+                        <h2>Orders for Me</h2>
+                        <p class="connect-prompt">Connect wallet to view orders targeted to you</p>
+                    </div>`;
+                return;
             }
 
             // Get initial orders from cache and filter for taker
-            const userAddress = await window.walletManager.getAccount();
-            const cachedOrders = window.webSocket.getOrders()
-                .filter(order => order.taker.toLowerCase() === userAddress.toLowerCase());
+            const cachedOrders = window.webSocket?.getOrders() || [];
+            const filteredOrders = cachedOrders.filter(order => 
+                order?.taker && userAddress && 
+                order.taker.toLowerCase() === userAddress.toLowerCase()
+            );
 
-            if (cachedOrders.length > 0) {
-                this.debug('Loading orders from cache:', cachedOrders);
-                cachedOrders.forEach(order => {
+            // Clear existing orders and add filtered ones
+            this.orders.clear();
+            if (filteredOrders.length > 0) {
+                this.debug('Loading orders from cache:', filteredOrders);
+                filteredOrders.forEach(order => {
                     this.orders.set(order.id, order);
                 });
             }
 
-            // Always call refreshOrdersView to either show orders or empty state
+            // Create table structure
             const tbody = this.container.querySelector('tbody');
-            if (!cachedOrders.length) {
+            if (!tbody) {
+                this.debug('Table body not found');
+                return;
+            }
+
+            if (!filteredOrders.length) {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="no-orders-message">
@@ -68,7 +95,11 @@ export class TakerOrders extends ViewOrders {
 
         } catch (error) {
             console.error('[TakerOrders] Initialization error:', error);
-            throw error;
+            this.container.innerHTML = `
+                <div class="tab-content-wrapper">
+                    <h2>Orders for Me</h2>
+                    <p class="error-message">Failed to load orders. Please try again later.</p>
+                </div>`;
         }
     }
 
@@ -193,24 +224,11 @@ export class TakerOrders extends ViewOrders {
                 this.showSuccess('Requesting token approval...');
                 
                 try {
-                    // Use a default gas limit for approval if estimation fails
-                    let gasLimit;
-                    try {
-                        const approveGasEstimate = await buyToken.estimateGas.approve(
-                            this.contract.address,
-                            order.buyAmount
-                        );
-                        gasLimit = Math.floor(approveGasEstimate.toNumber() * 1.2); // 20% buffer
-                    } catch (error) {
-                        this.debug('Gas estimation failed for approval, using default:', error);
-                        gasLimit = 100000; // Default gas limit for ERC20 approvals
-                    }
-
                     const approveTx = await buyToken.connect(window.walletManager.getProvider().getSigner()).approve(
                         this.contract.address,
                         order.buyAmount,
                         {
-                            gasLimit,
+                            gasLimit: 70000,  // Standard gas limit for ERC20 approvals
                             gasPrice: await window.walletManager.getProvider().getGasPrice()
                         }
                     );
@@ -219,34 +237,23 @@ export class TakerOrders extends ViewOrders {
                     await approveTx.wait();
                     this.showSuccess('Token approval granted');
                 } catch (error) {
-                    this.debug('Approval failed:', error);
-                    throw new Error('Token approval failed. Please try again.');
+                    if (error.code === 4001) { // MetaMask user rejected
+                        this.showError('Token approval was rejected');
+                        return;
+                    }
+                    throw error;
                 }
             }
 
-            // Estimate gas for fillOrder with fallback
-            let fillGasLimit;
-            try {
-                const fillGasEstimate = await this.contract.estimateGas.fillOrder(orderId);
-                fillGasLimit = Math.floor(fillGasEstimate.toNumber() * 1.2); // 20% buffer
-                this.debug('Fill order gas estimate:', fillGasEstimate.toString());
-            } catch (error) {
-                this.debug('Gas estimation failed for fill order, using default:', error);
-                fillGasLimit = 300000; // Default gas limit for fill orders
-            }
-
-            this.debug('Sending fill order transaction with params:', {
-                orderId,
-                gasLimit: fillGasLimit,
-                gasPrice: (await window.walletManager.getProvider().getGasPrice()).toString()
-            });
-
+            // Fill order with standard gas limit
             const tx = await this.contract.fillOrder(orderId, {
-                gasLimit: fillGasLimit,
+                gasLimit: 300000,  // Standard gas limit for fill orders
                 gasPrice: await window.walletManager.getProvider().getGasPrice()
             });
             
-            this.debug('Transaction sent:', tx.hash);
+            this.debug('Fill order transaction sent:', tx.hash);
+            this.showSuccess('Order fill transaction submitted');
+            
             await tx.wait();
             this.debug('Transaction confirmed');
 

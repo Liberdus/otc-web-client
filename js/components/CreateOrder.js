@@ -279,25 +279,12 @@ export class CreateOrder extends BaseComponent {
                 this.showSuccess('Requesting token approval...');
                 
                 try {
-                    // Use a default gas limit for approval if estimation fails
-                    let approvalGasLimit;
-                    try {
-                        const approveGasEstimate = await sellTokenContract.estimateGas.approve(
-                            this.contract.address,
-                            sellAmountWei
-                        );
-                        this.debug('Approve gas estimate:', approveGasEstimate.toString());
-                        approvalGasLimit = Math.floor(approveGasEstimate.toNumber() * 1.2); // 20% buffer
-                    } catch (error) {
-                        this.debug('Gas estimation failed for approval, using default:', error);
-                        approvalGasLimit = 100000; // Default gas limit for ERC20 approvals
-                    }
-
+                    // Skip gas estimation and use standard parameters
                     const approveTx = await sellTokenContract.connect(signer).approve(
                         this.contract.address,
                         sellAmountWei,
                         {
-                            gasLimit: approvalGasLimit,
+                            gasLimit: 70000,  // Standard gas limit for ERC20 approvals
                             gasPrice: await this.provider.getGasPrice()
                         }
                     );
@@ -306,6 +293,18 @@ export class CreateOrder extends BaseComponent {
                     await approveTx.wait();
                     this.showSuccess('Token approval granted');
                 } catch (error) {
+                    // Check if the error is due to user rejection
+                    if (error.code === 4001) { // MetaMask user rejected
+                        this.showError('Token approval was rejected');
+                        throw new Error('Token approval rejected by user');
+                    }
+                    
+                    // If it's a revert with specific error code
+                    if (error?.error?.data?.data === '0xe602df050000000000000000000000000000000000000000000000000000000000000000') {
+                        this.debug('Known contract error during approval:', error);
+                        throw new Error('Token approval failed - contract rejected the transaction');
+                    }
+                    
                     this.debug('Approval failed:', error);
                     throw new Error('Token approval failed. Please try again.');
                 }
@@ -382,9 +381,36 @@ export class CreateOrder extends BaseComponent {
                 code: error.code,
                 data: error?.error?.data,
                 reason: error?.reason,
-                stack: error.stack
+                stack: error.stack,
+                transactionHash: error?.transaction?.hash
             });
             
+            // Check for specific revert code 0xe602df05
+            if (error?.error?.data?.data === '0xe602df050000000000000000000000000000000000000000000000000000000000000000') {
+                try {
+                    // Try to decode the error using contract interface
+                    const decodedError = this.contract.interface.parseError(error.error.data.data);
+                    this.debug('Decoded contract error:', decodedError);
+                    
+                    // If transaction actually succeeded despite the error
+                    if (error?.transaction?.hash) {
+                        const receipt = await this.provider.getTransactionReceipt(error.transaction.hash);
+                        if (receipt && receipt.status === 1) {
+                            this.showSuccess('Order created successfully despite RPC error');
+                            this.resetForm();
+                            return;
+                        }
+                    }
+                    
+                    // If we get here, it's a real error
+                    this.showError(`Contract error: ${decodedError.name}`);
+                } catch (decodeError) {
+                    this.debug('Failed to decode contract error:', decodeError);
+                    this.showError('Failed to create order: Contract reverted');
+                }
+                return;
+            }
+
             let errorMessage = 'Failed to create order: ';
             
             // Try to decode the error

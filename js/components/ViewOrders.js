@@ -186,10 +186,7 @@ export class ViewOrders extends BaseComponent {
         try {
             // Get contract instance first
             this.contract = await this.getContract();
-            if (!this.contract) {
-                throw new Error('Contract not initialized');
-            }
-
+            
             // Clear existing orders from table
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
@@ -208,7 +205,7 @@ export class ViewOrders extends BaseComponent {
             // Debug log the orders
             this.debug('Orders before filtering:', ordersToDisplay);
 
-            if (showOnlyFillable) {
+            if (showOnlyFillable && this.contract) {
                 ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
                     const canFill = await this.canFillOrder(order);
                     return canFill ? order : null;
@@ -216,6 +213,26 @@ export class ViewOrders extends BaseComponent {
                 ordersToDisplay = ordersToDisplay.filter(order => order !== null);
             }
 
+            // Get token details only if we have orders
+            let tokenDetailsMap = new Map();
+            if (ordersToDisplay.length > 0) {
+                const tokenAddresses = new Set();
+                ordersToDisplay.forEach(order => {
+                    if (order?.sellToken) tokenAddresses.add(order.sellToken);
+                    if (order?.buyToken) tokenAddresses.add(order.buyToken);
+                });
+
+                const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
+                if (tokenDetails) {
+                    tokenDetails.forEach((details, index) => {
+                        if (details) {
+                            tokenDetailsMap.set(Array.from(tokenAddresses)[index], details);
+                        }
+                    });
+                }
+            }
+
+            // Debug log the orders
             this.debug('Orders after filtering:', ordersToDisplay);
 
             // Apply pagination if not viewing all
@@ -240,23 +257,6 @@ export class ViewOrders extends BaseComponent {
                     </tr>`;
                 return;
             }
-
-            // Get token details for all orders
-            const tokenAddresses = new Set();
-            ordersToDisplay.forEach(order => {
-                if (order?.sellToken) tokenAddresses.add(order.sellToken);
-                if (order?.buyToken) tokenAddresses.add(order.buyToken);
-            });
-
-            this.debug('Getting token details for addresses:', Array.from(tokenAddresses));
-            const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
-            
-            const tokenDetailsMap = new Map();
-            tokenDetails.forEach((details, index) => {
-                if (details) {
-                    tokenDetailsMap.set(Array.from(tokenAddresses)[index], details);
-                }
-            });
 
             // Sort the filtered orders
             const sortedOrders = ordersToDisplay.sort((a, b) => {
@@ -305,7 +305,19 @@ export class ViewOrders extends BaseComponent {
             }
         } catch (error) {
             console.error('[ViewOrders] Error refreshing orders view:', error);
-            throw error;
+            const tbody = this.container.querySelector('tbody');
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="no-orders-message">
+                            <div class="placeholder-text">
+                                ${!this.contract ? 
+                                    'Connect wallet to view orders' : 
+                                    'Unable to load orders. Please try again later.'}
+                            </div>
+                        </td>
+                    </tr>`;
+            }
         }
     }
 
@@ -623,24 +635,11 @@ export class ViewOrders extends BaseComponent {
                 this.showSuccess('Requesting token approval...');
                 
                 try {
-                    // Use a default gas limit for approval if estimation fails
-                    let gasLimit;
-                    try {
-                        const approveGasEstimate = await buyToken.estimateGas.approve(
-                            this.contract.address,
-                            order.buyAmount
-                        );
-                        gasLimit = Math.floor(approveGasEstimate.toNumber() * 1.2); // 20% buffer
-                    } catch (error) {
-                        this.debug('Gas estimation failed for approval, using default:', error);
-                        gasLimit = 100000; // Default gas limit for ERC20 approvals
-                    }
-
                     const approveTx = await buyToken.connect(this.provider.getSigner()).approve(
                         this.contract.address,
                         order.buyAmount,
                         {
-                            gasLimit,
+                            gasLimit: 70000,  // Standard gas limit for ERC20 approvals
                             gasPrice: await this.provider.getGasPrice()
                         }
                     );
@@ -654,25 +653,9 @@ export class ViewOrders extends BaseComponent {
                 }
             }
 
-            // Estimate gas for fillOrder with fallback
-            let fillGasLimit;
-            try {
-                const fillGasEstimate = await this.contract.estimateGas.fillOrder(orderId);
-                fillGasLimit = Math.floor(fillGasEstimate.toNumber() * 1.2); // 20% buffer
-                this.debug('Fill order gas estimate:', fillGasEstimate.toString());
-            } catch (error) {
-                this.debug('Gas estimation failed for fill order, using default:', error);
-                fillGasLimit = 300000; // Default gas limit for fill orders
-            }
-
-            this.debug('Sending fill order transaction with params:', {
-                orderId,
-                gasLimit: fillGasLimit,
-                gasPrice: (await this.provider.getGasPrice()).toString()
-            });
-
+            // Use standard gas limit for fill order
             const tx = await this.contract.fillOrder(orderId, {
-                gasLimit: fillGasLimit,
+                gasLimit: 300000,  // Standard gas limit for fill orders
                 gasPrice: await this.provider.getGasPrice()
             });
             

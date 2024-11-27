@@ -59,14 +59,21 @@ export class BaseComponent {
     // Add method to get contract (used by CreateOrder)
     async getContract() {
         try {
+            // If we're in read-only mode, return null without throwing
+            if (!window.walletManager?.provider) {
+                this.debug('No wallet connected - running in read-only mode');
+                return null;
+            }
+
             await window.walletInitialized;
             const contract = await walletManager.getContract();
             if (!contract) {
-                throw new Error('Contract not initialized');
+                this.debug('Contract not initialized');
+                return null;
             }
             return contract;
         } catch (error) {
-            console.error('[BaseComponent] Error getting contract:', error);
+            this.debug('Error getting contract:', error);
             return null;
         }
     }
@@ -100,13 +107,19 @@ export class BaseComponent {
             if (!this.provider) {
                 this.provider = window.walletManager?.provider;
                 if (!this.provider) {
-                    throw new Error('Provider not available');
+                    this.debug('No provider available - running in read-only mode');
+                    return null;
                 }
             }
 
-            // Get signer for balance check
-            const signer = await this.getSigner().catch(() => null);
-            const userAddress = signer ? await signer.getAddress() : null;
+            // Get signer for balance check - don't throw if not available
+            let userAddress = null;
+            try {
+                const signer = await this.getSigner().catch(() => null);
+                userAddress = signer ? await signer.getAddress() : null;
+            } catch (error) {
+                this.debug('No signer available - skipping balance check');
+            }
 
             // Ensure tokenAddresses is an array
             if (!Array.isArray(tokenAddresses)) {
@@ -166,7 +179,7 @@ export class BaseComponent {
 
             return results.length === 1 ? results[0] : results;
         } catch (error) {
-            console.error('[BaseComponent] Error in getTokenDetails:', error);
+            this.debug('Error in getTokenDetails:', error);
             return null;
         }
     }

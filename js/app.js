@@ -192,13 +192,19 @@ class App {
 
     async initializeComponents(readOnlyMode) {
         try {
-            this.debug('Initializing components...');
+            this.debug('Initializing components in ' + 
+                (readOnlyMode ? 'read-only' : 'connected') + ' mode');
             
             // Initialize each component
             for (const [id, component] of Object.entries(this.components)) {
                 if (component && typeof component.initialize === 'function') {
                     this.debug(`Initializing component: ${id}`);
-                    await component.initialize(readOnlyMode);
+                    try {
+                        await component.initialize(readOnlyMode);
+                    } catch (error) {
+                        // Log error but continue with other components
+                        console.error(`[App] Error initializing ${id}:`, error);
+                    }
                 }
             }
             
@@ -208,19 +214,25 @@ class App {
             this.debug('Components initialized');
         } catch (error) {
             console.error('[App] Error initializing components:', error);
-            throw error;
+            // Continue execution instead of throwing
+            this.showError("Some components failed to initialize. Limited functionality available.");
         }
     }
 
     async connectWallet() {
+        const loader = document.createElement('div');
+        loader.className = 'loader-overlay';
+        loader.innerHTML = '<div class="loader"></div>';
+        document.body.appendChild(loader);
+        
         try {
-            const loader = this.showLoader();
             await walletManager.connect();
-            this.hideLoader(loader);
-            
         } catch (error) {
-            this.hideLoader(loader);
             this.showError("Failed to connect wallet: " + error.message);
+        } finally {
+            if (loader && loader.parentElement) {
+                loader.parentElement.removeChild(loader);
+            }
         }
     }
 

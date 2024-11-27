@@ -14,53 +14,73 @@ export class MyOrders extends ViewOrders {
         };
     }
 
-    async initialize() {
+    async initialize(readOnlyMode = true) {
         try {
-            this.debug('Starting initialization...');
+            this.debug('Initializing MyOrders component');
+            
+            if (readOnlyMode || !window.walletManager?.provider) {
+                this.container.innerHTML = `
+                    <div class="tab-content-wrapper">
+                        <h2>My Orders</h2>
+                        <p class="connect-prompt">Connect wallet to view your orders</p>
+                    </div>`;
+                return;
+            }
+
+            // Get current account
+            let userAddress;
+            try {
+                userAddress = await window.walletManager.getAccount();
+            } catch (error) {
+                this.debug('Error getting account:', error);
+                userAddress = null;
+            }
+
+            if (!userAddress) {
+                this.debug('No account connected');
+                this.container.innerHTML = `
+                    <div class="tab-content-wrapper">
+                        <h2>My Orders</h2>
+                        <p class="connect-prompt">Connect wallet to view your orders</p>
+                    </div>`;
+                return;
+            }
+
             // Cleanup previous state
             this.cleanup();
-            this.debug('Container HTML before clear:', this.container.innerHTML);
             this.container.innerHTML = '';
             
             await this.setupTable();
-            this.debug('Table setup complete');
-            
-            // Wait for WebSocket initialization (reusing parent class method)
-            if (!window.webSocket?.isInitialized) {
-                this.debug('Waiting for WebSocket initialization...');
-                await new Promise(resolve => {
-                    const checkInterval = setInterval(() => {
-                        if (window.webSocket?.isInitialized) {
-                            clearInterval(checkInterval);
-                            resolve();
-                        }
-                    }, 100);
-                });
-            }
 
-            // Subscribe to order events
-            this.setupWebSocket();
+            // Get initial orders from cache and filter for maker
+            const cachedOrders = window.webSocket?.getOrders() || [];
+            const filteredOrders = cachedOrders.filter(order => 
+                order?.maker && userAddress && 
+                order.maker.toLowerCase() === userAddress.toLowerCase()
+            );
 
-            // Get initial orders from cache and filter for user
-            const userAddress = await window.walletManager.getAccount();
-            const cachedOrders = window.webSocket.getOrders()
-                .filter(order => order.maker.toLowerCase() === userAddress.toLowerCase());
-
-            if (cachedOrders.length > 0) {
-                this.debug('Loading orders from cache:', cachedOrders);
-                cachedOrders.forEach(order => {
+            // Clear existing orders and add filtered ones
+            this.orders.clear();
+            if (filteredOrders.length > 0) {
+                this.debug('Loading orders from cache:', filteredOrders);
+                filteredOrders.forEach(order => {
                     this.orders.set(order.id, order);
                 });
             }
 
-            // Always call refreshOrdersView to either show orders or empty state
+            // Create table structure
             const tbody = this.container.querySelector('tbody');
-            if (!cachedOrders.length) {
+            if (!tbody) {
+                this.debug('Table body not found');
+                return;
+            }
+
+            if (!filteredOrders.length) {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="no-orders-message">
                             <div class="placeholder-text">
-                                No orders found where you are the maker
+                                No orders found
                             </div>
                         </td>
                     </tr>`;
@@ -68,9 +88,16 @@ export class MyOrders extends ViewOrders {
                 await this.refreshOrdersView();
             }
 
+            // Setup WebSocket event handlers after initial load
+            this.setupWebSocket();
+
         } catch (error) {
             console.error('[MyOrders] Initialization error:', error);
-            throw error;
+            this.container.innerHTML = `
+                <div class="tab-content-wrapper">
+                    <h2>My Orders</h2>
+                    <p class="error-message">Failed to load orders. Please try again later.</p>
+                </div>`;
         }
     }
 
@@ -160,7 +187,7 @@ export class MyOrders extends ViewOrders {
             });
 
             const tx = await contract.cancelOrder(orderId, {
-                gasLimit: cancelGasLimit,
+                gasLimit: 100000,  // Standard gas limit for cancel orders
                 gasPrice: await this.provider.getGasPrice()
             });
             
