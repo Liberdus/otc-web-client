@@ -443,11 +443,10 @@ export class ViewOrders extends BaseComponent {
         thead.innerHTML = `
             <tr>
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
+                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
+                <th data-sort="buyAmount" class="">Amount <span class="sort-icon">↕</span></th>
                 <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
                 <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
-                <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="created">Created <span class="sort-icon">↕</span></th>
                 <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
@@ -568,8 +567,18 @@ export class ViewOrders extends BaseComponent {
 
     formatExpiry(timestamp) {
         const expiryTime = this.getExpiryTime(timestamp);
-        const days = Math.floor((expiryTime - Date.now()) / (1000 * 60 * 60 * 24));
-        return `${days}d`;
+        const now = Date.now();
+        const timeLeft = expiryTime - now;
+
+        if (timeLeft <= 0) {
+            return 'Expired';
+        }
+
+        const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+
+        return `${days}d ${hours}h ${minutes}m`;
     }
 
     setupEventListeners() {
@@ -797,11 +806,10 @@ export class ViewOrders extends BaseComponent {
 
         tr.innerHTML = `
             <td>${order.id}</td>
-            <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
-            <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
             <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
             <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
-            <td>${this.formatTimestamp(order.timestamp)}</td>
+            <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
+            <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
             <td>${this.formatExpiry(order.timestamp)}</td>
             <td class="order-status">${status}</td>
             <td class="taker-column">${takerDisplay}</td>

@@ -226,40 +226,39 @@ export class MyOrders extends ViewOrders {
     }
 
     async createOrderRow(order, tokenDetailsMap) {
-        const tr = this.createElement('tr');
-        tr.dataset.orderId = order.id.toString();
+        const tr = await super.createOrderRow(order, tokenDetailsMap);
+        
+        // Get the cells
+        const cells = tr.querySelectorAll('td');
+        
+        // Swap back the Buy and Sell columns for MyOrders view
+        const buySymbol = cells[1].textContent;
+        const buyAmount = cells[2].textContent;
+        const sellSymbol = cells[3].textContent;
+        const sellAmount = cells[4].textContent;
+        
+        cells[1].textContent = sellSymbol;
+        cells[2].textContent = sellAmount;
+        cells[3].textContent = buySymbol;
+        cells[4].textContent = buyAmount;
 
-        const sellTokenDetails = tokenDetailsMap.get(order.sellToken);
-        const buyTokenDetails = tokenDetailsMap.get(order.buyToken);
-        const expiryTime = this.getExpiryTime(order.timestamp);
-        const status = this.getOrderStatus(order, expiryTime);
-
-        // Format taker display
-        const takerDisplay = order.taker === ethers.constants.AddressZero 
-            ? '<span class="open-order">Open to All</span>'
-            : `<span class="targeted-order" title="${order.taker}">Specific Taker</span>`;
-
-        tr.innerHTML = `
-            <td>${order.id}</td>
-            <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
-            <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
-            <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
-            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
-            <td>${this.formatTimestamp(order.timestamp)}</td>
-            <td>${this.formatExpiry(order.timestamp)}</td>
-            <td class="order-status">${status}</td>
-            <td class="taker-column">${takerDisplay}</td>
-            <td class="action-column">
-                ${status === 'Active' ? 
-                    `<button class="cancel-button" data-order-id="${order.id}">Cancel</button>` : 
-                    '<span class="order-completed">Completed</span>'
+        // Update the action column
+        const actionCell = tr.querySelector('.action-column');
+        if (actionCell) {
+            const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
+            if (status === 'Active') {
+                actionCell.innerHTML = `
+                    <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
+                `;
+                
+                // Add click handler for cancel button
+                const cancelButton = actionCell.querySelector('.cancel-button');
+                if (cancelButton) {
+                    cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
                 }
-            </td>`;
-
-        // Add click handler for cancel button
-        const cancelButton = tr.querySelector('.cancel-button');
-        if (cancelButton) {
-            cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+            } else {
+                actionCell.innerHTML = `<span class="order-completed">Completed</span>`;
+            }
         }
 
         return tr;
@@ -370,6 +369,33 @@ export class MyOrders extends ViewOrders {
         } catch (error) {
             console.error('[MyOrders] Error refreshing orders view:', error);
             throw error;
+        }
+    }
+
+    async setupTable() {
+        // Call parent's setupTable to get basic structure
+        await super.setupTable();
+        
+        // Update the table header to swap Buy and Sell back
+        const thead = this.container.querySelector('thead tr');
+        if (thead) {
+            thead.innerHTML = `
+                <th data-sort="id">ID <span class="sort-icon">↕</span></th>
+                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
+                <th data-sort="sellAmount" class="">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
+                <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
+                <th data-sort="status">Status <span class="sort-icon">↕</span></th>
+                <th>Taker</th>
+                <th>Action</th>
+            `;
+        }
+
+        // Replace the filter toggle text
+        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
+        if (filterToggleSpan) {
+            filterToggleSpan.textContent = 'Show only active orders';
         }
     }
 }
