@@ -52,6 +52,9 @@ export class MyOrders extends ViewOrders {
             
             await this.setupTable();
 
+            // Setup WebSocket handlers after table setup
+            this.setupWebSocket();
+
             // Get initial orders from cache and filter for maker
             const cachedOrders = window.webSocket?.getOrders() || [];
             const filteredOrders = cachedOrders.filter(order => 
@@ -68,28 +71,7 @@ export class MyOrders extends ViewOrders {
                 });
             }
 
-            // Create table structure
-            const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                this.debug('Table body not found');
-                return;
-            }
-
-            if (!filteredOrders.length) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10" class="no-orders-message">
-                            <div class="placeholder-text">
-                                No orders found
-                            </div>
-                        </td>
-                    </tr>`;
-            } else {
-                await this.refreshOrdersView();
-            }
-
-            // Setup WebSocket event handlers after initial load
-            this.setupWebSocket();
+            await this.refreshOrdersView();
 
         } catch (error) {
             console.error('[MyOrders] Initialization error:', error);
@@ -102,6 +84,14 @@ export class MyOrders extends ViewOrders {
     }
 
     setupWebSocket() {
+        // Clear existing subscriptions first
+        this.eventSubscriptions.clear();
+        if (window.webSocket) {
+            window.webSocket.subscribers.forEach((_, event) => {
+                window.webSocket.unsubscribe(event, this);
+            });
+        }
+
         // Subscribe to order sync completion with user filter
         this.eventSubscriptions.add({
             event: 'orderSyncComplete',
@@ -153,9 +143,11 @@ export class MyOrders extends ViewOrders {
         });
 
         // Register all subscriptions
-        this.eventSubscriptions.forEach(sub => {
-            window.webSocket.subscribe(sub.event, sub.callback);
-        });
+        if (window.webSocket) {
+            this.eventSubscriptions.forEach(sub => {
+                window.webSocket.subscribe(sub.event, sub.callback);
+            });
+        }
     }
 
     async cancelOrder(orderId) {
@@ -197,8 +189,6 @@ export class MyOrders extends ViewOrders {
 
             this.showSuccess('Order canceled successfully');
             
-            // Note: The order will be removed from the table when we receive the
-            // OrderCanceled event through WebSocket
         } catch (error) {
             this.debug('Cancel order error details:', {
                 message: error.message,
@@ -303,21 +293,7 @@ export class MyOrders extends ViewOrders {
                 );
             }
 
-            // Check if we have any orders after filtering
-            if (!ordersToDisplay || ordersToDisplay.length === 0) {
-                this.debug('No orders to display after filtering');
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyActive ? 'No active orders found' : 'No orders found'}
-                            </div>
-                        </td>
-                    </tr>`;
-                return;
-            }
-
-            // Get token details and display orders
+            // Get token details
             const tokenAddresses = new Set();
             ordersToDisplay.forEach(order => {
                 if (order?.sellToken) tokenAddresses.add(order.sellToken);
@@ -331,6 +307,58 @@ export class MyOrders extends ViewOrders {
                     tokenDetailsMap.set(Array.from(tokenAddresses)[index], details);
                 }
             });
+
+            // Sort the filtered orders
+            ordersToDisplay = ordersToDisplay.sort((a, b) => {
+                const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
+                
+                switch (this.sortConfig.column) {
+                    case 'id':
+                        return (Number(a.id) - Number(b.id)) * direction;
+                    case 'sell':
+                        const sellTokenA = tokenDetailsMap.get(a.sellToken)?.symbol || '';
+                        const sellTokenB = tokenDetailsMap.get(b.sellToken)?.symbol || '';
+                        return sellTokenA.localeCompare(sellTokenB) * direction;
+                    case 'sellAmount':
+                        const sellAmountA = ethers.utils.formatUnits(a.sellAmount, tokenDetailsMap.get(a.sellToken)?.decimals || 18);
+                        const sellAmountB = ethers.utils.formatUnits(b.sellAmount, tokenDetailsMap.get(b.sellToken)?.decimals || 18);
+                        return (Number(sellAmountA) - Number(sellAmountB)) * direction;
+                    case 'buy':
+                        const buyTokenA = tokenDetailsMap.get(a.buyToken)?.symbol || '';
+                        const buyTokenB = tokenDetailsMap.get(b.buyToken)?.symbol || '';
+                        return buyTokenA.localeCompare(buyTokenB) * direction;
+                    case 'buyAmount':
+                        const buyAmountA = ethers.utils.formatUnits(a.buyAmount, tokenDetailsMap.get(a.buyToken)?.decimals || 18);
+                        const buyAmountB = ethers.utils.formatUnits(b.buyAmount, tokenDetailsMap.get(b.buyToken)?.decimals || 18);
+                        return (Number(buyAmountA) - Number(buyAmountB)) * direction;
+                    case 'created':
+                        return (Number(a.timestamp) - Number(b.timestamp)) * direction;
+                    case 'expires':
+                        const expiryA = this.getExpiryTime(a.timestamp);
+                        const expiryB = this.getExpiryTime(b.timestamp);
+                        return (expiryA - expiryB) * direction;
+                    case 'status':
+                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
+                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
+                        return statusA.localeCompare(statusB) * direction;
+                    default:
+                        return 0;
+                }
+            });
+
+            // Check if we have any orders after filtering
+            if (!ordersToDisplay || ordersToDisplay.length === 0) {
+                this.debug('No orders to display after filtering');
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="no-orders-message">
+                            <div class="placeholder-text">
+                                ${showOnlyActive ? 'No active orders found' : 'No orders found'}
+                            </div>
+                        </td>
+                    </tr>`;
+                return;
+            }
 
             // Add orders to table
             for (const order of ordersToDisplay) {

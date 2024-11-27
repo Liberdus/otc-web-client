@@ -146,7 +146,10 @@ export class TakerOrders extends ViewOrders {
                 callback: (order) => {
                     if (this.orders.has(order.id)) {
                         this.debug(`Order ${event.toLowerCase()}:`, order);
-                        this.removeOrderFromTable(order.id);
+                        this.orders.get(order.id).status = event === 'OrderFilled' ? 'Filled' : 'Canceled';
+                        this.refreshOrdersView().catch(error => {
+                            this.debug('Error refreshing after order status change:', error);
+                        });
                     }
                 }
             });

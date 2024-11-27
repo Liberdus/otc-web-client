@@ -151,10 +151,8 @@ export class ViewOrders extends BaseComponent {
             event: 'OrderFilled',
             callback: (orderData) => {
                 this.debug('Order filled:', orderData);
-                const order = this.orders.get(Number(orderData.id));
-                if (order) {
-                    order.status = 'Filled';
-                    this.orders.set(Number(orderData.id), order);
+                if (this.orders.has(Number(orderData.id))) {
+                    this.orders.get(Number(orderData.id)).status = 'Filled';
                     this.refreshOrdersView().catch(error => {
                         console.error('[ViewOrders] Error refreshing view after order fill:', error);
                     });
@@ -166,10 +164,12 @@ export class ViewOrders extends BaseComponent {
             event: 'OrderCanceled',
             callback: (orderData) => {
                 this.debug('Order canceled:', orderData);
-                this.removeOrderFromTable(orderData.id);
-                this.refreshOrdersView().catch(error => {
-                    console.error('[ViewOrders] Error refreshing view after order cancel:', error);
-                });
+                if (this.orders.has(Number(orderData.id))) {
+                    this.orders.get(Number(orderData.id)).status = 'Canceled';
+                    this.refreshOrdersView().catch(error => {
+                        console.error('[ViewOrders] Error refreshing view after order cancel:', error);
+                    });
+                }
             }
         });
 
@@ -235,31 +235,8 @@ export class ViewOrders extends BaseComponent {
             // Debug log the orders
             this.debug('Orders after filtering:', ordersToDisplay);
 
-            // Apply pagination if not viewing all
-            const totalOrders = ordersToDisplay.length;
-            if (pageSize !== -1) {
-                const startIndex = (this.currentPage - 1) * pageSize;
-                ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
-            }
-
-            // Update pagination controls
-            this.updatePaginationControls(totalOrders);
-
-            // Check if we have any orders after filtering
-            if (!ordersToDisplay || ordersToDisplay.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyFillable ? 'No fillable orders found' : 'No orders found'}
-                            </div>
-                        </td>
-                    </tr>`;
-                return;
-            }
-
-            // Sort the filtered orders
-            const sortedOrders = ordersToDisplay.sort((a, b) => {
+            // Sort the filtered orders first
+            ordersToDisplay = ordersToDisplay.sort((a, b) => {
                 const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
                 
                 switch (this.sortConfig.column) {
@@ -296,8 +273,34 @@ export class ViewOrders extends BaseComponent {
                 }
             });
 
+            // Debug log the orders after sorting
+            this.debug('Orders after sorting:', ordersToDisplay);
+
+            // Apply pagination if not viewing all
+            const totalOrders = ordersToDisplay.length;
+            if (pageSize !== -1) {
+                const startIndex = (this.currentPage - 1) * pageSize;
+                ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
+            }
+
+            // Update pagination controls
+            this.updatePaginationControls(totalOrders);
+
+            // Check if we have any orders after filtering
+            if (!ordersToDisplay || ordersToDisplay.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="10" class="no-orders-message">
+                            <div class="placeholder-text">
+                                ${showOnlyFillable ? 'No fillable orders found' : 'No orders found'}
+                            </div>
+                        </td>
+                    </tr>`;
+                return;
+            }
+
             // Add sorted orders to table
-            for (const order of sortedOrders) {
+            for (const order of ordersToDisplay) {
                 if (order) {
                     const row = await this.createOrderRow(order, tokenDetailsMap);
                     tbody.appendChild(row);
@@ -387,7 +390,7 @@ export class ViewOrders extends BaseComponent {
                 <select id="page-size-select" class="page-size-select">
                     <option value="10">10 per page</option>
                     <option value="25">25 per page</option>
-                    <option value="50">50 per page</option>
+                    <option value="50" selected>50 per page</option>
                     <option value="100">100 per page</option>
                     <option value="-1">View all</option>
                 </select>
