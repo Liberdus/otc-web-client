@@ -567,23 +567,32 @@ export class ViewOrders extends BaseComponent {
 
     async formatExpiry(timestamp) {
         try {
-            const expiryTime = await this.getExpiryTime(timestamp);
-            const now = Date.now();
+            const contract = await this.getContract();
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();  // 420 seconds (7 minutes)
+            // Don't add gracePeriod here since we only want to show when it expires
+            
+            const expiryTime = Number(timestamp) + orderExpiry;  // Just use orderExpiry
+            const now = Math.floor(Date.now() / 1000);
             const timeLeft = expiryTime - now;
+
+            this.debug('Expiry calculation:', {
+                timestamp,
+                orderExpiry,
+                expiryTime,
+                now,
+                timeLeft,
+                timeLeftMinutes: timeLeft / 60
+            });
 
             if (timeLeft <= 0) {
                 return 'Expired';
             }
 
-            // Convert to minutes, hours, days
-            const minutes = Math.floor((timeLeft / 1000 / 60) % 60);
-            const hours = Math.floor((timeLeft / 1000 / 60 / 60) % 24);
-            const days = Math.floor(timeLeft / 1000 / 60 / 60 / 24);
-
-            return `${days}d ${hours}h ${minutes}m`;
+            const minutes = Math.ceil(timeLeft / 60);
+            return `${minutes}m`;
         } catch (error) {
-            console.error('[ViewOrders] Error formatting expiry:', error);
-            return 'Error';
+            this.debug('Error formatting expiry:', error);
+            return 'Unknown';
         }
     }
 
@@ -860,10 +869,33 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
-    getOrderStatus(order, expiryTime) {
-        if (order.status === 'Filled') return 'Filled';
+    getOrderStatus(order, currentTime, orderExpiry, gracePeriod) {
+        this.debug('Order timing:', {
+            currentTime,
+            orderTime: order.timestamp,
+            orderExpiry,  // 420 seconds (7 minutes)
+            gracePeriod   // 420 seconds (7 minutes)
+        });
+
+        // Check explicit status first
         if (order.status === 'Canceled') return 'Canceled';
-        if (Date.now() > expiryTime) return 'Expired';
+        if (order.status === 'Filled') return 'Filled';
+        if (order.status === 'Cleaned') return 'Cleaned';
+
+        // Then check timing
+        const totalExpiry = orderExpiry + gracePeriod;  // This adds up to 14 minutes
+        const orderTime = Number(order.timestamp);
+
+        if (currentTime > orderTime + totalExpiry) {
+            this.debug('Order not active: Past grace period');
+            return 'Cleaned';
+        }
+        if (currentTime > orderTime + orderExpiry) {  // This should be the 7 minute mark
+            this.debug('Order status: Awaiting Clean');
+            return 'Awaiting Clean';
+        }
+
+        this.debug('Order status: Active');
         return 'Active';
     }
 
@@ -957,5 +989,84 @@ export class ViewOrders extends BaseComponent {
         // Update both top and bottom controls
         const controls = this.container.querySelectorAll('.filter-controls');
         controls.forEach(updateControls);
+    }
+
+    async refreshOrders() {
+        try {
+            this.debug('Refreshing orders view');
+            const orders = this.webSocket.getOrders() || [];
+            this.debug('Orders from WebSocket:', orders);
+
+            const contract = await this.getContract();
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
+
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
+            const gracePeriod = (await contract.GRACE_PERIOD()).toNumber();
+            const currentTime = Math.floor(Date.now() / 1000);
+
+            // Show all orders including cleaned ones
+            const filteredOrders = orders.filter(order => {
+                const status = this.getOrderStatus(order, currentTime, orderExpiry, gracePeriod);
+                this.debug('Processing order:', {
+                    orderId: order.id,
+                    status,
+                    timestamp: order.timestamp,
+                    currentTime,
+                    orderExpiry,
+                    gracePeriod
+                });
+                return true; // Show all orders
+            });
+
+            this.debug('Orders after filtering:', filteredOrders);
+
+            // Sort orders by timestamp descending
+            const sortedOrders = [...filteredOrders].sort((a, b) => b.timestamp - a.timestamp);
+            await this.displayOrders(sortedOrders);
+
+        } catch (error) {
+            this.debug('Error refreshing orders:', error);
+            this.showError('Failed to refresh orders');
+        }
+    }
+
+    async displayOrders(orders) {
+        try {
+            const contract = await this.getContract();
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
+            this.debug('Order expiry from contract:', {
+                orderExpiry,
+                inMinutes: orderExpiry / 60
+            });
+            
+            // ... rest of the code ...
+        } catch (error) {
+            this.debug('Error displaying orders:', error);
+            throw error;
+        }
+    }
+
+    formatExpiryTime(timestamp, orderExpiry) {
+        const expiryTime = timestamp + orderExpiry;
+        const now = Math.floor(Date.now() / 1000);
+        const timeLeft = expiryTime - now;
+        
+        this.debug('Expiry calculation:', {
+            timestamp,
+            orderExpiry,
+            expiryTime,
+            now,
+            timeLeft,
+            timeLeftMinutes: timeLeft / 60
+        });
+        
+        if (timeLeft <= 0) {
+            return 'Expired';
+        }
+        
+        const minutes = Math.ceil(timeLeft / 60);
+        return `${minutes}m`;
     }
 }

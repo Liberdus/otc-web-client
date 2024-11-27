@@ -5,6 +5,7 @@
   margin-bottom: 1.25rem;
   border-radius: 0.75rem;
   box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
+  padding: 0.5rem;
 }
 
 /* Table base styles */
@@ -13,43 +14,40 @@
   border-collapse: collapse;
   background: #ffffff;
   table-layout: fixed;
-  min-width: 64rem; /* Reduced from 1200px */
+  min-width: 56rem;
 }
 
 .orders-table thead {
   background-color: #f8f9fe;
 }
 
-/* Column widths - optimized */
+/* Column widths - with wider ID column */
 .orders-table th:nth-child(1) {
-  width: 3rem;
+  width: 7%;
 } /* ID */
 .orders-table th:nth-child(2) {
-  width: 5rem;
-} /* Sell Token */
-.orders-table th:nth-child(3) {
-  width: 6rem;
-} /* Sell Amount */
-.orders-table th:nth-child(4) {
-  width: 5rem;
+  width: 11%;
 } /* Buy Token */
-.orders-table th:nth-child(5) {
-  width: 6rem;
+.orders-table th:nth-child(3) {
+  width: 11%;
 } /* Buy Amount */
+.orders-table th:nth-child(4) {
+  width: 11%;
+} /* Sell Token */
+.orders-table th:nth-child(5) {
+  width: 11%;
+} /* Sell Amount */
 .orders-table th:nth-child(6) {
-  width: 8rem;
-} /* Created */
-.orders-table th:nth-child(7) {
-  width: 6rem;
+  width: 12%;
 } /* Expires */
-.orders-table th:nth-child(8) {
-  width: 5rem;
+.orders-table th:nth-child(7) {
+  width: 12%;
 } /* Status */
+.orders-table th:nth-child(8) {
+  width: 12%;
+} /* Maker */
 .orders-table th:nth-child(9) {
-  width: 6rem;
-} /* Taker */
-.orders-table th:nth-child(10) {
-  width: 7rem;
+  width: 13%;
 } /* Action */
 
 /* Cell styles */
@@ -148,155 +146,170 @@ th[data-sort].active-sort {
 
 th[data-sort].active-sort .sort-icon {
   opacity: 1;
-  color: #10B981; /* Using your existing green color */
+  color: #10b981; /* Using your existing green color */
 }
 
 /* Filter and Pagination Controls */
 .filter-controls {
-    margin-bottom: 1rem;
-    padding: 1rem;
-    background-color: #f8f9fe;
-    border-radius: 0.75rem;
-    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background-color: #f8f9fe;
+  border-radius: 0.75rem;
+  box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
 }
 
 .filter-controls.bottom-controls {
-    margin-top: 1rem;
-    margin-bottom: 0;
+  margin-top: 1rem;
+  margin-bottom: 0;
 }
 
 .filter-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
 }
 
 /* Filter Toggle */
 .filter-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    font-size: 0.875rem;
-    color: #6b7280;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: #6b7280;
 }
 
 .filter-toggle input[type="checkbox"] {
-    cursor: pointer;
-    width: 1rem;
-    height: 1rem;
-    border-radius: 0.25rem;
-    border: 2px solid #10b981;
-    accent-color: #10b981;
+  cursor: pointer;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.25rem;
+  border: 2px solid #10b981;
+  accent-color: #10b981;
 }
 
 .filter-toggle:hover {
-    color: #4b5563;
+  color: #4b5563;
 }
 
 /* Pagination Controls */
 .pagination-controls {
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-    margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-left: auto;
 }
 
 /* Page Size Select */
 .page-size-select {
-    padding: 0.5rem 2rem 0.5rem 1rem;
-    border-radius: 0.5rem;
-    border: 1px solid #e5e7eb;
-    background-color: white;
-    color: #374151;
-    font-size: 0.875rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236B7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 0.75rem center;
-    background-size: 1rem;
+  padding: 0.5rem 2rem 0.5rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e5e7eb;
+  background-color: white;
+  color: #374151;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236B7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
 }
 
 .page-size-select:hover {
-    border-color: #10b981;
+  border-color: #10b981;
 }
 
 .page-size-select:focus {
-    outline: none;
-    border-color: #10b981;
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+  outline: none;
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
 }
 
 /* Pagination Buttons */
 .pagination-buttons {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .pagination-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.375rem;
-    border: 1px solid #e5e7eb;
-    background-color: white;
-    color: #374151;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.375rem;
+  border: 1px solid #e5e7eb;
+  background-color: white;
+  color: #374151;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
 }
 
 .pagination-button:hover:not(:disabled) {
-    background-color: #f9fafb;
-    border-color: #10b981;
-    color: #10b981;
+  background-color: #f9fafb;
+  border-color: #10b981;
+  color: #10b981;
 }
 
 .pagination-button:disabled {
-    background-color: #f3f4f6;
-    color: #9ca3af;
-    cursor: not-allowed;
-    border-color: #e5e7eb;
+  background-color: #f3f4f6;
+  color: #9ca3af;
+  cursor: not-allowed;
+  border-color: #e5e7eb;
 }
 
 .pagination-arrow {
-    font-size: 1rem;
-    line-height: 1;
+  font-size: 1rem;
+  line-height: 1;
 }
 
 /* Page Info */
 .page-info {
-    font-size: 0.875rem;
-    color: #6b7280;
-    min-width: 5rem;
-    text-align: center;
-    font-weight: 500;
+  font-size: 0.875rem;
+  color: #6b7280;
+  min-width: 5rem;
+  text-align: center;
+  font-weight: 500;
 }
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
-    .filter-row {
-        flex-direction: column;
-        align-items: stretch;
-    }
+  .filter-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
 
-    .pagination-controls {
-        flex-direction: column;
-        gap: 1rem;
-    }
+  .pagination-controls {
+    flex-direction: column;
+    gap: 1rem;
+  }
 
-    .pagination-buttons {
-        justify-content: center;
-    }
-    
-    .page-size-select {
-        width: 100%;
-    }
+  .pagination-buttons {
+    justify-content: center;
+  }
+
+  .page-size-select {
+    width: 100%;
+  }
+}
+
+/* Zebra striping for rows */
+.orders-table tbody tr:nth-child(even) {
+    background-color: #f9fafb;  /* Very light gray with slight blue tint */
+}
+
+.orders-table tbody tr:nth-child(odd) {
+    background-color: #ffffff;  /* White */
+}
+
+/* Hover effect for rows */
+.orders-table tbody tr:hover {
+    background-color: #f3f4f6;  /* Slightly darker on hover */
+    transition: background-color 0.15s ease-in-out;
 }

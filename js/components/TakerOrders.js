@@ -166,20 +166,33 @@ export class TakerOrders extends ViewOrders {
         
         // Replace the action column with fill button for active orders
         const actionCell = tr.querySelector('.action-column');
-        if (actionCell) {
-            const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
-            if (status === 'Active') {
-                actionCell.innerHTML = `
-                    <button class="fill-button" data-order-id="${order.id}">Fill Order</button>
-                `;
+        const statusCell = tr.querySelector('.order-status');
+        
+        if (actionCell && statusCell) {
+            try {
+                const currentTime = Math.floor(Date.now() / 1000);
+                const orderTime = Number(order.timestamp);
+                const contract = await this.getContract();
                 
-                // Add click handler for fill button
-                const fillButton = actionCell.querySelector('.fill-button');
-                if (fillButton) {
-                    fillButton.addEventListener('click', () => this.fillOrder(order.id));
+                const orderExpiry = await contract.ORDER_EXPIRY();
+                const isExpired = currentTime > orderTime + orderExpiry.toNumber();
+                
+                if (!isExpired && order.status === 'Active') {
+                    actionCell.innerHTML = `
+                        <button class="fill-button" data-order-id="${order.id}">Fill Order</button>
+                    `;
+                    
+                    // Add click handler for fill button
+                    const fillButton = actionCell.querySelector('.fill-button');
+                    if (fillButton) {
+                        fillButton.addEventListener('click', () => this.fillOrder(order.id));
+                    }
+                } else {
+                    actionCell.innerHTML = '<span class="order-status">Not Available</span>';
                 }
-            } else {
-                actionCell.innerHTML = `<span class="order-status status-${status.toLowerCase()}">${status}</span>`;
+            } catch (error) {
+                console.error('[TakerOrders] Error in createOrderRow:', error);
+                actionCell.innerHTML = '<span class="order-status error">Error</span>';
             }
         }
 
@@ -388,10 +401,26 @@ export class TakerOrders extends ViewOrders {
     }
 
     async setupTable() {
-        // Call parent's setupTable to get pagination
+        // Call parent's setupTable to get basic structure
         await super.setupTable();
         
-        // Replace the filter toggle text
+        // Keep the same structure as ViewOrders.js since it's already in taker's perspective
+        const thead = this.container.querySelector('thead tr');
+        if (thead) {
+            thead.innerHTML = `
+                <th data-sort="id">ID <span class="sort-icon">↕</span></th>
+                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
+                <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
+                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
+                <th data-sort="status">Status <span class="sort-icon">↕</span></th>
+                <th>Maker</th>
+                <th>Action</th>
+            `;
+        }
+
+        // Update filter toggle text
         const filterToggleSpan = this.container.querySelector('.filter-toggle span');
         if (filterToggleSpan) {
             filterToggleSpan.textContent = 'Show only fillable orders';

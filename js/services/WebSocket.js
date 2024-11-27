@@ -151,7 +151,7 @@ export class WebSocketService {
             }
 
             // Try getting firstOrderId with explicit error handling
-            let firstOrderId = 0;  // Default to 0 if call fails
+            let firstOrderId = 0;  // Start from 0 instead of using contract value
             try {
                 this.debug('Calling firstOrderId...');
                 firstOrderId = await contract.firstOrderId();
@@ -161,7 +161,7 @@ export class WebSocketService {
             }
 
             // Try getting nextOrderId with explicit error handling
-            let nextOrderId = 0;  // Default to 0 if call fails
+            let nextOrderId = 0;
             try {
                 this.debug('Calling nextOrderId...');
                 nextOrderId = await contract.nextOrderId();
@@ -170,24 +170,10 @@ export class WebSocketService {
                 this.debug('nextOrderId call failed, using default value:', error);
             }
 
-            // If both calls failed, try reading a single order
-            if (firstOrderId === 0 && nextOrderId === 0) {
-                try {
-                    this.debug('Attempting to read order 0...');
-                    const order = await contract.orders(0);
-                    this.debug('Order 0 result:', order);
-                } catch (error) {
-                    this.debug('Failed to read order 0:', error);
-                    // If we can't read any orders, return empty cache
-                    this.orderCache.clear();
-                    this.notifySubscribers('orderSyncComplete', {});
-                    return;
-                }
-            }
-            
             this.debug('Syncing orders from', firstOrderId.toString(), 'to', nextOrderId.toString());
             
-            for (let i = firstOrderId; i < nextOrderId; i++) {
+            // Always sync from 0 to ensure we don't miss any orders
+            for (let i = 0; i < nextOrderId; i++) {
                 try {
                     const order = await contract.orders(i);
                     if (order.maker !== ethers.constants.AddressZero) {
@@ -200,11 +186,12 @@ export class WebSocketService {
                             buyToken: order.buyToken,
                             buyAmount: order.buyAmount,
                             timestamp: order.timestamp.toNumber(),
-                            status: ['Active', 'Filled', 'Canceled'][order.status],
+                            status: ['Active', 'Filled', 'Canceled', 'Cleaned'][order.status],
                             orderCreationFee: order.orderCreationFee,
                             tries: order.tries
                         };
                         this.orderCache.set(i, orderData);
+                        this.debug('Added order to cache:', orderData);
                     }
                 } catch (error) {
                     this.debug(`Failed to read order ${i}:`, error);
@@ -217,18 +204,25 @@ export class WebSocketService {
             
         } catch (error) {
             this.debug('Order sync failed:', error);
-            // Don't throw - instead handle gracefully
             this.orderCache.clear();
             this.notifySubscribers('orderSyncComplete', {});
         }
     }
 
     getOrders(filterStatus = null) {
-        const orders = Array.from(this.orderCache.values());
-        if (filterStatus) {
-            return orders.filter(order => order.status === filterStatus);
+        try {
+            this.debug('Getting orders with filter:', filterStatus);
+            const orders = Array.from(this.orderCache.values());
+            
+            if (filterStatus) {
+                return orders.filter(order => order.status === filterStatus);
+            }
+            
+            return orders;
+        } catch (error) {
+            this.debug('Error getting orders:', error);
+            return [];
         }
-        return orders;
     }
 
     async reconnect() {
