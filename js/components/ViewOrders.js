@@ -622,8 +622,9 @@ export class ViewOrders extends BaseComponent {
             this.debug('Order details:', order);
 
             // Create token contract instance with full ERC20 ABI
-            const buyToken = new ethers.Contract(
-                order.buyToken,
+            // Use sellToken since the taker is selling what the maker is buying
+            const takerToken = new ethers.Contract(
+                order.sellToken,  // This is what the taker needs to sell
                 erc20Abi,
                 this.provider
             );
@@ -631,25 +632,25 @@ export class ViewOrders extends BaseComponent {
             const userAddress = await window.walletManager.getAccount();
             
             // Check balance first
-            const balance = await buyToken.balanceOf(userAddress);
+            const balance = await takerToken.balanceOf(userAddress);
             this.debug('Current balance:', balance.toString());
-            this.debug('Required amount:', order.buyAmount.toString());
+            this.debug('Required amount:', order.sellAmount.toString());
 
-            if (balance.lt(order.buyAmount)) {
-                throw new Error(`Insufficient token balance. Have ${ethers.utils.formatEther(balance)}, need ${ethers.utils.formatEther(order.buyAmount)}`);
+            if (balance.lt(order.sellAmount)) {
+                throw new Error(`Insufficient token balance. Have ${ethers.utils.formatEther(balance)}, need ${ethers.utils.formatEther(order.sellAmount)}`);
             }
 
             // Check allowance
-            const allowance = await buyToken.allowance(userAddress, this.contract.address);
+            const allowance = await takerToken.allowance(userAddress, this.contract.address);
             this.debug('Current allowance:', allowance.toString());
 
-            if (allowance.lt(order.buyAmount)) {
+            if (allowance.lt(order.sellAmount)) {
                 this.showSuccess('Requesting token approval...');
                 
                 try {
-                    const approveTx = await buyToken.connect(this.provider.getSigner()).approve(
+                    const approveTx = await takerToken.connect(this.provider.getSigner()).approve(
                         this.contract.address,
-                        order.buyAmount,
+                        order.sellAmount,  // Amount the taker needs to sell
                         {
                             gasLimit: 70000,  // Standard gas limit for ERC20 approvals
                             gasPrice: await this.provider.getGasPrice()
