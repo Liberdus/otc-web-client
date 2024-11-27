@@ -12,7 +12,13 @@ console.log('App.js loaded');
 
 class App {
     constructor() {
-        console.log('App constructor called');
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('APP')) {
+                console.log('[App]', message, ...args);
+            }
+        };
+
+        this.debug('App constructor called');
         
         this.walletUI = new WalletUI();
         
@@ -69,7 +75,11 @@ class App {
         walletManager.addListener((event, data) => {
             if (event === 'connect') {
                 this.debug('Wallet connected, reinitializing components...');
+                this.updateTabVisibility(true);
                 this.reinitializeComponents();
+            } else if (event === 'disconnect') {
+                this.debug('Wallet disconnected, updating tab visibility...');
+                this.updateTabVisibility(false);
             }
         });
 
@@ -95,14 +105,25 @@ class App {
             this.refreshActiveComponent();
         });
 
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('APP')) {
-                console.log('[App]', message, ...args);
+        // Initialize debug panel
+        this.initializeDebugPanel();
+
+        // Add new method to update tab visibility
+        this.updateTabVisibility = (isConnected) => {
+            const tabButtons = document.querySelectorAll('.tab-button');
+            tabButtons.forEach(button => {
+                if (button.dataset.tab === 'create-order') return; // Always show create-order
+                button.style.display = isConnected ? 'block' : 'none';
+            });
+            
+            // If disconnected and not on create-order tab, switch to it
+            if (!isConnected && this.currentTab !== 'create-order') {
+                this.showTab('create-order');
             }
         };
 
-        // Initialize debug panel
-        this.initializeDebugPanel();
+        // Update initial tab visibility
+        this.updateTabVisibility(false);
     }
 
     initializeEventListeners() {
@@ -157,13 +178,13 @@ class App {
             window.webSocket = new WebSocketService();
             const wsInitialized = await window.webSocket.initialize();
             if (!wsInitialized) {
-                console.warn('[App] WebSocket initialization failed, falling back to HTTP');
+                this.debug('WebSocket initialization failed, falling back to HTTP');
             }
             
             // Initialize components in read-only mode initially
             await this.initializeComponents(true);
             
-            console.log('[App] Initialization complete');
+            this.debug('Initialization complete');
         } catch (error) {
             this.debug('Initialization error:', error);
         }
@@ -171,12 +192,12 @@ class App {
 
     async initializeComponents(readOnlyMode) {
         try {
-            console.log('[App] Initializing components...');
+            this.debug('Initializing components...');
             
             // Initialize each component
             for (const [id, component] of Object.entries(this.components)) {
                 if (component && typeof component.initialize === 'function') {
-                    console.log(`[App] Initializing component: ${id}`);
+                    this.debug(`Initializing component: ${id}`);
                     await component.initialize(readOnlyMode);
                 }
             }
@@ -184,7 +205,7 @@ class App {
             // Show the current tab
             this.showTab(this.currentTab);
             
-            console.log('[App] Components initialized');
+            this.debug('Components initialized');
         } catch (error) {
             console.error('[App] Error initializing components:', error);
             throw error;

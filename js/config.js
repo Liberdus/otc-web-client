@@ -38,6 +38,7 @@ export const DEBUG_CONFIG = {
     TAKER_ORDERS: false,
     CLEANUP_ORDERS: false,
     WALLET_UI: false,
+    BASE_COMPONENT: false,
     // Add more specific flags as needed
 };
 
@@ -68,11 +69,16 @@ export class WalletManager {
         this.contractAddress = networkConfig["80002"].contractAddress;
         this.contractABI = CONTRACT_ABI;
         this.isInitialized = false;
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('WALLET')) {
+                console.log('[WalletManager]', message, ...args);
+            }
+        };
     }
 
     async init() {
         try {
-            console.log('[WalletManager] Starting initialization...');
+            this.debug('Starting initialization...');
             
             if (typeof window.ethereum === 'undefined') {
                 throw new Error("MetaMask is not installed!");
@@ -85,8 +91,8 @@ export class WalletManager {
             this.contractAddress = networkCfg.contractAddress;
             this.contractABI = CONTRACT_ABI;
             
-            console.log('[WalletManager] Provider initialized');
-            console.log('[WalletManager] Contract config:', {
+            this.debug('Provider initialized');
+            this.debug('Contract config:', {
                 address: this.contractAddress,
                 hasABI: !!this.contractABI
             });
@@ -106,7 +112,7 @@ export class WalletManager {
             }
 
             this.isInitialized = true;
-            console.log('[WalletManager] Initialization complete');
+            this.debug('Initialization complete');
         } catch (error) {
             console.error("[WalletManager] Error in init:", error);
             throw error;
@@ -159,20 +165,20 @@ export class WalletManager {
 
         this.isConnecting = true;
         try {
-            console.log('[WalletManager] Requesting accounts...');
+            this.debug('Requesting accounts...');
             const accounts = await window.ethereum.request({ 
                 method: 'eth_requestAccounts' 
             });
             
-            console.log('[WalletManager] Accounts received:', accounts);
+            this.debug('Accounts received:', accounts);
             
             const chainId = await window.ethereum.request({ 
                 method: 'eth_chainId' 
             });
-            console.log('[WalletManager] Chain ID:', chainId);
+            this.debug('Chain ID:', chainId);
 
             const decimalChainId = parseInt(chainId, 16).toString();
-            console.log('[WalletManager] Decimal Chain ID:', decimalChainId);
+            this.debug('Decimal Chain ID:', decimalChainId);
             
             if (decimalChainId !== "80002") {
                 await this.switchToAmoy();
@@ -182,7 +188,7 @@ export class WalletManager {
             this.chainId = chainId;
             this.isConnected = true;
 
-            console.log('[WalletManager] Notifying listeners of connection');
+            this.debug('Notifying listeners of connection');
             this.notifyListeners('connect', {
                 account: this.account,
                 chainId: this.chainId
@@ -194,7 +200,7 @@ export class WalletManager {
                 chainId: this.chainId
             };
         } catch (error) {
-            console.error('[WalletManager] Connection error:', error);
+            this.debug('Connection error:', error);
             throw error;
         } finally {
             this.isConnecting = false;
@@ -227,16 +233,16 @@ export class WalletManager {
     }
 
     handleAccountsChanged(accounts) {
-        console.log('[WalletManager] Accounts changed:', accounts);
+        this.debug('Accounts changed:', accounts);
         if (accounts.length === 0) {
             this.account = null;
             this.isConnected = false;
-            console.log('[WalletManager] No accounts, triggering disconnect');
+            this.debug('No accounts, triggering disconnect');
             this.notifyListeners('disconnect', {});
         } else if (accounts[0] !== this.account) {
             this.account = accounts[0];
             this.isConnected = true;
-            console.log('[WalletManager] New account:', this.account);
+            this.debug('New account:', this.account);
             this.notifyListeners('accountsChanged', { account: this.account });
         }
     }

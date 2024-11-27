@@ -56,7 +56,7 @@ export class ViewOrders extends BaseComponent {
             }
 
             this.showError(userMessage);
-            console.error('[ViewOrders] Order error:', {
+            this.debug('Order error:', {
                 code: error.code,
                 message: error.message,
                 details: error.details
@@ -854,7 +854,7 @@ export class ViewOrders extends BaseComponent {
                 method: 'eth_accounts' 
             });
             if (!accounts || accounts.length === 0) {
-                console.log('[ViewOrders] No wallet connected');
+                this.debug('No wallet connected');
                 return false;
             }
             const currentAccount = accounts[0].toLowerCase();
@@ -865,20 +865,20 @@ export class ViewOrders extends BaseComponent {
                 statusMap[order.status] : order.status;
             
             if (orderStatus !== 'Active') {
-                console.log('[ViewOrders] Order not active:', orderStatus);
+                this.debug('Order not active:', orderStatus);
                 return false;
             }
 
             // Check if order is expired
             const expiryTime = this.getExpiryTime(order.timestamp);
             if (Date.now() >= expiryTime) {
-                console.log('[ViewOrders] Order expired');
+                this.debug('Order expired');
                 return false;
             }
 
             // Check if user is the maker (can't fill own orders)
             if (order.maker?.toLowerCase() === currentAccount) {
-                console.log('[ViewOrders] User is maker of order');
+                this.debug('User is maker of order');
                 return false;
             }
 
@@ -887,7 +887,7 @@ export class ViewOrders extends BaseComponent {
             const isSpecifiedTaker = order.taker?.toLowerCase() === currentAccount;
             const canFill = isOpenOrder || isSpecifiedTaker;
 
-            console.log('[ViewOrders] Can fill order:', {
+            this.debug('Can fill order:', {
                 isOpenOrder,
                 isSpecifiedTaker,
                 canFill

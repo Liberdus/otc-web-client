@@ -7,7 +7,14 @@ console.log('BaseComponent.js loaded');
 
 export class BaseComponent {
     constructor(containerId) {
-        console.log('BaseComponent constructor called with:', containerId);
+        // Define debug method first
+        this.debug = (message, ...args) => {
+            if (isDebugEnabled('BASE_COMPONENT')) {
+                console.log(`[${this.constructor.name}]`, message, ...args);
+            }
+        };
+
+        this.debug('Constructor called with:', containerId);
         this.container = document.querySelector(`#${containerId}, .${containerId}`);
         if (!this.container) {
             throw new Error(`Container with id or class ${containerId} not found`);
@@ -17,12 +24,6 @@ export class BaseComponent {
         this.tokenCache = new Map();
         // Initialize provider from window.walletManager if available
         this.provider = window.walletManager?.provider || null;
-
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('COMPONENTS')) {
-                console.log(`[${this.constructor.name}]`, message, ...args);
-            }
-        };
     }
 
     createElement(tag, className = '', textContent = '') {
@@ -87,11 +88,11 @@ export class BaseComponent {
     // Add this method to BaseComponent.js
     async getTokenDetails(tokenAddresses) {
         try {
-            console.log('[BaseComponent] Getting token details for:', tokenAddresses);
+            this.debug('Getting token details for:', tokenAddresses);
             
             // Cache verification
             if (!this.tokenCache) {
-                console.warn('[BaseComponent] Token cache not initialized');
+                this.debug('Token cache not initialized');
                 this.tokenCache = new Map();
             }
 
@@ -160,7 +161,7 @@ export class BaseComponent {
             }));
 
             // Log cache updates
-            console.log('[BaseComponent] Token cache after update:', 
+            this.debug('Token cache after update:', 
                 Array.from(this.tokenCache.entries()));
 
             return results.length === 1 ? results[0] : results;
@@ -187,7 +188,7 @@ export class BaseComponent {
         // Check RPC error codes
         const rpcCode = error.error?.code || error.code;
         if (retryableCodes.includes(rpcCode)) {
-            console.log('[BaseComponent] Retryable RPC code detected:', rpcCode);
+            this.debug('Retryable RPC code detected:', rpcCode);
             return true;
         }
 
@@ -203,7 +204,7 @@ export class BaseComponent {
         );
 
         if (hasRetryableMessage) {
-            console.log('[BaseComponent] Retryable message detected:', {
+            this.debug('Retryable message detected:', {
                 errorMessage,
                 rpcMessage,
                 dataMessage
@@ -250,28 +251,28 @@ export class BaseComponent {
     async retryCall(fn, maxRetries = 3, delay = 1000) {
         for (let i = 0; i < maxRetries; i++) {
             try {
-                console.log(`[BaseComponent] Attempt ${i + 1}/${maxRetries}`);
+                this.debug(`Attempt ${i + 1}/${maxRetries}`);
                 return await fn();
             } catch (error) {
                 const errorDetails = this.logDetailedError(
-                    `[BaseComponent] Attempt ${i + 1} failed:`,
+                    `Attempt ${i + 1} failed:`,
                     error
                 );
 
                 const isRetryable = this.isRetryableError(error);
-                console.log('[BaseComponent] Error is retryable:', isRetryable, {
+                this.debug('Error is retryable:', isRetryable, {
                     errorCode: errorDetails.code,
                     rpcCode: errorDetails.rpcCode,
                     message: errorDetails.message
                 });
 
                 if (i === maxRetries - 1 || !isRetryable) {
-                    console.error('[BaseComponent] Max retries reached or non-retryable error');
+                    this.debug('Max retries reached or non-retryable error');
                     throw error;
                 }
                 
                 const waitTime = delay * Math.pow(2, i); // Exponential backoff
-                console.log(`[BaseComponent] Retrying in ${waitTime}ms...`);
+                this.debug(`Retrying in ${waitTime}ms...`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
             }
         }
