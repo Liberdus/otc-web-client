@@ -443,10 +443,10 @@ export class ViewOrders extends BaseComponent {
         thead.innerHTML = `
             <tr>
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="sell">Buy <span class="sort-icon">↕</span></th>
-                <th data-sort="sellAmount" class="">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Sell <span class="sort-icon">↕</span></th>
+                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
                 <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
+                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
                 <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
@@ -622,37 +622,32 @@ export class ViewOrders extends BaseComponent {
             this.debug('Order details:', order);
 
             // Create token contract instance with full ERC20 ABI
-            // Use sellToken since the taker is selling what the maker is buying
+            // Use buyToken since the taker is selling what the maker wants to buy
             const takerToken = new ethers.Contract(
-                order.sellToken,  // This is what the taker needs to sell
+                order.buyToken,  // This is what the taker needs to sell (maker wants to buy)
                 erc20Abi,
                 this.provider
             );
             
             const userAddress = await window.walletManager.getAccount();
             
-            // Check balance first
+            // Check balance and allowance for what taker needs to sell
             const balance = await takerToken.balanceOf(userAddress);
-            this.debug('Current balance:', balance.toString());
-            this.debug('Required amount:', order.sellAmount.toString());
+            const allowance = await takerToken.allowance(userAddress, this.contract.address);
 
-            if (balance.lt(order.sellAmount)) {
-                throw new Error(`Insufficient token balance. Have ${ethers.utils.formatEther(balance)}, need ${ethers.utils.formatEther(order.sellAmount)}`);
+            if (balance.lt(order.buyAmount)) {
+                throw new Error(`Insufficient token balance. Have ${ethers.utils.formatEther(balance)}, need ${ethers.utils.formatEther(order.buyAmount)}`);
             }
 
-            // Check allowance
-            const allowance = await takerToken.allowance(userAddress, this.contract.address);
-            this.debug('Current allowance:', allowance.toString());
-
-            if (allowance.lt(order.sellAmount)) {
+            if (allowance.lt(order.buyAmount)) {
                 this.showSuccess('Requesting token approval...');
                 
                 try {
                     const approveTx = await takerToken.connect(this.provider.getSigner()).approve(
                         this.contract.address,
-                        order.sellAmount,  // Amount the taker needs to sell
+                        order.buyAmount,  // Amount the taker needs to sell (maker's buyAmount)
                         {
-                            gasLimit: 70000,  // Standard gas limit for ERC20 approvals
+                            gasLimit: 70000,
                             gasPrice: await this.provider.getGasPrice()
                         }
                     );
@@ -807,10 +802,10 @@ export class ViewOrders extends BaseComponent {
 
         tr.innerHTML = `
             <td>${order.id}</td>
-            <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
-            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
             <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
             <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
+            <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
+            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
             <td>${this.formatExpiry(order.timestamp)}</td>
             <td class="order-status">${status}</td>
             <td class="taker-column">${takerDisplay}</td>
