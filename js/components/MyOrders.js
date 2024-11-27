@@ -376,15 +376,15 @@ export class MyOrders extends ViewOrders {
         // Call parent's setupTable to get basic structure
         await super.setupTable();
         
-        // Update the table header to swap Buy and Sell back
+        // Update the table header to show maker's perspective
         const thead = this.container.querySelector('thead tr');
         if (thead) {
             thead.innerHTML = `
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
-                <th data-sort="sellAmount" class="">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
-                <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="buy">Sell <span class="sort-icon">↕</span></th>
+                <th data-sort="buyAmount" class="">Amount <span class="sort-icon">↕</span></th>
+                <th data-sort="sell">Buy <span class="sort-icon">↕</span></th>
+                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
                 <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
