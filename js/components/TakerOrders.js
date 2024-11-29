@@ -188,7 +188,7 @@ export class TakerOrders extends ViewOrders {
                         fillButton.addEventListener('click', () => this.fillOrder(order.id));
                     }
                 } else {
-                    actionCell.innerHTML = '<span class="order-status">Not Available</span>';
+                    actionCell.innerHTML = '<span class="order-status"></span>';
                 }
             } catch (error) {
                 console.error('[TakerOrders] Error in createOrderRow:', error);
@@ -415,7 +415,7 @@ export class TakerOrders extends ViewOrders {
                 <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
                 <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
-                <th>Maker</th>
+                <th>Taker</th>
                 <th>Action</th>
             `;
         }
