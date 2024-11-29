@@ -88,63 +88,36 @@ export class Cleanup extends BaseComponent {
 
     async checkCleanupOpportunities() {
         try {
-            const contract = await this.getContract();
-            if (!contract) {
-                throw new Error('Contract not initialized');
-            }
-
-            const orderExpiry = await contract.ORDER_EXPIRY();
-            const gracePeriod = await contract.GRACE_PERIOD();
-            const totalExpiry = orderExpiry.add(gracePeriod);
+            const orders = this.webSocket.getOrders('Active');
+            const eligibleOrders = [];
             
-            const currentTime = Math.floor(Date.now() / 1000);
-            const orders = this.webSocket.getOrders('Active') || [];
+            for (const order of orders) {
+                const { isEligible } = await this.webSocket.checkCleanupEligibility(order.id);
+                if (isEligible) {
+                    eligibleOrders.push(order);
+                }
+            }
             
-            this.debug('Checking cleanup opportunities:', {
-                currentTime,
-                orderExpiry: orderExpiry.toString(),
-                gracePeriod: gracePeriod.toString(),
-                totalExpiry: totalExpiry.toString(),
-                activeOrders: orders.length
-            });
-
-            const readyOrders = orders.filter(order => {
-                const isPastGracePeriod = currentTime > order.timestamp + totalExpiry.toNumber();
-                this.debug('Order cleanup check:', {
-                    orderId: order.orderId,
-                    orderTime: order.timestamp,
-                    expiryTime: order.timestamp + totalExpiry.toNumber(),
-                    isPastGracePeriod
-                });
-                return isPastGracePeriod;
-            });
-
-            const reward = readyOrders.reduce((total, order) => {
-                return total.add(ethers.BigNumber.from(order.orderCreationFee));
-            }, ethers.BigNumber.from(0));
-
-            const rewardSpan = document.getElementById('cleanup-reward');
-            const readySpan = document.getElementById('cleanup-ready');
-            const cleanupButton = document.getElementById('cleanup-button');
-
-            if (rewardSpan) {
-                rewardSpan.textContent = ethers.utils.formatEther(reward) + ' POL';
+            this.debug('Cleanup eligible orders:', eligibleOrders);
+            
+            // Update UI to show eligible orders
+            const container = document.getElementById('cleanup-container');
+            if (eligibleOrders.length > 0) {
+                container.innerHTML = `
+                    <div class="tab-content-wrapper">
+                        <h2>Cleanup Expired Orders</h2>
+                        <p>${eligibleOrders.length} orders eligible for cleanup</p>
+                        <button id="cleanupButton" class="action-button">Clean Orders</button>
+                    </div>`;
+            } else {
+                container.innerHTML = `
+                    <div class="tab-content-wrapper">
+                        <h2>Cleanup Expired Orders</h2>
+                        <p>No orders eligible for cleanup</p>
+                    </div>`;
             }
-            if (readySpan) {
-                readySpan.textContent = readyOrders.length.toString();
-            }
-            if (cleanupButton) {
-                cleanupButton.disabled = readyOrders.length === 0;
-            }
-
-            this.debug('Cleanup check complete:', {
-                readyOrders: readyOrders.length,
-                reward: reward.toString()
-            });
-
         } catch (error) {
             this.debug('Error checking cleanup opportunities:', error);
-            throw error;
         }
     }
 
@@ -183,77 +156,75 @@ export class Cleanup extends BaseComponent {
                 throw new Error('Contract not initialized');
             }
 
-            console.log('[Cleanup] Starting cleanup process');  // Temporary console.log for debugging
             this.cleanupButton.disabled = true;
             this.cleanupButton.textContent = 'Cleaning...';
 
             // Get current network conditions
             const provider = contract.provider;
             const feeData = await provider.getFeeData();
-            console.log('[Cleanup] Fee data:', {  // Temporary console.log for debugging
-                gasPrice: ethers.utils.formatUnits(feeData.gasPrice, 'gwei') + ' gwei',
-                maxFeePerGas: feeData.maxFeePerGas ? ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei') + ' gwei' : null,
-                maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei') + ' gwei' : null
-            });
-
-            // Get gas estimate with higher buffer
+            
+            // Get gas estimate
             const gasEstimate = await contract.estimateGas.cleanupExpiredOrders()
                 .catch(error => {
-                    console.log('[Cleanup] Gas estimation failed:', error);  // Temporary console.log for debugging
-                    return ethers.BigNumber.from('300000'); // Lower default gas limit
+                    console.log('[Cleanup] Gas estimation failed:', error);
+                    return ethers.BigNumber.from('300000'); // Default gas limit
                 });
 
-            // Add 50% buffer to gas estimate
-            const gasLimit = gasEstimate.mul(150).div(100);
+            // Add 20% buffer to gas estimate
+            const gasLimit = gasEstimate.mul(120).div(100);
 
-            console.log('[Cleanup] Transaction parameters:', {  // Temporary console.log for debugging
-                gasLimit: gasLimit.toString(),
-                gasPrice: ethers.utils.formatUnits(feeData.gasPrice, 'gwei') + ' gwei'
-            });
-
-            // Use legacy transaction type for compatibility
+            // Use legacy transaction type
             const txOptions = {
                 gasLimit,
                 gasPrice: feeData.gasPrice,
                 type: 0  // Force legacy transaction
             };
 
-            console.log('[Cleanup] Sending cleanup transaction with options:', txOptions);  // Temporary console.log for debugging
-
+            console.log('[Cleanup] Sending transaction with options:', txOptions);
             const tx = await contract.cleanupExpiredOrders(txOptions);
-            console.log('[Cleanup] Transaction sent:', tx.hash);  // Temporary console.log for debugging
+            console.log('[Cleanup] Transaction sent:', tx.hash);
 
             const receipt = await tx.wait();
-            console.log('[Cleanup] Transaction confirmed:', receipt);  // Temporary console.log for debugging
+            console.log('[Cleanup] Transaction confirmed:', receipt);
+            console.log('[Cleanup] Events:', receipt.events);
 
             if (receipt.status === 0) {
                 throw new Error('Transaction failed during execution');
+            }
+
+            // Parse cleanup events from receipt
+            const cleanedOrderIds = receipt.events
+                ?.filter(event => {
+                    console.log('[Cleanup] Processing event:', event);
+                    return event.event === 'OrderCleanedUp';
+                })
+                ?.map(event => {
+                    console.log('[Cleanup] Cleaned order:', event.args);
+                    return event.args.orderId.toString();
+                });
+                
+            console.log('[Cleanup] Cleaned order IDs:', cleanedOrderIds);
+                
+            if (cleanedOrderIds?.length) {
+                this.debug('Orders cleaned:', cleanedOrderIds);
+                // Remove cleaned orders from WebSocket cache
+                this.webSocket.removeOrders(cleanedOrderIds);
+                // Force a fresh sync
+                await this.webSocket.syncAllOrders(contract);
             }
 
             this.showSuccess('Cleanup successful! Check your wallet for rewards.');
             await this.checkCleanupOpportunities();
 
         } catch (error) {
-            console.error('[Cleanup] Error details:', {  // Temporary console.log for debugging
+            console.error('[Cleanup] Error details:', {
                 message: error.message,
                 code: error.code,
                 error: error.error,
                 reason: error.reason,
                 transaction: error.transaction
             });
-            
-            let errorMessage = 'Cleanup failed: ';
-            if (error.error?.message) {
-                errorMessage += error.error.message;
-            } else if (error.reason) {
-                errorMessage += error.reason;
-            } else if (error.message) {
-                errorMessage += error.message;
-            } else {
-                errorMessage += 'Unknown error occurred';
-            }
-            
-            this.showError(errorMessage);
+            this.showError(`Cleanup failed: ${error.message}`);
         } finally {
             this.cleanupButton.textContent = 'Clean Orders';
             this.cleanupButton.disabled = false;
