@@ -154,11 +154,11 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
 
-            const tokenDetails = await this.getTokenDetails(tokenAddress);
-            if (tokenDetails && tokenDetails.symbol) {
+            const tokenDetails = await this.getTokenDetails([tokenAddress]);
+            if (tokenDetails && tokenDetails[0]?.symbol) {
                 const balanceElement = document.getElementById(elementId);
-                const formattedBalance = parseFloat(tokenDetails.formattedBalance).toFixed(4);
-                balanceElement.textContent = `Balance: ${formattedBalance} ${tokenDetails.symbol}`;
+                const formattedBalance = parseFloat(tokenDetails[0].formattedBalance).toFixed(4);
+                balanceElement.textContent = `Balance: ${formattedBalance} ${tokenDetails[0].symbol}`;
             }
         } catch (error) {
             console.error(`Error updating token balance:`, error);

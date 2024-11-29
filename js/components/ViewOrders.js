@@ -214,29 +214,25 @@ export class ViewOrders extends BaseComponent {
                 ordersToDisplay = ordersToDisplay.filter(order => order !== null);
             }
 
-            // Get token details only if we have orders
-            let tokenDetailsMap = new Map();
-            if (ordersToDisplay.length > 0) {
-                const tokenAddresses = new Set();
-                ordersToDisplay.forEach(order => {
-                    if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
-                    if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
-                });
+            // Get token details
+            const tokenAddresses = new Set();
+            ordersToDisplay.forEach(order => {
+                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
+                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
+            });
 
-                const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
-                if (tokenDetails) {
-                    Array.from(tokenAddresses).forEach((address, index) => {
-                        if (tokenDetails[index]) {
-                            tokenDetailsMap.set(address.toLowerCase(), tokenDetails[index]);
-                        }
-                    });
+            const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
+            const tokenDetailsMap = new Map();
+            Array.from(tokenAddresses).forEach((address, index) => {
+                if (tokenDetails[index]) {
+                    tokenDetailsMap.set(address, tokenDetails[index]);
                 }
-            }
+            });
 
             // Debug log the orders
             this.debug('Orders after filtering:', ordersToDisplay);
 
-            // Sort the filtered orders first
+            // Sort orders based on current sort configuration
             ordersToDisplay = ordersToDisplay.sort((a, b) => {
                 const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
                 
@@ -247,14 +243,14 @@ export class ViewOrders extends BaseComponent {
                         const sellTokenA = tokenDetailsMap.get(a.sellToken?.toLowerCase())?.symbol || 'Unknown';
                         const sellTokenB = tokenDetailsMap.get(b.sellToken?.toLowerCase())?.symbol || 'Unknown';
                         return sellTokenA.localeCompare(sellTokenB) * direction;
-                    case 'sellAmount':
-                        const sellAmountA = ethers.utils.formatUnits(a.sellAmount, tokenDetailsMap.get(a.sellToken?.toLowerCase())?.decimals || 18);
-                        const sellAmountB = ethers.utils.formatUnits(b.sellAmount, tokenDetailsMap.get(b.sellToken?.toLowerCase())?.decimals || 18);
-                        return (Number(sellAmountA) - Number(sellAmountB)) * direction;
                     case 'buy':
                         const buyTokenA = tokenDetailsMap.get(a.buyToken?.toLowerCase())?.symbol || 'Unknown';
                         const buyTokenB = tokenDetailsMap.get(b.buyToken?.toLowerCase())?.symbol || 'Unknown';
                         return buyTokenA.localeCompare(buyTokenB) * direction;
+                    case 'sellAmount':
+                        const sellAmountA = ethers.utils.formatUnits(a.sellAmount, tokenDetailsMap.get(a.sellToken?.toLowerCase())?.decimals || 18);
+                        const sellAmountB = ethers.utils.formatUnits(b.sellAmount, tokenDetailsMap.get(b.sellToken?.toLowerCase())?.decimals || 18);
+                        return (Number(sellAmountA) - Number(sellAmountB)) * direction;
                     case 'buyAmount':
                         const buyAmountA = ethers.utils.formatUnits(a.buyAmount, tokenDetailsMap.get(a.buyToken?.toLowerCase())?.decimals || 18);
                         const buyAmountB = ethers.utils.formatUnits(b.buyAmount, tokenDetailsMap.get(b.buyToken?.toLowerCase())?.decimals || 18);
@@ -300,10 +296,15 @@ export class ViewOrders extends BaseComponent {
                 return;
             }
 
-            // Add sorted orders to table
+            // Add orders to table with lowercase token addresses
             for (const order of ordersToDisplay) {
                 if (order) {
-                    const row = await this.createOrderRow(order, tokenDetailsMap);
+                    const orderWithLowercase = {
+                        ...order,
+                        sellToken: order.sellToken.toLowerCase(),
+                        buyToken: order.buyToken.toLowerCase()
+                    };
+                    const row = await this.createOrderRow(orderWithLowercase, tokenDetailsMap);
                     tbody.appendChild(row);
                 }
             }
