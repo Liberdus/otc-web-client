@@ -142,7 +142,6 @@ export class WebSocketService {
         try {
             this.debug('Starting order sync with contract:', contract.address);
             
-            // Get current order state directly from contract
             let nextOrderId = 0;
             try {
                 nextOrderId = await contract.nextOrderId();
@@ -154,13 +153,12 @@ export class WebSocketService {
             // Clear existing cache before sync
             this.orderCache.clear();
             
-            // Always sync from 0 to ensure we don't miss any orders
+            // Sync all orders that have a valid maker address
             for (let i = 0; i < nextOrderId; i++) {
                 try {
                     const order = await contract.orders(i);
-                    // Only add non-zero address orders that are Active
-                    if (order.maker !== ethers.constants.AddressZero && 
-                        order.status === 0) { // 0 = Active
+                    // Only filter out zero-address makers (non-existent orders)
+                    if (order.maker !== ethers.constants.AddressZero) {
                         const orderData = {
                             id: i,
                             maker: order.maker,
@@ -170,7 +168,7 @@ export class WebSocketService {
                             buyToken: order.buyToken,
                             buyAmount: order.buyAmount,
                             timestamp: order.timestamp.toNumber(),
-                            status: ['Active', 'Filled', 'Canceled'][order.status],
+                            status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
                             orderCreationFee: order.orderCreationFee,
                             tries: order.tries
                         };
@@ -183,7 +181,7 @@ export class WebSocketService {
                 }
             }
             
-            this.debug('Order sync complete:', Object.fromEntries(this.orderCache));
+            this.debug('Order sync complete. Cache size:', this.orderCache.size);
             this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
             
         } catch (error) {
