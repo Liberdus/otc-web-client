@@ -142,41 +142,25 @@ export class WebSocketService {
         try {
             this.debug('Starting order sync with contract:', contract.address);
             
-            // Try reading a simple view function first to verify contract access
-            try {
-                const maxCleanupBatch = await contract.MAX_CLEANUP_BATCH();
-                this.debug('MAX_CLEANUP_BATCH:', maxCleanupBatch.toString());
-            } catch (error) {
-                this.debug('Failed to read MAX_CLEANUP_BATCH:', error);
-            }
-
-            // Try getting firstOrderId with explicit error handling
-            let firstOrderId = 0;  // Start from 0 instead of using contract value
-            try {
-                this.debug('Calling firstOrderId...');
-                firstOrderId = await contract.firstOrderId();
-                this.debug('firstOrderId result:', firstOrderId.toString());
-            } catch (error) {
-                this.debug('firstOrderId call failed, using default value:', error);
-            }
-
-            // Try getting nextOrderId with explicit error handling
+            // Get current order state directly from contract
             let nextOrderId = 0;
             try {
-                this.debug('Calling nextOrderId...');
                 nextOrderId = await contract.nextOrderId();
                 this.debug('nextOrderId result:', nextOrderId.toString());
             } catch (error) {
                 this.debug('nextOrderId call failed, using default value:', error);
             }
 
-            this.debug('Syncing orders from', firstOrderId.toString(), 'to', nextOrderId.toString());
+            // Clear existing cache before sync
+            this.orderCache.clear();
             
             // Always sync from 0 to ensure we don't miss any orders
             for (let i = 0; i < nextOrderId; i++) {
                 try {
                     const order = await contract.orders(i);
-                    if (order.maker !== ethers.constants.AddressZero) {
+                    // Only add non-zero address orders that are Active
+                    if (order.maker !== ethers.constants.AddressZero && 
+                        order.status === 0) { // 0 = Active
                         const orderData = {
                             id: i,
                             maker: order.maker,
@@ -186,7 +170,7 @@ export class WebSocketService {
                             buyToken: order.buyToken,
                             buyAmount: order.buyAmount,
                             timestamp: order.timestamp.toNumber(),
-                            status: ['Active', 'Filled', 'Canceled', 'Cleaned'][order.status],
+                            status: ['Active', 'Filled', 'Canceled'][order.status],
                             orderCreationFee: order.orderCreationFee,
                             tries: order.tries
                         };
@@ -275,6 +259,21 @@ export class WebSocketService {
         this.orderCache.delete(orderId);
     }
 
+    removeOrders(orderIds) {
+        if (!Array.isArray(orderIds)) {
+            console.warn('[WebSocket] removeOrders called with non-array:', orderIds);
+            return;
+        }
+        
+        this.debug('Removing orders:', orderIds);
+        orderIds.forEach(orderId => {
+            this.orderCache.delete(orderId);
+        });
+        
+        // Notify subscribers of the update
+        this.notifySubscribers('ordersUpdated', this.getOrders());
+    }
+
     notifySubscribers(eventName, data) {
         this.debug('Notifying subscribers for event:', eventName);
         const subscribers = this.subscribers.get(eventName);
@@ -310,6 +309,57 @@ export class WebSocketService {
         } catch (error) {
             this.debug('Contract state check failed:', error);
             return false;
+        }
+    }
+
+    // Add this method to verify specific order state
+    async verifyOrderState(orderId) {
+        try {
+            const contract = await this.getContract();
+            const order = await contract.orders(orderId);
+            this.debug('Direct order state check:', {
+                orderId,
+                exists: order.maker !== ethers.constants.AddressZero,
+                status: ['Active', 'Filled', 'Canceled'][order.status],
+                timestamp: order.timestamp.toNumber()
+            });
+            return order;
+        } catch (error) {
+            this.debug('Error verifying order state:', error);
+            return null;
+        }
+    }
+
+    // Add this method to check if orders are eligible for cleanup
+    async checkCleanupEligibility(orderId) {
+        try {
+            const contract = new ethers.Contract(
+                this.contractAddress,
+                this.contractABI,
+                this.provider
+            );
+
+            const order = await contract.orders(orderId);
+            const currentTime = Math.floor(Date.now() / 1000);
+            const orderTime = order.timestamp.toNumber();
+            const totalExpiry = 14 * 24 * 60 * 60; // 14 days in seconds
+
+            this.debug('Cleanup eligibility check:', {
+                orderId,
+                orderTime,
+                currentTime,
+                age: currentTime - orderTime,
+                requiredAge: totalExpiry,
+                isEligible: (currentTime - orderTime) > totalExpiry
+            });
+
+            return {
+                isEligible: (currentTime - orderTime) > totalExpiry,
+                order
+            };
+        } catch (error) {
+            this.debug('Error checking cleanup eligibility:', error);
+            return { isEligible: false, error };
         }
     }
 }

@@ -880,19 +880,18 @@ export class ViewOrders extends BaseComponent {
         // Check explicit status first
         if (order.status === 'Canceled') return 'Canceled';
         if (order.status === 'Filled') return 'Filled';
-        if (order.status === 'Cleaned') return 'Cleaned';
 
         // Then check timing
-        const totalExpiry = orderExpiry + gracePeriod;  // This adds up to 14 minutes
+        const totalExpiry = orderExpiry + gracePeriod;
         const orderTime = Number(order.timestamp);
 
         if (currentTime > orderTime + totalExpiry) {
             this.debug('Order not active: Past grace period');
-            return 'Cleaned';
+            return 'Expired';
         }
-        if (currentTime > orderTime + orderExpiry) {  // This should be the 7 minute mark
+        if (currentTime > orderTime + orderExpiry) {
             this.debug('Order status: Awaiting Clean');
-            return 'Awaiting Clean';
+            return 'Expired';
         }
 
         this.debug('Order status: Active');
@@ -921,10 +920,19 @@ export class ViewOrders extends BaseComponent {
                 return false;
             }
 
-            // Check if order is expired
-            const expiryTime = this.getExpiryTime(order.timestamp);
-            if (Date.now() >= expiryTime) {
-                this.debug('Order expired');
+            // Check if order is expired - using the contract's ORDER_EXPIRY
+            const contract = await this.getContract();
+            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
+            const now = Math.floor(Date.now() / 1000);
+            const expiryTime = Number(order.timestamp) + orderExpiry;
+
+            if (now >= expiryTime) {
+                this.debug('Order expired', {
+                    now,
+                    timestamp: order.timestamp,
+                    orderExpiry,
+                    expiryTime
+                });
                 return false;
             }
 
