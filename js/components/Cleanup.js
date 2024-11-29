@@ -18,20 +18,29 @@ export class Cleanup extends BaseComponent {
         try {
             this.debug('Initializing cleanup component...');
             
-            if (!this.webSocket?.isInitialized) {
-                this.debug('Waiting for WebSocket service to initialize...');
-                for (let i = 0; i < 10; i++) {
-                    if (window.webSocket?.isInitialized) {
+            // Wait for both WebSocket and Contract to be ready
+            if (!this.webSocket?.isInitialized || !this.webSocket?.contract) {
+                this.debug('Waiting for WebSocket service and contract to initialize...');
+                let attempts = 0;
+                while (attempts < 10) {
+                    if (window.webSocket?.isInitialized && window.webSocket?.contract) {
                         this.webSocket = window.webSocket;
+                        this.debug('WebSocket service and contract found');
                         break;
                     }
+                    this.debug(`Attempt ${attempts + 1}: Waiting for WebSocket...`);
                     await new Promise(resolve => setTimeout(resolve, 500));
+                    attempts++;
                 }
             }
 
-            if (!this.webSocket?.isInitialized) {
-                throw new Error('WebSocket service not initialized after timeout');
+            // Verify both WebSocket and Contract are available
+            if (!this.webSocket?.isInitialized || !this.webSocket?.contract) {
+                throw new Error('WebSocket service or contract not properly initialized');
             }
+
+            // Setup WebSocket event listeners
+            this.setupWebSocket();
 
             this.container.innerHTML = '';
             
@@ -89,6 +98,7 @@ export class Cleanup extends BaseComponent {
         } catch (error) {
             this.debug('Initialization failed:', error);
             this.showError('Failed to initialize cleanup component');
+            this.updateUIForError();
         }
     }
 
@@ -101,7 +111,16 @@ export class Cleanup extends BaseComponent {
 
     async checkCleanupOpportunities() {
         try {
+            // Verify WebSocket and contract before proceeding
+            if (!this.webSocket?.contract) {
+                throw new Error('Contract not available for cleanup check');
+            }
+
             const orders = this.webSocket.getOrders();
+            if (!Array.isArray(orders)) {
+                throw new Error('Invalid orders data received from WebSocket');
+            }
+
             const eligibleOrders = {
                 active: [],
                 cancelled: []
@@ -221,7 +240,8 @@ export class Cleanup extends BaseComponent {
 
     async performCleanup() {
         try {
-            const contract = await this.getContract();
+            // Use WebSocket's contract instance instead of getting a new one
+            const contract = this.webSocket?.contract;
             if (!contract) {
                 throw new Error('Contract not initialized');
             }

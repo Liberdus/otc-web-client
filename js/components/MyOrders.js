@@ -6,6 +6,12 @@ export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
         
+        // Initialize sort config
+        this.sortConfig = {
+            column: 'id',
+            direction: 'asc'
+        };
+        
         // Initialize debug logger
         this.debug = (message, ...args) => {
             if (isDebugEnabled('MY_ORDERS')) {
@@ -229,7 +235,7 @@ export class MyOrders extends ViewOrders {
                 } else if (order.status === 'Filled') {
                     actionCell.innerHTML = '<span class="order-status">Filled</span>';
                 } else if (isGracePeriodExpired) {
-                    actionCell.innerHTML = '<span class="order-status">Awaiting Cleanup</span>';
+                    actionCell.innerHTML = '<span class="order-status">Await Cleanup</span>';
                 } else {
                     actionCell.innerHTML = `
                         <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
@@ -249,8 +255,9 @@ export class MyOrders extends ViewOrders {
     }
 
     async refreshOrdersView() {
-        this.debug('Refreshing orders view');
         try {
+            this.debug('Initializing MyOrders component');
+            
             // Get contract instance first
             this.contract = await this.getContract();
             if (!this.contract) {
@@ -265,11 +272,22 @@ export class MyOrders extends ViewOrders {
             }
             tbody.innerHTML = '';
 
+            // Get current account
+            const userAddress = await window.walletManager.getAccount();
+            if (!userAddress) {
+                this.debug('No account connected');
+                return;
+            }
+
             // Get filter state
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
 
-            // Filter orders if necessary
-            let ordersToDisplay = Array.from(this.orders.values());
+            // Filter orders for the current user
+            let ordersToDisplay = Array.from(this.orders.values()).filter(order => 
+                order?.maker && userAddress && 
+                order.maker.toLowerCase() === userAddress.toLowerCase()
+            );
+
             if (showOnlyActive) {
                 ordersToDisplay = ordersToDisplay.filter(order => 
                     order.status !== 'Canceled' && order.status !== 'Filled'
@@ -291,7 +309,7 @@ export class MyOrders extends ViewOrders {
                 }
             });
 
-            // Sort the filtered orders
+            // Sort orders based on current sort configuration
             ordersToDisplay = ordersToDisplay.sort((a, b) => {
                 const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
                 
@@ -314,16 +332,12 @@ export class MyOrders extends ViewOrders {
                         const buyAmountA = ethers.utils.formatUnits(a.buyAmount, tokenDetailsMap.get(a.buyToken)?.decimals || 18);
                         const buyAmountB = ethers.utils.formatUnits(b.buyAmount, tokenDetailsMap.get(b.buyToken)?.decimals || 18);
                         return (Number(buyAmountA) - Number(buyAmountB)) * direction;
-                    case 'created':
-                        return (Number(a.timestamp) - Number(b.timestamp)) * direction;
                     case 'expires':
                         const expiryA = this.getExpiryTime(a.timestamp);
                         const expiryB = this.getExpiryTime(b.timestamp);
                         return (expiryA - expiryB) * direction;
                     case 'status':
-                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
-                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
-                        return statusA.localeCompare(statusB) * direction;
+                        return a.status.localeCompare(b.status) * direction;
                     default:
                         return 0;
                 }
@@ -374,6 +388,11 @@ export class MyOrders extends ViewOrders {
                 <th>Taker</th>
                 <th>Action</th>
             `;
+
+            // Re-add click handlers for sorting after updating innerHTML
+            thead.querySelectorAll('th[data-sort]').forEach(th => {
+                th.addEventListener('click', () => this.handleSort(th.dataset.sort));
+            });
         }
 
         // Replace the filter toggle text

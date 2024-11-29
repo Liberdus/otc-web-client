@@ -12,6 +12,7 @@ export class WebSocketService {
         this.isInitialized = false;
         this.contractAddress = null;
         this.contractABI = null;
+        this.contract = null;
         
         this.debug = (message, ...args) => {
             if (isDebugEnabled('WEBSOCKET')) {
@@ -31,22 +32,26 @@ export class WebSocketService {
             this.contractAddress = config.contractAddress;
             this.contractABI = config.contractABI;
             
+            if (!this.contractABI) {
+                throw new Error('Contract ABI not found in network config');
+            }
+            
             this.provider = new ethers.providers.WebSocketProvider(config.wsUrl);
             
             // Wait for provider to be ready
             await this.provider.ready;
             this.debug('Provider ready');
 
-            const contract = new ethers.Contract(
+            this.contract = new ethers.Contract(
                 this.contractAddress,
                 this.contractABI,
                 this.provider
             );
 
             this.debug('Contract initialized, starting order sync...');
-            await this.syncAllOrders(contract);
+            await this.syncAllOrders(this.contract);
             this.debug('Setting up event listeners...');
-            await this.setupEventListeners(contract);
+            await this.setupEventListeners(this.contract);
             
             this.isInitialized = true;
             this.debug('Initialization complete');
@@ -318,8 +323,7 @@ export class WebSocketService {
     // Add this method to verify specific order state
     async verifyOrderState(orderId) {
         try {
-            const contract = await this.getContract();
-            const order = await contract.orders(orderId);
+            const order = await this.contract.orders(orderId);
             this.debug('Direct order state check:', {
                 orderId,
                 exists: order.maker !== ethers.constants.AddressZero,
@@ -336,20 +340,18 @@ export class WebSocketService {
     // Add this method to check if orders are eligible for cleanup
     async checkCleanupEligibility(orderId) {
         try {
+            if (!this.contract) {
+                throw new Error('Contract not initialized');
+            }
+
             const order = this.orderCache.get(orderId);
             if (!order) {
                 this.debug('Order not found in cache:', orderId);
                 return { isEligible: false };
             }
 
-            const contract = new ethers.Contract(
-                this.contractAddress,
-                this.contractABI,
-                this.provider
-            );
-
-            const orderExpiry = await contract.ORDER_EXPIRY();
-            const gracePeriod = await contract.GRACE_PERIOD();
+            const orderExpiry = await this.contract.ORDER_EXPIRY();
+            const gracePeriod = await this.contract.GRACE_PERIOD();
 
             const currentTime = Math.floor(Date.now() / 1000);
             const orderTime = order.timestamp;

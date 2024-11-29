@@ -219,15 +219,15 @@ export class ViewOrders extends BaseComponent {
             if (ordersToDisplay.length > 0) {
                 const tokenAddresses = new Set();
                 ordersToDisplay.forEach(order => {
-                    if (order?.sellToken) tokenAddresses.add(order.sellToken);
-                    if (order?.buyToken) tokenAddresses.add(order.buyToken);
+                    if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
+                    if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
                 });
 
                 const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
                 if (tokenDetails) {
-                    tokenDetails.forEach((details, index) => {
-                        if (details) {
-                            tokenDetailsMap.set(Array.from(tokenAddresses)[index], details);
+                    Array.from(tokenAddresses).forEach((address, index) => {
+                        if (tokenDetails[index]) {
+                            tokenDetailsMap.set(address.toLowerCase(), tokenDetails[index]);
                         }
                     });
                 }
@@ -244,20 +244,20 @@ export class ViewOrders extends BaseComponent {
                     case 'id':
                         return (Number(a.id) - Number(b.id)) * direction;
                     case 'sell':
-                        const sellTokenA = tokenDetailsMap.get(a.sellToken)?.symbol || '';
-                        const sellTokenB = tokenDetailsMap.get(b.sellToken)?.symbol || '';
+                        const sellTokenA = tokenDetailsMap.get(a.sellToken?.toLowerCase())?.symbol || 'Unknown';
+                        const sellTokenB = tokenDetailsMap.get(b.sellToken?.toLowerCase())?.symbol || 'Unknown';
                         return sellTokenA.localeCompare(sellTokenB) * direction;
                     case 'sellAmount':
-                        const sellAmountA = ethers.utils.formatUnits(a.sellAmount, tokenDetailsMap.get(a.sellToken)?.decimals || 18);
-                        const sellAmountB = ethers.utils.formatUnits(b.sellAmount, tokenDetailsMap.get(b.sellToken)?.decimals || 18);
+                        const sellAmountA = ethers.utils.formatUnits(a.sellAmount, tokenDetailsMap.get(a.sellToken?.toLowerCase())?.decimals || 18);
+                        const sellAmountB = ethers.utils.formatUnits(b.sellAmount, tokenDetailsMap.get(b.sellToken?.toLowerCase())?.decimals || 18);
                         return (Number(sellAmountA) - Number(sellAmountB)) * direction;
                     case 'buy':
-                        const buyTokenA = tokenDetailsMap.get(a.buyToken)?.symbol || '';
-                        const buyTokenB = tokenDetailsMap.get(b.buyToken)?.symbol || '';
+                        const buyTokenA = tokenDetailsMap.get(a.buyToken?.toLowerCase())?.symbol || 'Unknown';
+                        const buyTokenB = tokenDetailsMap.get(b.buyToken?.toLowerCase())?.symbol || 'Unknown';
                         return buyTokenA.localeCompare(buyTokenB) * direction;
                     case 'buyAmount':
-                        const buyAmountA = ethers.utils.formatUnits(a.buyAmount, tokenDetailsMap.get(a.buyToken)?.decimals || 18);
-                        const buyAmountB = ethers.utils.formatUnits(b.buyAmount, tokenDetailsMap.get(b.buyToken)?.decimals || 18);
+                        const buyAmountA = ethers.utils.formatUnits(a.buyAmount, tokenDetailsMap.get(a.buyToken?.toLowerCase())?.decimals || 18);
+                        const buyAmountB = ethers.utils.formatUnits(b.buyAmount, tokenDetailsMap.get(b.buyToken?.toLowerCase())?.decimals || 18);
                         return (Number(buyAmountA) - Number(buyAmountB)) * direction;
                     case 'created':
                         return (Number(a.timestamp) - Number(b.timestamp)) * direction;
