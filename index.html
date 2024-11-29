@@ -1,46 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
+  <!-- Head -->
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OTC Swap</title>
+    <!-- Normalize.css -->
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css"
     />
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-      .debug-panel {
-        position: fixed;
-        bottom: 0;
-        right: 0;
-        background: rgba(0, 0, 0, 0.8);
-        color: #fff;
-        padding: 10px;
-        border-radius: 5px 0 0 0;
-        z-index: 9999;
-      }
-      .debug-controls {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-      }
-      .debug-controls label {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-      }
-    </style>
+    <!-- Styles -->
     <link rel="stylesheet" href="css/styles.css" />
+    <!-- Components -->
+    <link rel="stylesheet" href="css/components/header.css" />
+    <link rel="stylesheet" href="css/components/network.css" />
+    <link rel="stylesheet" href="css/components/content.css" />
     <link rel="stylesheet" href="css/components/forms.css" />
     <link rel="stylesheet" href="css/components/orders.css" />
     <link rel="stylesheet" href="css/components/tabs.css" />
     <link rel="stylesheet" href="css/components/wallet.css" />
     <link rel="stylesheet" href="css/components/cleanup.css" />
+    <link rel="stylesheet" href="css/components/debug.css" />
+    <!-- Script -->
     <script type="importmap">
       {
         "imports": {
@@ -48,17 +30,23 @@
         }
       }
     </script>
+    <!-- App -->
     <script type="module" src="js/app.js" defer></script>
   </head>
+  <!-- Body -->
   <body>
     <div class="container">
+      <!-- Header -->
       <header class="header">
+        <!-- Header Left -->
         <div class="header-left">
           <div class="logo-container">
             <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image">
             <h1>LiberOTCSwap</h1>
+            <span class="version">v1.0.1</span>
           </div>
         </div>
+        <!-- Header Right -->
         <div class="header-right">
           <div id="wallet-container" class="wallet-container">
             <div class="network-selector">
@@ -80,15 +68,19 @@
                   />
                 </svg>
               </button>
+              <!-- Network Dropdown -->
               <div class="network-dropdown hidden">
                 <!-- Network options will be populated dynamically -->
               </div>
             </div>
+            <!-- Wallet Connect Button -->
             <button id="walletConnect" class="wallet-button">
               <span class="wallet-button-text">Connect Wallet</span>
             </button>
+            <!-- Wallet Info -->
             <div id="walletInfo" class="wallet-info hidden">
               <span id="accountAddress" class="account-address"></span>
+              <!-- Wallet Disconnect Button -->
               <button id="walletDisconnect" class="wallet-disconnect">
                 <svg
                   width="16"
@@ -114,43 +106,28 @@
           </div>
         </div>
       </header>
+      <!-- Debug Panel -->
       <div class="debug-panel" style="display: none">
         <div class="debug-controls">
           <h3>Debug Settings</h3>
+          <!-- Select All Checkbox -->
+          <label>
+            <input type="checkbox" id="selectAll" /> Select All
+          </label>
           <label><input type="checkbox" data-debug="APP" /> App</label>
-          <label
-            ><input type="checkbox" data-debug="WEBSOCKET" /> WebSocket</label
-          >
-          <label
-            ><input type="checkbox" data-debug="COMPONENTS" /> Components</label
-          >
+          <label><input type="checkbox" data-debug="WEBSOCKET" /> WebSocket</label>
+          <label><input type="checkbox" data-debug="COMPONENTS" /> Components</label>
           <label><input type="checkbox" data-debug="WALLET" /> Wallet</label>
-          <label
-            ><input type="checkbox" data-debug="VIEW_ORDERS" /> View
-            Orders</label
-          >
-          <label
-            ><input type="checkbox" data-debug="CREATE_ORDER" /> Create
-            Order</label
-          >
-          <label
-            ><input type="checkbox" data-debug="MY_ORDERS" /> My Orders</label
-          >
-          <label
-            ><input type="checkbox" data-debug="TAKER_ORDERS" /> Taker
-            Orders</label
-          >
-          <label
-            ><input type="checkbox" data-debug="CLEANUP_ORDERS" /> Cleanup
-            Orders</label
-          >
-          <label
-            ><input type="checkbox" data-debug="WALLET_UI" /> Wallet UI</label
-          >
+          <label><input type="checkbox" data-debug="VIEW_ORDERS" /> View Orders</label>
+          <label><input type="checkbox" data-debug="CREATE_ORDER" /> Create Order</label>
+          <label><input type="checkbox" data-debug="MY_ORDERS" /> My Orders</label>
+          <label><input type="checkbox" data-debug="TAKER_ORDERS" /> Taker Orders</label>
+          <label><input type="checkbox" data-debug="CLEANUP_ORDERS" /> Cleanup Orders</label>
+          <label><input type="checkbox" data-debug="WALLET_UI" /> Wallet UI</label>
           <button id="applyDebug">Apply</button>
         </div>
       </div>
-
+      <!-- Main Content -->
       <main class="main-content">
         <div class="content-wrapper">
           <nav class="nav-tabs">
