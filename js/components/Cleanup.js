@@ -51,10 +51,23 @@ export class Cleanup extends BaseComponent {
                 <div class="cleanup-section">
                     <h2>Cleanup Expired Orders</h2>
                     <div class="cleanup-info">
-                        <p>Earn fees by cleaning up expired orders (14+ minutes old)</p>
+                        <p>Earn fees by cleaning up expired orders</p>
                         <div class="cleanup-stats">
-                            <div>Potential Reward: <span id="cleanup-reward">Loading...</span></div>
-                            <div>Orders Ready: <span id="cleanup-ready">Loading...</span></div>
+                            <div class="cleanup-category">
+                                <h3>Active Orders</h3>
+                                <div>Count: <span id="active-orders-count">Loading...</span></div>
+                                <div>Fees: <span id="active-orders-fees">Loading...</span></div>
+                            </div>
+                            <div class="cleanup-category">
+                                <h3>Cancelled Orders</h3>
+                                <div>Count: <span id="cancelled-orders-count">Loading...</span></div>
+                                <div>Fees: <span id="cancelled-orders-fees">Loading...</span></div>
+                            </div>
+                            <div class="cleanup-total">
+                                <h3>Total</h3>
+                                <div>Orders Ready: <span id="cleanup-ready">Loading...</span></div>
+                                <div>Total Reward: <span id="cleanup-reward">Loading...</span></div>
+                            </div>
                         </div>
                     </div>
                     <button id="cleanup-button" class="action-button" disabled>
@@ -74,7 +87,7 @@ export class Cleanup extends BaseComponent {
             this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
             this.debug('Initialization complete');
         } catch (error) {
-            this.debug('Initialization error:', error);
+            this.debug('Initialization failed:', error);
             this.showError('Failed to initialize cleanup component');
         }
     }
@@ -88,37 +101,94 @@ export class Cleanup extends BaseComponent {
 
     async checkCleanupOpportunities() {
         try {
-            const orders = this.webSocket.getOrders('Active');
-            const eligibleOrders = [];
+            const orders = this.webSocket.getOrders();
+            const eligibleOrders = {
+                active: [],
+                cancelled: []
+            };
+            let activeFees = 0;
+            let cancelledFees = 0;
             
             for (const order of orders) {
-                const { isEligible } = await this.webSocket.checkCleanupEligibility(order.id);
+                const { isEligible, order: orderDetails } = await this.webSocket.checkCleanupEligibility(order.id);
                 if (isEligible) {
-                    eligibleOrders.push(order);
+                    if (orderDetails.status === 'Active') {
+                        eligibleOrders.active.push(orderDetails);
+                        activeFees += Number(orderDetails.orderCreationFee || 0);
+                    } else if (orderDetails.status === 'Canceled') {
+                        eligibleOrders.cancelled.push(orderDetails);
+                        cancelledFees += Number(orderDetails.orderCreationFee || 0);
+                    }
                 }
             }
             
-            this.debug('Cleanup eligible orders:', eligibleOrders);
+            const totalEligible = eligibleOrders.active.length + eligibleOrders.cancelled.length;
+            const totalFees = activeFees + cancelledFees;
             
-            // Update UI to show eligible orders
-            const container = document.getElementById('cleanup-container');
-            if (eligibleOrders.length > 0) {
-                container.innerHTML = `
-                    <div class="tab-content-wrapper">
-                        <h2>Cleanup Expired Orders</h2>
-                        <p>${eligibleOrders.length} orders eligible for cleanup</p>
-                        <button id="cleanupButton" class="action-button">Clean Orders</button>
-                    </div>`;
-            } else {
-                container.innerHTML = `
-                    <div class="tab-content-wrapper">
-                        <h2>Cleanup Expired Orders</h2>
-                        <p>No orders eligible for cleanup</p>
-                    </div>`;
+            // Update UI elements
+            const elements = {
+                activeCount: document.getElementById('active-orders-count'),
+                activeFees: document.getElementById('active-orders-fees'),
+                cancelledCount: document.getElementById('cancelled-orders-count'),
+                cancelledFees: document.getElementById('cancelled-orders-fees'),
+                totalReward: document.getElementById('cleanup-reward'),
+                totalReady: document.getElementById('cleanup-ready'),
+                cleanupButton: document.getElementById('cleanup-button')
+            };
+            
+            if (elements.activeCount) {
+                elements.activeCount.textContent = eligibleOrders.active.length.toString();
             }
+            if (elements.activeFees) {
+                elements.activeFees.textContent = `${this.formatEth(activeFees)} ETH`;
+            }
+            if (elements.cancelledCount) {
+                elements.cancelledCount.textContent = eligibleOrders.cancelled.length.toString();
+            }
+            if (elements.cancelledFees) {
+                elements.cancelledFees.textContent = `${this.formatEth(cancelledFees)} ETH`;
+            }
+            if (elements.totalReward) {
+                elements.totalReward.textContent = `${this.formatEth(totalFees)} ETH`;
+            }
+            if (elements.totalReady) {
+                elements.totalReady.textContent = totalEligible.toString();
+            }
+            if (elements.cleanupButton) {
+                elements.cleanupButton.disabled = totalEligible === 0;
+                elements.cleanupButton.textContent = `Clean ${totalEligible} Order${totalEligible !== 1 ? 's' : ''}`;
+            }
+
+            this.debug('Cleanup stats:', {
+                active: {
+                    count: eligibleOrders.active.length,
+                    fees: this.formatEth(activeFees)
+                },
+                cancelled: {
+                    count: eligibleOrders.cancelled.length,
+                    fees: this.formatEth(cancelledFees)
+                },
+                total: {
+                    count: totalEligible,
+                    fees: this.formatEth(totalFees)
+                }
+            });
+
         } catch (error) {
             this.debug('Error checking cleanup opportunities:', error);
+            this.showError('Failed to check cleanup opportunities');
+            this.updateUIForError();
         }
+    }
+
+    updateUIForError() {
+        const errorText = 'Error';
+        ['active-orders-count', 'active-orders-fees', 
+         'cancelled-orders-count', 'cancelled-orders-fees',
+         'cleanup-reward', 'cleanup-ready'].forEach(id => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = errorText;
+        });
     }
 
     setupWebSocket() {
@@ -239,5 +309,10 @@ export class Cleanup extends BaseComponent {
     showError(message) {
         this.debug('Error:', message);
         // Implement your error notification
+    }
+
+    // Add helper method to format ETH values
+    formatEth(wei) {
+        return ethers.utils.formatEther(wei.toString());
     }
 } 

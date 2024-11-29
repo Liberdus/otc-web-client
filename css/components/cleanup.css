@@ -26,10 +26,27 @@
     gap: 1rem;
 }
 
-.cleanup-stats div {
+.cleanup-category {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+}
+
+.cleanup-total {
+    grid-column: 1 / -1;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.cleanup-total h3 {
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
 }
 
 .cleanup-stats span {
