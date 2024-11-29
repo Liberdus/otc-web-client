@@ -97,22 +97,10 @@ export class BaseComponent {
         try {
             this.debug('Getting token details for:', tokenAddresses);
             
-            // Cache verification
-            if (!this.tokenCache) {
-                this.debug('Token cache not initialized');
-                this.tokenCache = new Map();
-            }
-
-            // Ensure we have a provider
-            if (!this.provider) {
-                this.provider = window.walletManager?.provider;
-                if (!this.provider) {
-                    this.debug('No provider available - running in read-only mode');
-                    return null;
-                }
-            }
-
-            // Get signer for balance check - don't throw if not available
+            // Ensure tokenAddresses is always an array
+            const addressArray = Array.isArray(tokenAddresses) ? tokenAddresses : [tokenAddresses];
+            
+            // Get signer for balance check
             let userAddress = null;
             try {
                 const signer = await this.getSigner().catch(() => null);
@@ -121,23 +109,35 @@ export class BaseComponent {
                 this.debug('No signer available - skipping balance check');
             }
 
-            // Ensure tokenAddresses is an array
-            if (!Array.isArray(tokenAddresses)) {
-                tokenAddresses = [tokenAddresses];
-            }
-
-            const validAddresses = tokenAddresses.filter(addr => 
-                typeof addr === 'string' && 
-                ethers.utils.isAddress(addr)
-            );
+            // Normalize addresses to lowercase for consistent cache lookup
+            const validAddresses = addressArray
+                .filter(addr => typeof addr === 'string' && ethers.utils.isAddress(addr))
+                .map(addr => addr.toLowerCase());
 
             if (validAddresses.length === 0) {
                 console.warn('[BaseComponent] No valid token addresses provided');
-                return null;
+                return addressArray.map(() => null);
             }
 
             const results = await Promise.all(validAddresses.map(async (tokenAddress) => {
+                // Check cache first with lowercase address
                 if (this.tokenCache.has(tokenAddress)) {
+                    this.debug('Cache hit for token:', tokenAddress);
+                    // If we have a user address, update balance even for cached tokens
+                    if (userAddress) {
+                        const tokenContract = new ethers.Contract(
+                            tokenAddress,
+                            erc20Abi,
+                            this.provider
+                        );
+                        const balance = await tokenContract.balanceOf(userAddress);
+                        const cachedDetails = this.tokenCache.get(tokenAddress);
+                        return {
+                            ...cachedDetails,
+                            balance,
+                            formattedBalance: ethers.utils.formatUnits(balance, cachedDetails.decimals)
+                        };
+                    }
                     return this.tokenCache.get(tokenAddress);
                 }
 
@@ -148,39 +148,43 @@ export class BaseComponent {
                         this.provider
                     );
 
+                    // Use Promise.all for parallel requests
                     const [name, symbol, decimals, balance] = await Promise.all([
-                        tokenContract.name().catch(() => 'Unknown'),
-                        tokenContract.symbol().catch(() => 'UNK'),
+                        tokenContract.name().catch(() => null),
+                        tokenContract.symbol().catch(() => null),
                         tokenContract.decimals().catch(() => 18),
                         userAddress ? tokenContract.balanceOf(userAddress).catch(() => '0') : '0'
                     ]);
 
-                    const formattedBalance = ethers.utils.formatUnits(balance, decimals);
-                    
-                    const details = { 
-                        name, 
-                        symbol, 
-                        decimals, 
+                    // If both name and symbol failed, use formatted address
+                    const shortAddr = `${tokenAddress.slice(0, 6)}...${tokenAddress.slice(-4)}`;
+                    const details = {
+                        name: name || shortAddr,
+                        symbol: symbol || 'UNK',
+                        decimals,
+                        address: tokenAddress,
                         balance,
-                        formattedBalance
+                        formattedBalance: ethers.utils.formatUnits(balance, decimals)
                     };
-                    
+
+                    // Cache the result with lowercase address
                     this.tokenCache.set(tokenAddress, details);
+                    this.debug('Added token to cache:', { address: tokenAddress, details });
                     return details;
                 } catch (error) {
-                    console.error(`[BaseComponent] Error getting details for token ${tokenAddress}:`, error);
+                    this.debug('Error fetching token details:', {
+                        address: tokenAddress,
+                        error: error.message
+                    });
                     return null;
                 }
             }));
 
-            // Log cache updates
-            this.debug('Token cache after update:', 
-                Array.from(this.tokenCache.entries()));
-
-            return results.length === 1 ? results[0] : results;
+            this.debug('Token cache after update:', Array.from(this.tokenCache.entries()));
+            return results;
         } catch (error) {
             this.debug('Error in getTokenDetails:', error);
-            return null;
+            return Array.isArray(tokenAddresses) ? tokenAddresses.map(() => null) : null;
         }
     }
 
