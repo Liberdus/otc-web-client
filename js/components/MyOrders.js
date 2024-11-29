@@ -181,6 +181,7 @@ export class MyOrders extends ViewOrders {
         const tr = await super.createOrderRow(order, tokenDetailsMap);
         const actionCell = tr.querySelector('.action-column');
         const statusCell = tr.querySelector('.order-status');
+        const expiresCell = tr.querySelector('td:nth-child(6)'); // Expires column
         
         if (actionCell && statusCell) {
             try {
@@ -192,17 +193,26 @@ export class MyOrders extends ViewOrders {
                 const orderExpiry = await contract.ORDER_EXPIRY();
                 const gracePeriod = await contract.GRACE_PERIOD();
                 
-                this.debug('Order timing:', {
-                    currentTime,
-                    orderTime,
-                    orderExpiry: orderExpiry.toNumber(),
-                    gracePeriod: gracePeriod.toNumber()
-                });
+                const expiryTime = orderTime + orderExpiry.toNumber();
+                const timeDiff = expiryTime - currentTime;
+                
+                // Format time difference
+                const formatTimeDiff = (diff) => {
+                    const absHours = Math.floor(Math.abs(diff) / 3600);
+                    const absMinutes = Math.floor((Math.abs(diff) % 3600) / 60);
+                    const sign = diff < 0 ? '-' : '';
+                    return `${sign}${absHours}h ${absMinutes}m`;
+                };
+
+                // Update expires column with the time difference
+                if (expiresCell) {
+                    expiresCell.textContent = formatTimeDiff(timeDiff);
+                }
 
                 const isExpired = currentTime > orderTime + orderExpiry.toNumber();
                 const isInGracePeriod = currentTime <= (orderTime + orderExpiry.toNumber() + gracePeriod.toNumber());
                 
-                // Check order status first
+                // Original status logic
                 if (order.status === 'Canceled') {
                     statusCell.textContent = 'Canceled';
                     statusCell.className = 'order-status canceled';
@@ -219,9 +229,10 @@ export class MyOrders extends ViewOrders {
                     }
                 } else if (isExpired) {
                     statusCell.textContent = 'Expired';
+                    statusCell.className = 'order-status expired';
                     actionCell.innerHTML = '<span class="order-status">Awaiting Cleanup</span>';
                 } else {
-                    // active order 
+                    // active order
                     actionCell.innerHTML = `
                         <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
                     `;
