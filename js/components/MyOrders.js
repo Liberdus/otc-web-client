@@ -316,28 +316,10 @@ export class MyOrders extends ViewOrders {
                 switch (this.sortConfig.column) {
                     case 'id':
                         return (Number(a.id) - Number(b.id)) * direction;
-                    case 'sell':
-                        const sellTokenA = tokenDetailsMap.get(a.sellToken)?.symbol || '';
-                        const sellTokenB = tokenDetailsMap.get(b.sellToken)?.symbol || '';
-                        return sellTokenA.localeCompare(sellTokenB) * direction;
-                    case 'sellAmount':
-                        const sellAmountA = ethers.utils.formatUnits(a.sellAmount, tokenDetailsMap.get(a.sellToken)?.decimals || 18);
-                        const sellAmountB = ethers.utils.formatUnits(b.sellAmount, tokenDetailsMap.get(b.sellToken)?.decimals || 18);
-                        return (Number(sellAmountA) - Number(sellAmountB)) * direction;
-                    case 'buy':
-                        const buyTokenA = tokenDetailsMap.get(a.buyToken)?.symbol || '';
-                        const buyTokenB = tokenDetailsMap.get(b.buyToken)?.symbol || '';
-                        return buyTokenA.localeCompare(buyTokenB) * direction;
-                    case 'buyAmount':
-                        const buyAmountA = ethers.utils.formatUnits(a.buyAmount, tokenDetailsMap.get(a.buyToken)?.decimals || 18);
-                        const buyAmountB = ethers.utils.formatUnits(b.buyAmount, tokenDetailsMap.get(b.buyToken)?.decimals || 18);
-                        return (Number(buyAmountA) - Number(buyAmountB)) * direction;
-                    case 'expires':
-                        const expiryA = this.getExpiryTime(a.timestamp);
-                        const expiryB = this.getExpiryTime(b.timestamp);
-                        return (expiryA - expiryB) * direction;
                     case 'status':
-                        return a.status.localeCompare(b.status) * direction;
+                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
+                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
+                        return statusA.localeCompare(statusB) * direction;
                     default:
                         return 0;
                 }
@@ -379,11 +361,11 @@ export class MyOrders extends ViewOrders {
         if (thead) {
             thead.innerHTML = `
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Sell <span class="sort-icon">↕</span></th>
-                <th data-sort="buyAmount" class="">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="sell">Buy <span class="sort-icon">↕</span></th>
-                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
+                <th>Sell</th>
+                <th>Amount</th>
+                <th>Buy</th>
+                <th>Amount</th>
+                <th>Expires</th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
                 <th>Action</th>

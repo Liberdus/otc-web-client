@@ -239,28 +239,6 @@ export class ViewOrders extends BaseComponent {
                 switch (this.sortConfig.column) {
                     case 'id':
                         return (Number(a.id) - Number(b.id)) * direction;
-                    case 'sell':
-                        const sellTokenA = tokenDetailsMap.get(a.sellToken?.toLowerCase())?.symbol || 'Unknown';
-                        const sellTokenB = tokenDetailsMap.get(b.sellToken?.toLowerCase())?.symbol || 'Unknown';
-                        return sellTokenA.localeCompare(sellTokenB) * direction;
-                    case 'buy':
-                        const buyTokenA = tokenDetailsMap.get(a.buyToken?.toLowerCase())?.symbol || 'Unknown';
-                        const buyTokenB = tokenDetailsMap.get(b.buyToken?.toLowerCase())?.symbol || 'Unknown';
-                        return buyTokenA.localeCompare(buyTokenB) * direction;
-                    case 'sellAmount':
-                        const sellAmountA = ethers.utils.formatUnits(a.sellAmount, tokenDetailsMap.get(a.sellToken?.toLowerCase())?.decimals || 18);
-                        const sellAmountB = ethers.utils.formatUnits(b.sellAmount, tokenDetailsMap.get(b.sellToken?.toLowerCase())?.decimals || 18);
-                        return (Number(sellAmountA) - Number(sellAmountB)) * direction;
-                    case 'buyAmount':
-                        const buyAmountA = ethers.utils.formatUnits(a.buyAmount, tokenDetailsMap.get(a.buyToken?.toLowerCase())?.decimals || 18);
-                        const buyAmountB = ethers.utils.formatUnits(b.buyAmount, tokenDetailsMap.get(b.buyToken?.toLowerCase())?.decimals || 18);
-                        return (Number(buyAmountA) - Number(buyAmountB)) * direction;
-                    case 'created':
-                        return (Number(a.timestamp) - Number(b.timestamp)) * direction;
-                    case 'expires':
-                        const expiryA = this.getExpiryTime(a.timestamp);
-                        const expiryB = this.getExpiryTime(b.timestamp);
-                        return (expiryA - expiryB) * direction;
                     case 'status':
                         const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
                         const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
@@ -445,11 +423,11 @@ export class ViewOrders extends BaseComponent {
         thead.innerHTML = `
             <tr>
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
-                <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
-                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
+                <th>Buy</th>
+                <th>Amount</th>
+                <th>Sell</th>
+                <th>Amount</th>
+                <th>Expires</th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
                 <th>Action</th>
