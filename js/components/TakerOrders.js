@@ -339,6 +339,22 @@ export class TakerOrders extends ViewOrders {
                 ordersToDisplay = ordersToDisplay.filter(order => order !== null);
             }
 
+            // Sort orders based on current sort configuration
+            ordersToDisplay = ordersToDisplay.sort((a, b) => {
+                const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
+                
+                switch (this.sortConfig.column) {
+                    case 'id':
+                        return (Number(a.id) - Number(b.id)) * direction;
+                    case 'status':
+                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
+                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
+                        return statusA.localeCompare(statusB) * direction;
+                    default:
+                        return 0;
+                }
+            });
+
             // Apply pagination if not viewing all
             const totalOrders = ordersToDisplay.length;
             if (pageSize !== -1) {
@@ -362,7 +378,7 @@ export class TakerOrders extends ViewOrders {
                 return;
             }
 
-            // Get token details and create rows
+            // Get token details
             const tokenAddresses = new Set();
             ordersToDisplay.forEach(order => {
                 if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
@@ -404,20 +420,31 @@ export class TakerOrders extends ViewOrders {
         // Call parent's setupTable to get basic structure
         await super.setupTable();
         
-        // Keep the same structure as ViewOrders.js since it's already in taker's perspective
+        // Update the table header with only ID and Status sorting
         const thead = this.container.querySelector('thead tr');
         if (thead) {
             thead.innerHTML = `
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
-                <th data-sort="buyAmount">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
-                <th data-sort="sellAmount">Amount <span class="sort-icon">↕</span></th>
-                <th data-sort="expires">Expires <span class="sort-icon">↕</span></th>
+                <th>Buy</th>
+                <th>Amount</th>
+                <th>Sell</th>
+                <th>Amount</th>
+                <th>Expires</th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
                 <th>Taker</th>
                 <th>Action</th>
             `;
+
+            // Initialize sorting state
+            this.sortConfig = {
+                column: 'id',
+                direction: 'asc'
+            };
+
+            // Re-add click handlers for sorting
+            thead.querySelectorAll('th[data-sort]').forEach(th => {
+                th.addEventListener('click', () => this.handleSort(th.dataset.sort));
+            });
         }
 
         // Update filter toggle text
@@ -425,5 +452,34 @@ export class TakerOrders extends ViewOrders {
         if (filterToggleSpan) {
             filterToggleSpan.textContent = 'Show only fillable orders';
         }
+    }
+
+    // Add handleSort method if not inherited properly
+    handleSort(column) {
+        this.debug('Sorting by column:', column);
+        
+        // Toggle direction if clicking same column
+        if (this.sortConfig.column === column) {
+            this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.sortConfig.column = column;
+            this.sortConfig.direction = 'asc';
+        }
+
+        // Update sort icons and active states
+        const headers = this.container.querySelectorAll('th[data-sort]');
+        headers.forEach(header => {
+            const icon = header.querySelector('.sort-icon');
+            if (header.dataset.sort === column) {
+                header.classList.add('active-sort');
+                icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
+            } else {
+                header.classList.remove('active-sort');
+                icon.textContent = '↕';
+            }
+        });
+
+        // Refresh the view with new sort
+        this.refreshOrdersView();
     }
 }
