@@ -240,30 +240,58 @@ export class Cleanup extends BaseComponent {
 
     async performCleanup() {
         try {
-            // Use WebSocket's contract instance instead of getting a new one
+            // Get contract with signer
             const contract = this.webSocket?.contract;
             if (!contract) {
                 throw new Error('Contract not initialized');
             }
 
+            // Check if provider and wallet are connected
+            if (!contract.provider) {
+                throw new Error('Provider not available');
+            }
+
+            // Add these checks for wallet connection
+            if (!window.walletManager?.isConnected) {
+                throw new Error('Wallet not connected');
+            }
+
+            // Get signer from wallet manager
+            const signer = await window.walletManager.getSigner();
+            if (!signer) {
+                throw new Error('No signer available');
+            }
+
+            const contractWithSigner = contract.connect(signer);
+
             this.cleanupButton.disabled = true;
             this.cleanupButton.textContent = 'Cleaning...';
 
-            // Get current network conditions
-            const provider = contract.provider;
-            const feeData = await provider.getFeeData();
-            
-            // Get gas estimate
-            const gasEstimate = await contract.estimateGas.cleanupExpiredOrders()
+            // Get number of eligible orders to estimate gas better
+            const orders = this.webSocket.getOrders();
+            const eligibleOrderCount = orders.filter(order => 
+                order.isEligible && (order.status === 'Active' || order.status === 'Canceled')
+            ).length;
+
+            // Dynamic base gas estimate based on number of orders
+            const baseGasEstimate = ethers.BigNumber.from('100000') // Base cost
+                .add(ethers.BigNumber.from('50000').mul(eligibleOrderCount)); // Per-order cost
+
+            // Try to get actual gas estimate, fall back to calculated estimate
+            const gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders()
                 .catch(error => {
                     console.log('[Cleanup] Gas estimation failed:', error);
-                    return ethers.BigNumber.from('300000'); // Default gas limit
+                    return baseGasEstimate;
                 });
 
             // Add 20% buffer to gas estimate
             const gasLimit = gasEstimate.mul(120).div(100);
 
-            // Use legacy transaction type
+            const feeData = await contract.provider.getFeeData();
+            if (!feeData || !feeData.gasPrice) {
+                throw new Error('Unable to get current gas prices');
+            }
+
             const txOptions = {
                 gasLimit,
                 gasPrice: feeData.gasPrice,
@@ -271,7 +299,7 @@ export class Cleanup extends BaseComponent {
             };
 
             console.log('[Cleanup] Sending transaction with options:', txOptions);
-            const tx = await contract.cleanupExpiredOrders(txOptions);
+            const tx = await contractWithSigner.cleanupExpiredOrders(txOptions);
             console.log('[Cleanup] Transaction sent:', tx.hash);
 
             const receipt = await tx.wait();
