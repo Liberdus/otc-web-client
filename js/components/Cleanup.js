@@ -159,16 +159,16 @@ export class Cleanup extends BaseComponent {
                 elements.activeCount.textContent = eligibleOrders.active.length.toString();
             }
             if (elements.activeFees) {
-                elements.activeFees.textContent = `${this.formatEth(activeFees)} ETH`;
+                elements.activeFees.textContent = `${this.formatEth(activeFees)} POL`;
             }
             if (elements.cancelledCount) {
                 elements.cancelledCount.textContent = eligibleOrders.cancelled.length.toString();
             }
             if (elements.cancelledFees) {
-                elements.cancelledFees.textContent = `${this.formatEth(cancelledFees)} ETH`;
+                elements.cancelledFees.textContent = `${this.formatEth(cancelledFees)} POL`;
             }
             if (elements.totalReward) {
-                elements.totalReward.textContent = `${this.formatEth(totalFees)} ETH`;
+                elements.totalReward.textContent = `${this.formatEth(totalFees)} POL`;
             }
             if (elements.totalReady) {
                 elements.totalReady.textContent = totalEligible.toString();
