@@ -21,6 +21,20 @@ export class ViewOrders extends BaseComponent {
                 console.log('[ViewOrders]', message, ...args);
             }
         };
+
+        // Add debounce mechanism
+        this._refreshTimeout = null;
+        this.debouncedRefresh = () => {
+            clearTimeout(this._refreshTimeout);
+            this._refreshTimeout = setTimeout(() => {
+                this.refreshOrdersView().catch(error => {
+                    this.debug('Error refreshing orders:', error);
+                });
+            }, 100);
+        };
+
+        // Add loading state
+        this.isLoading = false;
     }
 
     setupErrorHandling() {
@@ -183,45 +197,46 @@ export class ViewOrders extends BaseComponent {
     }
 
     async refreshOrdersView() {
-        this.debug('Refreshing orders view');
+        if (this.isLoading) return;
+        this.isLoading = true;
+        
         try {
+            this.debug('Refreshing orders view');
+            this.showLoadingState();
+
             // Get contract instance first
             this.contract = await this.getContract();
             
-            // Clear existing orders from table
-            const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                this.debug('Table body not found');
-                return;
-            }
-            tbody.innerHTML = '';
-
             // Get filter and pagination state
             const showOnlyFillable = this.container.querySelector('#fillable-orders-toggle')?.checked;
             const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
             
-            // Filter orders if necessary
+            // Process all orders first
             let ordersToDisplay = Array.from(this.orders.values());
             
-            // Debug log the orders
             this.debug('Orders before filtering:', ordersToDisplay);
 
+            // Do all async operations before touching the DOM
             if (showOnlyFillable && this.contract) {
-                ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
+                const fillableChecks = await Promise.all(ordersToDisplay.map(async order => {
                     const canFill = await this.canFillOrder(order);
                     return canFill ? order : null;
                 }));
-                ordersToDisplay = ordersToDisplay.filter(order => order !== null);
+                ordersToDisplay = fillableChecks.filter(order => order !== null);
             }
 
-            // Get token details
+            // Get all token details at once
             const tokenAddresses = new Set();
             ordersToDisplay.forEach(order => {
                 if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
                 if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
             });
 
-            const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
+            const [tokenDetails] = await Promise.all([
+                this.getTokenDetails(Array.from(tokenAddresses))
+            ]);
+
+            // Process token details
             const tokenDetailsMap = new Map();
             Array.from(tokenAddresses).forEach((address, index) => {
                 if (tokenDetails[index]) {
@@ -229,40 +244,36 @@ export class ViewOrders extends BaseComponent {
                 }
             });
 
-            // Debug log the orders
-            this.debug('Orders after filtering:', ordersToDisplay);
-
-            // Sort orders based on current sort configuration
-            ordersToDisplay = ordersToDisplay.sort((a, b) => {
-                const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
-                
-                switch (this.sortConfig.column) {
-                    case 'id':
-                        return (Number(a.id) - Number(b.id)) * direction;
-                    case 'status':
-                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
-                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
-                        return statusA.localeCompare(statusB) * direction;
-                    default:
-                        return 0;
-                }
-            });
-
-            // Debug log the orders after sorting
-            this.debug('Orders after sorting:', ordersToDisplay);
-
-            // Apply pagination if not viewing all
+            // Sort orders by ID (default sorting)
+            ordersToDisplay.sort((a, b) => Number(b.id) - Number(a.id));
+            
             const totalOrders = ordersToDisplay.length;
+            
+            // Apply pagination
             if (pageSize !== -1) {
                 const startIndex = (this.currentPage - 1) * pageSize;
                 ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
             }
 
-            // Update pagination controls
+            // Create all rows before touching the DOM
+            const rows = await Promise.all(ordersToDisplay.map(async order => {
+                const orderWithLowercase = {
+                    ...order,
+                    sellToken: order.sellToken.toLowerCase(),
+                    buyToken: order.buyToken.toLowerCase()
+                };
+                return this.createOrderRow(orderWithLowercase, tokenDetailsMap);
+            }));
+
+            // Only update the DOM once all processing is complete
+            const tbody = this.container.querySelector('tbody');
+            if (!tbody) return;
+
+            // Update pagination before showing orders
             this.updatePaginationControls(totalOrders);
 
-            // Check if we have any orders after filtering
-            if (!ordersToDisplay || ordersToDisplay.length === 0) {
+            // Show no orders message or display the rows
+            if (!rows.length) {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="10" class="no-orders-message">
@@ -271,21 +282,13 @@ export class ViewOrders extends BaseComponent {
                             </div>
                         </td>
                     </tr>`;
-                return;
+            } else {
+                tbody.innerHTML = '';
+                rows.forEach(row => {
+                    if (row) tbody.appendChild(row);
+                });
             }
 
-            // Add orders to table with lowercase token addresses
-            for (const order of ordersToDisplay) {
-                if (order) {
-                    const orderWithLowercase = {
-                        ...order,
-                        sellToken: order.sellToken.toLowerCase(),
-                        buyToken: order.buyToken.toLowerCase()
-                    };
-                    const row = await this.createOrderRow(orderWithLowercase, tokenDetailsMap);
-                    tbody.appendChild(row);
-                }
-            }
         } catch (error) {
             console.error('[ViewOrders] Error refreshing orders view:', error);
             const tbody = this.container.querySelector('tbody');
@@ -301,6 +304,8 @@ export class ViewOrders extends BaseComponent {
                         </td>
                     </tr>`;
             }
+        } finally {
+            this.isLoading = false;
         }
     }
 
@@ -313,40 +318,18 @@ export class ViewOrders extends BaseComponent {
     }
 
     updateOrderStatus(orderId, status) {
-        const row = this.container.querySelector(`tr[data-order-id="${orderId}"]`);
-        if (row) {
-            const statusCell = row.querySelector('.order-status');
-            if (statusCell) {
-                statusCell.textContent = status;
-                statusCell.className = `order-status status-${status.toLowerCase()}`;
-            }
+        const order = this.orders.get(orderId.toString());
+        if (order) {
+            order.status = status;
+            this.orders.set(orderId.toString(), order);
+            this.debouncedRefresh();
         }
     }
 
     async addOrderToTable(order, tokenDetailsMap) {
         try {
-            const sellTokenDetails = tokenDetailsMap.get(order.sellToken);
-            const buyTokenDetails = tokenDetailsMap.get(order.buyToken);
-
-            const row = document.createElement('tr');
-            row.setAttribute('data-order-id', order.id);
-            
-            row.innerHTML = `
-                <td>${order.id}</td>
-                <td>${order.maker}</td>
-                <td>${order.taker || 'Any'}</td>
-                <td>${sellTokenDetails.symbol} (${order.sellToken})</td>
-                <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails.decimals)}</td>
-                <td>${buyTokenDetails.symbol} (${order.buyToken})</td>
-                <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails.decimals)}</td>
-                <td>${new Date(order.timestamp * 1000).toLocaleString()}</td>
-                <td class="order-status status-${order.status.toLowerCase()}">${order.status}</td>
-            `;
-
-            const tableBody = this.container.querySelector('tbody');
-            if (tableBody) {
-                tableBody.appendChild(row);
-            }
+            this.orders.set(order.id.toString(), order);
+            this.debouncedRefresh();
         } catch (error) {
             console.error('[ViewOrders] Error adding order to table:', error);
             throw error;
@@ -354,11 +337,8 @@ export class ViewOrders extends BaseComponent {
     }
 
     removeOrderFromTable(orderId) {
-        const row = this.tbody.querySelector(`tr[data-order-id="${orderId}"]`);
-        if (row) {
-            row.remove();
-            this.orders.delete(orderId.toString());
-        }
+        this.orders.delete(orderId.toString());
+        this.debouncedRefresh();
     }
 
     async setupTable() {
@@ -407,7 +387,7 @@ export class ViewOrders extends BaseComponent {
         filterControls.innerHTML = `
             <div class="filter-row">
                 <label class="filter-toggle">
-                    <input type="checkbox" id="fillable-orders-toggle">
+                    <input type="checkbox" id="fillable-orders-toggle" checked>
                     <span>Show only fillable orders</span>
                 </label>
                 ${createTopControls()}
@@ -755,6 +735,7 @@ export class ViewOrders extends BaseComponent {
     }
 
     cleanup() {
+        clearTimeout(this._refreshTimeout);
         // Clear all expiry timers
         if (this.expiryTimers) {
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
@@ -1121,5 +1102,18 @@ export class ViewOrders extends BaseComponent {
         updateExpiry();
         const timerId = setInterval(updateExpiry, 60000); // Update every minute
         this.expiryTimers.set(row.dataset.orderId, timerId);
+    }
+
+    showLoadingState() {
+        const tbody = this.container.querySelector('tbody');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="10" class="loading-message">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text">Loading orders...</div>
+                    </td>
+                </tr>`;
+        }
     }
 }
