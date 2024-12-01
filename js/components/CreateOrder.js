@@ -2,6 +2,7 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, isDebugEnabled } from '../config.js';
 import { erc20Abi } from '../abi/erc20.js';
+import { getTokenList } from '../utils/tokens.js';
 
 export class CreateOrder extends BaseComponent {
     constructor() {
@@ -12,6 +13,7 @@ export class CreateOrder extends BaseComponent {
         this.tokenCache = new Map();
         this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
         this.isSubmitting = false;
+        this.tokens = [];
         
         // Initialize debug logger
         this.debug = (message, ...args) => {
@@ -69,11 +71,19 @@ export class CreateOrder extends BaseComponent {
             
             // Initialize contract and load fee
             await this.initializeContract();
-            await this.loadOrderCreationFee();
             
-            // Setup all event listeners
+            // Setup UI immediately
+            this.populateTokenDropdowns();
             this.setupTokenInputListeners();
             this.setupCreateOrderListener();
+            
+            // Load data asynchronously
+            Promise.all([
+                this.loadOrderCreationFee(),
+                this.loadTokens()
+            ]).catch(error => {
+                console.error('[CreateOrder] Error loading data:', error);
+            });
             
             this.debug('Initialization complete');
             this.initialized = true;
@@ -478,6 +488,157 @@ export class CreateOrder extends BaseComponent {
             const element = document.getElementById(id);
             if (element) element.textContent = '';
         });
+    }
+
+    async loadTokens() {
+        try {
+            this.tokens = await getTokenList();
+            // Update the modal content after tokens are loaded
+            ['sell', 'buy'].forEach(type => {
+                const modal = document.getElementById(`${type}TokenModal`);
+                if (modal) {
+                    const tokenList = modal.querySelector('.token-list');
+                    if (tokenList) {
+                        if (this.tokens.length === 0) {
+                            tokenList.innerHTML = `
+                                <div class="token-list-empty">
+                                    No tokens found in wallet
+                                </div>
+                            `;
+                        } else {
+                            tokenList.innerHTML = this.tokens.map(token => `
+                                <div class="token-item" data-address="${token.address}">
+                                    <div class="token-item-info">
+                                        <div class="token-item-symbol">${token.symbol}</div>
+                                        <div class="token-item-name">${token.name}</div>
+                                        ${token.balance ? `
+                                            <div class="token-item-balance">
+                                                Balance: ${Number(token.balance).toFixed(4)}
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            `).join('');
+                            
+                            // Reattach event listeners to new token items
+                            tokenList.querySelectorAll('.token-item').forEach(item => {
+                                item.addEventListener('click', () => {
+                                    const address = item.dataset.address;
+                                    const input = document.getElementById(`${type}Token`);
+                                    input.value = address;
+                                    this.updateTokenBalance(address, `${type}TokenBalance`);
+                                    modal.classList.remove('show');
+                                });
+                            });
+                        }
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('[CreateOrder] Error loading tokens:', error);
+            ['sell', 'buy'].forEach(type => {
+                const modal = document.getElementById(`${type}TokenModal`);
+                if (modal) {
+                    const tokenList = modal.querySelector('.token-list');
+                    if (tokenList) {
+                        tokenList.innerHTML = `
+                            <div class="token-list-error">
+                                Error loading tokens. Please try again.
+                            </div>
+                        `;
+                    }
+                }
+            });
+        }
+    }
+
+    populateTokenDropdowns() {
+        ['sell', 'buy'].forEach(type => {
+            const currentInput = document.getElementById(`${type}Token`);
+            
+            // Check if already initialized
+            if (currentInput.parentElement.classList.contains('token-input-container')) {
+                return; // Skip if already set up
+            }
+            
+            // Create container
+            const container = document.createElement('div');
+            container.className = 'token-input-container';
+            
+            // Create input
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.id = `${type}Token`;
+            input.className = 'token-input';
+            input.placeholder = 'Enter token address (0x...)';
+            
+            // Create token select button
+            const selectButton = document.createElement('button');
+            selectButton.className = 'token-select-button';
+            selectButton.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M12 3v18M3 12h18" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            `;
+            selectButton.title = 'Select known token';
+            
+            // Create modal (only if it doesn't exist)
+            if (!document.getElementById(`${type}TokenModal`)) {
+                const modal = this.createTokenModal(type);
+                document.body.appendChild(modal);
+            }
+            
+            // Add event listeners
+            selectButton.addEventListener('click', () => {
+                const modal = document.getElementById(`${type}TokenModal`);
+                modal.classList.add('show');
+            });
+            
+            input.addEventListener('input', (e) => {
+                if (ethers.utils.isAddress(e.target.value)) {
+                    this.updateTokenBalance(e.target.value, `${type}TokenBalance`);
+                }
+            });
+            
+            // Replace existing input
+            container.appendChild(input);
+            container.appendChild(selectButton);
+            currentInput.parentNode.replaceChild(container, currentInput);
+        });
+    }
+
+    createTokenModal(type) {
+        const modal = document.createElement('div');
+        modal.className = 'token-modal';
+        modal.id = `${type}TokenModal`;
+        
+        modal.innerHTML = `
+            <div class="token-modal-content">
+                <div class="token-modal-header">
+                    <h3>Select Token</h3>
+                    <button class="token-modal-close">&times;</button>
+                </div>
+                <div class="token-list">
+                    <div class="token-list-loading">
+                        <div class="spinner"></div>
+                        <div>Loading tokens...</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add event listeners
+        modal.querySelector('.token-modal-close').addEventListener('click', () => {
+            modal.classList.remove('show');
+        });
+        
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('show');
+            }
+        });
+        
+        return modal;
     }
 }
 
