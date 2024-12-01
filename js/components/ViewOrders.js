@@ -35,6 +35,13 @@ export class ViewOrders extends BaseComponent {
 
         // Add loading state
         this.isLoading = false;
+
+        // Initialize sorting state with null values
+        this.sortConfig = {
+            column: null,
+            direction: null,
+            isColumnClick: false
+        };
     }
 
     setupErrorHandling() {
@@ -207,6 +214,11 @@ export class ViewOrders extends BaseComponent {
             // Get contract instance first
             this.contract = await this.getContract();
             
+            // Get contract expiry times
+            const orderExpiry = (await this.contract.ORDER_EXPIRY()).toNumber();
+            const gracePeriod = (await this.contract.GRACE_PERIOD()).toNumber();
+            const currentTime = Math.floor(Date.now() / 1000);
+
             // Get filter and pagination state
             const showOnlyFillable = this.container.querySelector('#fillable-orders-toggle')?.checked;
             const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
@@ -215,15 +227,6 @@ export class ViewOrders extends BaseComponent {
             let ordersToDisplay = Array.from(this.orders.values());
             
             this.debug('Orders before filtering:', ordersToDisplay);
-
-            // Do all async operations before touching the DOM
-            if (showOnlyFillable && this.contract) {
-                const fillableChecks = await Promise.all(ordersToDisplay.map(async order => {
-                    const canFill = await this.canFillOrder(order);
-                    return canFill ? order : null;
-                }));
-                ordersToDisplay = fillableChecks.filter(order => order !== null);
-            }
 
             // Get all token details at once
             const tokenAddresses = new Set();
@@ -244,9 +247,74 @@ export class ViewOrders extends BaseComponent {
                 }
             });
 
-            // Sort orders by ID (default sorting)
-            ordersToDisplay.sort((a, b) => Number(b.id) - Number(a.id));
-            
+            // Do all async operations before touching the DOM
+            if (showOnlyFillable && this.contract) {
+                const fillableChecks = await Promise.all(ordersToDisplay.map(async order => {
+                    const canFill = await this.canFillOrder(order);
+                    return canFill ? order : null;
+                }));
+                ordersToDisplay = fillableChecks.filter(order => order !== null);
+            }
+
+            // Sort orders based on whether this is a column click or initial load
+            if (this.sortConfig.isColumnClick) {
+                switch (this.sortConfig.column) {
+                    case 'id':
+                        ordersToDisplay.sort((a, b) => {
+                            const idCompare = Number(a.id) - Number(b.id);
+                            return this.sortConfig.direction === 'asc' ? idCompare : -idCompare;
+                        });
+                        break;
+                    case 'buy':
+                        ordersToDisplay.sort((a, b) => {
+                            const tokenA = tokenDetailsMap.get(a.buyToken.toLowerCase())?.symbol || '';
+                            const tokenB = tokenDetailsMap.get(b.buyToken.toLowerCase())?.symbol || '';
+                            const compare = tokenA.localeCompare(tokenB);
+                            return this.sortConfig.direction === 'asc' ? compare : -compare;
+                        });
+                        break;
+                    case 'sell':
+                        ordersToDisplay.sort((a, b) => {
+                            const tokenA = tokenDetailsMap.get(a.sellToken.toLowerCase())?.symbol || '';
+                            const tokenB = tokenDetailsMap.get(b.sellToken.toLowerCase())?.symbol || '';
+                            const compare = tokenA.localeCompare(tokenB);
+                            return this.sortConfig.direction === 'asc' ? compare : -compare;
+                        });
+                        break;
+                }
+            } else {
+                // Default status-based sorting
+                ordersToDisplay.sort((a, b) => {
+                    // Define status priority (Active = 0, Filled = 1, Canceled = 2, Expired = 3)
+                    const getStatusPriority = (order) => {
+                        // If order is explicitly Filled or Canceled, use that status
+                        if (order.status === 'Filled') return 1;
+                        if (order.status === 'Canceled') return 2;
+
+                        // Check if Active order is expired
+                        const orderTime = Number(order.timestamp);
+                        const expiryTime = orderTime + orderExpiry;
+                        
+                        if (currentTime >= expiryTime) {
+                            return 3; // Expired orders have lowest priority
+                        }
+
+                        return 0; // Active and not expired
+                    };
+
+                    const priorityA = getStatusPriority(a);
+                    const priorityB = getStatusPriority(b);
+
+                    // First sort by status priority
+                    if (priorityA !== priorityB) {
+                        return priorityA - priorityB;
+                    }
+
+                    // Within same status, sort by ID descending
+                    return Number(b.id) - Number(a.id);
+                });
+            }
+
             const totalOrders = ordersToDisplay.length;
             
             // Apply pagination
@@ -403,12 +471,12 @@ export class ViewOrders extends BaseComponent {
         thead.innerHTML = `
             <tr>
                 <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th>Buy</th>
+                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
                 <th>Amount</th>
-                <th>Sell</th>
+                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
                 <th>Amount</th>
                 <th>Expires</th>
-                <th data-sort="status">Status <span class="sort-icon"></span></th>
+                <th>Status</th>
                 <th>Action</th>
             </tr>
         `;
@@ -485,12 +553,22 @@ export class ViewOrders extends BaseComponent {
     handleSort(column) {
         this.debug('Sorting by column:', column);
         
-        // Toggle direction if clicking same column
-        if (this.sortConfig.column === column) {
-            this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
+        // If clicking same column and already in a sorted state
+        if (this.sortConfig.column === column && this.sortConfig.isColumnClick) {
+            // Cycle through: asc -> desc -> default (null)
+            if (this.sortConfig.direction === 'asc') {
+                this.sortConfig.direction = 'desc';
+            } else if (this.sortConfig.direction === 'desc') {
+                // Reset to default sorting
+                this.sortConfig.direction = null;
+                this.sortConfig.column = null;
+                this.sortConfig.isColumnClick = false;
+            }
         } else {
+            // First click - start with ascending
             this.sortConfig.column = column;
             this.sortConfig.direction = 'asc';
+            this.sortConfig.isColumnClick = true;
         }
 
         // Update sort icons and active states
@@ -498,15 +576,20 @@ export class ViewOrders extends BaseComponent {
         headers.forEach(header => {
             const icon = header.querySelector('.sort-icon');
             if (header.dataset.sort === column) {
-                header.classList.add('active-sort');
-                icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
+                if (this.sortConfig.direction) {
+                    header.classList.add('active-sort');
+                    icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
+                } else {
+                    header.classList.remove('active-sort');
+                    icon.textContent = '↕';
+                }
             } else {
                 header.classList.remove('active-sort');
                 icon.textContent = '↕';
             }
         });
 
-        // Refresh the view with new sort
+        this.debug('Sort config after update:', this.sortConfig);
         this.refreshOrdersView();
     }
 
