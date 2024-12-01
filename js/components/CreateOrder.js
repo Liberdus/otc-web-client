@@ -168,7 +168,14 @@ export class CreateOrder extends BaseComponent {
             if (tokenDetails && tokenDetails[0]?.symbol) {
                 const balanceElement = document.getElementById(elementId);
                 const formattedBalance = parseFloat(tokenDetails[0].formattedBalance).toFixed(4);
-                balanceElement.textContent = `Balance: ${formattedBalance} ${tokenDetails[0].symbol}`;
+                balanceElement.innerHTML = `
+                    <div class="balance-with-icon">
+                        <div class="token-icon small">
+                            ${this.getTokenIcon(tokenDetails[0])}
+                        </div>
+                        <span>Balance: ${formattedBalance} ${tokenDetails[0].symbol}</span>
+                    </div>
+                `;
             }
         } catch (error) {
             console.error(`Error updating token balance:`, error);
@@ -182,6 +189,25 @@ export class CreateOrder extends BaseComponent {
 
         const updateBalance = async (input, balanceId) => {
             const tokenAddress = input.value.trim();
+            if (ethers.utils.isAddress(tokenAddress)) {
+                const container = input.parentElement;
+                const existingTooltip = container.querySelector('.token-address-tooltip');
+                if (existingTooltip) {
+                    existingTooltip.remove();
+                }
+                
+                const tooltip = document.createElement('div');
+                tooltip.className = 'token-address-tooltip';
+                tooltip.innerHTML = `
+                    Verify token at: 
+                    <a href="${this.getExplorerUrl(tokenAddress)}" 
+                       target="_blank"
+                       style="color: #fff; text-decoration: underline;">
+                       ${tokenAddress.slice(0, 6)}...${tokenAddress.slice(-4)}
+                    </a>
+                `;
+                container.appendChild(tooltip);
+            }
             await this.updateTokenBalance(tokenAddress, balanceId);
         };
 
@@ -508,15 +534,30 @@ export class CreateOrder extends BaseComponent {
                         } else {
                             tokenList.innerHTML = this.tokens.map(token => `
                                 <div class="token-item" data-address="${token.address}">
-                                    <div class="token-item-info">
-                                        <div class="token-item-symbol">${token.symbol}</div>
-                                        <div class="token-item-name">${token.name}</div>
-                                        ${token.balance ? `
-                                            <div class="token-item-balance">
-                                                Balance: ${Number(token.balance).toFixed(4)}
+                                    <div class="token-item-left">
+                                        <div class="token-icon">
+                                            ${this.getTokenIcon(token)}
+                                        </div>
+                                        <div class="token-item-info">
+                                            <div class="token-item-symbol">${token.symbol}</div>
+                                            <div class="token-item-name">
+                                                ${token.name}
+                                                <a href="${this.getExplorerUrl(token.address)}" 
+                                                   class="token-explorer-link"
+                                                   target="_blank"
+                                                   title="View contract on explorer">
+                                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                                    </svg>
+                                                </a>
                                             </div>
-                                        ` : ''}
+                                        </div>
                                     </div>
+                                    ${token.balance ? `
+                                        <div class="token-item-balance">
+                                            ${Number(token.balance).toFixed(2)}
+                                        </div>
+                                    ` : ''}
                                 </div>
                             `).join('');
                             
@@ -600,6 +641,22 @@ export class CreateOrder extends BaseComponent {
                 }
             });
             
+            input.addEventListener('change', (e) => {
+                if (ethers.utils.isAddress(e.target.value)) {
+                    const tooltip = document.createElement('div');
+                    tooltip.className = 'token-address-tooltip';
+                    tooltip.innerHTML = `
+                        Verify token at: 
+                        <a href="${this.getExplorerUrl(e.target.value)}" 
+                           target="_blank"
+                           style="color: #fff; text-decoration: underline;">
+                           ${e.target.value.slice(0, 6)}...${e.target.value.slice(-4)}
+                        </a>
+                    `;
+                    container.appendChild(tooltip);
+                }
+            });
+            
             // Replace existing input
             container.appendChild(input);
             container.appendChild(selectButton);
@@ -639,6 +696,47 @@ export class CreateOrder extends BaseComponent {
         });
         
         return modal;
+    }
+
+    getExplorerUrl(address) {
+        const networkConfig = getNetworkConfig();
+        if (!networkConfig?.explorer) {
+            console.warn('Explorer URL not configured');
+            return '#';
+        }
+        return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
+    }
+
+    // Add helper method for token icons
+    getTokenIcon(token) {
+        const symbol = token.symbol || '?';
+        const firstLetter = symbol.charAt(0).toUpperCase();
+        const colors = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+            '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+        ];
+        
+        // Generate consistent color based on address
+        const colorIndex = parseInt(token.address.slice(-6), 16) % colors.length;
+        const backgroundColor = colors[colorIndex];
+        
+        if (token.iconUrl) {
+            return `
+                <div class="token-icon" style="background: ${backgroundColor}">
+                    <img src="${token.iconUrl}" 
+                         alt="${symbol}"
+                         onerror="this.parentElement.innerHTML='<div class=\'token-icon-fallback\' style=\'background: ${backgroundColor}\'>${firstLetter}</div>'">
+                </div>
+            `;
+        }
+        
+        return `
+            <div class="token-icon">
+                <div class="token-icon-fallback" style="background: ${backgroundColor}">
+                    ${firstLetter}
+                </div>
+            </div>
+        `;
     }
 }
 
