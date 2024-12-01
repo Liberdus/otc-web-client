@@ -2,7 +2,7 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
-import { isDebugEnabled } from '../config.js';
+import { isDebugEnabled, getNetworkConfig } from '../config.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -408,7 +408,7 @@ export class ViewOrders extends BaseComponent {
                 <th>Sell</th>
                 <th>Amount</th>
                 <th>Expires</th>
-                <th data-sort="status">Status <span class="sort-icon">↕</span></th>
+                <th data-sort="status">Status <span class="sort-icon"></span></th>
                 <th>Action</th>
             </tr>
         `;
@@ -781,10 +781,40 @@ export class ViewOrders extends BaseComponent {
 
         tr.innerHTML = `
             <td>${order.id}</td>
-            <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
-            <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
-            <td>${buyTokenDetails?.symbol || 'Unknown'}</td>
+            <td>
+                <div class="token-info">
+                    <div class="token-icon small">
+                        ${this.getTokenIcon(buyTokenDetails)}
+                    </div>
+                    <a href="${this.getExplorerUrl(order.buyToken)}" 
+                       class="token-link" 
+                       target="_blank" 
+                       title="View token contract">
+                        ${buyTokenDetails?.symbol || 'Unknown'}
+                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                        </svg>
+                    </a>
+                </div>
+            </td>
             <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
+            <td>
+                <div class="token-info">
+                    <div class="token-icon small">
+                        ${this.getTokenIcon(sellTokenDetails)}
+                    </div>
+                    <a href="${this.getExplorerUrl(order.sellToken)}" 
+                       class="token-link" 
+                       target="_blank" 
+                       title="View token contract">
+                        ${sellTokenDetails?.symbol || 'Unknown'}
+                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                        </svg>
+                    </a>
+                </div>
+            </td>
+            <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
             <td>${formattedExpiry}</td>
             <td class="order-status">${status}</td>
             <td class="action-column">${canFill ? 
@@ -1108,5 +1138,46 @@ export class ViewOrders extends BaseComponent {
                     </td>
                 </tr>`;
         }
+    }
+
+    getExplorerUrl(address) {
+        const networkConfig = getNetworkConfig();
+        if (!networkConfig?.explorer) {
+            console.warn('Explorer URL not configured');
+            return '#';
+        }
+        return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
+    }
+
+    getTokenIcon(token) {
+        if (!token) return '';
+        
+        if (token.iconUrl) {
+            return `
+                <div class="token-icon">
+                    <img src="${token.iconUrl}" alt="${token.symbol}" class="token-icon-image">
+                </div>
+            `;
+        }
+
+        // Fallback to letter-based icon
+        const symbol = token.symbol || '?';
+        const firstLetter = symbol.charAt(0).toUpperCase();
+        const colors = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+            '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+        ];
+        
+        // Generate consistent color based on address
+        const colorIndex = parseInt(token.address.slice(-6), 16) % colors.length;
+        const backgroundColor = colors[colorIndex];
+        
+        return `
+            <div class="token-icon">
+                <div class="token-icon-fallback" style="background: ${backgroundColor}">
+                    ${firstLetter}
+                </div>
+            </div>
+        `;
     }
 }
