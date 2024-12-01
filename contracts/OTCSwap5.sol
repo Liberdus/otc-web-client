@@ -8,8 +8,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract OTCSwap is ReentrancyGuard {
     using SafeERC20 for IERC20;
     
-    uint256 public constant ORDER_EXPIRY = 7 days;
-    uint256 public constant GRACE_PERIOD = 7 days;
+    uint256 public constant ORDER_EXPIRY = 7 minutes;
+    uint256 public constant GRACE_PERIOD = 7 minutes;
     uint256 public constant MAX_CLEANUP_BATCH = 10;  // Maximum orders to process in one call
     uint256 public constant FEE_DAMPENING_FACTOR = 9;  // Used in fee calculation to smooth changes
     uint256 public constant MIN_FEE_PERCENTAGE = 90;   // 90% of expected fee
@@ -171,8 +171,8 @@ contract OTCSwap is ReentrancyGuard {
 
         // Update fee using dampening formula: fee = 100 * (9 * currentFee + gasUsed) / 10
         uint256 gasUsed = startGas - gasleft();
-        avgerageGasUsed = (FEE_DAMPENING_FACTOR * avgerageGasUsed + gasUsed) / (FEE_DAMPENING_FACTOR + 1);
-        orderCreationFee = 100 * avgerageGasUsed;
+        averageGasUsed = (FEE_DAMPENING_FACTOR * averageGasUsed + gasUsed) / (FEE_DAMPENING_FACTOR + 1);
+        orderCreationFee = 100 * averageGasUsed;
 
         return orderId;
     }
@@ -296,7 +296,7 @@ contract OTCSwap is ReentrancyGuard {
                 continue;
             }
             
-            // Check if grace period has passed
+            // Check if grace period has passed (now 14 minutes total)
             if (block.timestamp > order.timestamp + ORDER_EXPIRY + GRACE_PERIOD) {
                 // Only attempt token transfer for Active orders or orders with previous failed transfers
                 if (order.status == OrderStatus.Active || order.tries > 0) {
