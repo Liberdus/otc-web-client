@@ -255,22 +255,29 @@ export class MyOrders extends ViewOrders {
     }
 
     async refreshOrdersView() {
+        const tbody = this.container.querySelector('tbody');
+        if (!tbody) {
+            this.debug('Table body not found');
+            return;
+        }
+
+        // Show loading state immediately
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="9" class="loading-message">
+                    <div class="loading-spinner"></div>
+                    <div class="loading-text">Loading your orders...</div>
+                </td>
+            </tr>`;
+
         try {
-            this.debug('Initializing MyOrders component');
+            this.debug('Refreshing orders view');
             
             // Get contract instance first
             this.contract = await this.getContract();
             if (!this.contract) {
                 throw new Error('Contract not initialized');
             }
-
-            // Clear existing orders from table
-            const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                this.debug('Table body not found');
-                return;
-            }
-            tbody.innerHTML = '';
 
             // Get current account
             const userAddress = await window.walletManager.getAccount();
@@ -280,7 +287,7 @@ export class MyOrders extends ViewOrders {
             }
 
             // Get filter state
-            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
 
             // Filter orders for the current user
             let ordersToDisplay = Array.from(this.orders.values()).filter(order => 
@@ -288,13 +295,24 @@ export class MyOrders extends ViewOrders {
                 order.maker.toLowerCase() === userAddress.toLowerCase()
             );
 
-            if (showOnlyActive) {
-                ordersToDisplay = ordersToDisplay.filter(order => 
-                    order.status !== 'Canceled' && order.status !== 'Filled'
-                );
+            if (showOnlyCancellable) {
+                const currentTime = Math.floor(Date.now() / 1000);
+                const orderExpiry = await this.contract.ORDER_EXPIRY();
+                const gracePeriod = await this.contract.GRACE_PERIOD();
+
+                ordersToDisplay = ordersToDisplay.filter(order => {
+                    // Only show orders that are:
+                    // 1. Not cancelled
+                    // 2. Not filled
+                    // 3. Not expired beyond grace period
+                    const isGracePeriodExpired = currentTime > Number(order.timestamp) + orderExpiry.toNumber() + gracePeriod.toNumber();
+                    return order.status !== 'Canceled' && 
+                           order.status !== 'Filled' && 
+                           !isGracePeriodExpired;
+                });
             }
 
-            // Get token details
+            // Get all token details at once
             const tokenAddresses = new Set();
             ordersToDisplay.forEach(order => {
                 if (order?.sellToken) tokenAddresses.add(order.sellToken);
@@ -309,46 +327,36 @@ export class MyOrders extends ViewOrders {
                 }
             });
 
-            // Sort orders based on current sort configuration
-            ordersToDisplay = ordersToDisplay.sort((a, b) => {
-                const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
-                
-                switch (this.sortConfig.column) {
-                    case 'id':
-                        return (Number(a.id) - Number(b.id)) * direction;
-                    case 'status':
-                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
-                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
-                        return statusA.localeCompare(statusB) * direction;
-                    default:
-                        return 0;
-                }
-            });
+            // Create all rows first before adding to DOM
+            const rows = await Promise.all(ordersToDisplay.map(order => 
+                this.createOrderRow(order, tokenDetailsMap)
+            ));
 
-            // Check if we have any orders after filtering
-            if (!ordersToDisplay || ordersToDisplay.length === 0) {
-                this.debug('No orders to display after filtering');
+            // Clear loading state and add all rows at once
+            tbody.innerHTML = '';
+            if (!rows.length) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" class="no-orders-message">
+                        <td colspan="9" class="no-orders-message">
                             <div class="placeholder-text">
-                                ${showOnlyActive ? 'No active orders found' : 'No orders found'}
+                                ${showOnlyCancellable ? 'No cancellable orders found' : 'No orders found'}
                             </div>
                         </td>
                     </tr>`;
-                return;
+            } else {
+                rows.forEach(row => {
+                    if (row) tbody.appendChild(row);
+                });
             }
 
-            // Add orders to table
-            for (const order of ordersToDisplay) {
-                if (order) {
-                    const row = await this.createOrderRow(order, tokenDetailsMap);
-                    tbody.appendChild(row);
-                }
-            }
         } catch (error) {
             console.error('[MyOrders] Error refreshing orders view:', error);
-            throw error;
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="9" class="no-orders-message">
+                        <div class="placeholder-text">Failed to load orders</div>
+                    </td>
+                </tr>`;
         }
     }
 
@@ -380,7 +388,7 @@ export class MyOrders extends ViewOrders {
         // Replace the filter toggle text
         const filterToggleSpan = this.container.querySelector('.filter-toggle span');
         if (filterToggleSpan) {
-            filterToggleSpan.textContent = 'Show only active orders';
+            filterToggleSpan.textContent = 'Show only cancellable orders';
         }
     }
 }

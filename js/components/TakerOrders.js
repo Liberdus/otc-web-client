@@ -104,6 +104,17 @@ export class TakerOrders extends ViewOrders {
     }
 
     setupWebSocket() {
+        // Use parent's debounced refresh mechanism
+        const debouncedRefresh = () => {
+            this.debouncedRefresh();
+        };
+
+        // Clear existing subscriptions before adding new ones
+        this.eventSubscriptions.forEach(sub => {
+            window.webSocket.unsubscribe(sub.event, sub.callback);
+        });
+        this.eventSubscriptions.clear();
+
         // Subscribe to order sync completion with taker filter
         this.eventSubscriptions.add({
             event: 'orderSyncComplete',
@@ -118,24 +129,7 @@ export class TakerOrders extends ViewOrders {
                         this.orders.set(order.id, order);
                     });
                 
-                this.refreshOrdersView().catch(error => {
-                    this.debug('Error refreshing orders after sync:', error);
-                });
-            }
-        });
-
-        // Subscribe to new orders
-        this.eventSubscriptions.add({
-            event: 'OrderCreated',
-            callback: async (orderData) => {
-                const userAddress = await window.walletManager.getAccount();
-                if (orderData.taker.toLowerCase() === userAddress.toLowerCase()) {
-                    this.debug('New order received:', orderData);
-                    this.orders.set(orderData.id, orderData);
-                    this.refreshOrdersView().catch(error => {
-                        this.debug('Error refreshing after new order:', error);
-                    });
-                }
+                debouncedRefresh();
             }
         });
 
@@ -147,9 +141,7 @@ export class TakerOrders extends ViewOrders {
                     if (this.orders.has(order.id)) {
                         this.debug(`Order ${event.toLowerCase()}:`, order);
                         this.orders.get(order.id).status = event === 'OrderFilled' ? 'Filled' : 'Canceled';
-                        this.refreshOrdersView().catch(error => {
-                            this.debug('Error refreshing after order status change:', error);
-                        });
+                        debouncedRefresh();
                     }
                 }
             });
@@ -454,11 +446,10 @@ export class TakerOrders extends ViewOrders {
         }
     }
 
-    // Add handleSort method if not inherited properly
+    // Override handleSort to use parent's debouncedRefresh
     handleSort(column) {
         this.debug('Sorting by column:', column);
         
-        // Toggle direction if clicking same column
         if (this.sortConfig.column === column) {
             this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
         } else {
@@ -466,7 +457,6 @@ export class TakerOrders extends ViewOrders {
             this.sortConfig.direction = 'asc';
         }
 
-        // Update sort icons and active states
         const headers = this.container.querySelectorAll('th[data-sort]');
         headers.forEach(header => {
             const icon = header.querySelector('.sort-icon');
@@ -479,7 +469,7 @@ export class TakerOrders extends ViewOrders {
             }
         });
 
-        // Refresh the view with new sort
-        this.refreshOrdersView();
+        // Use parent's debouncedRefresh instead of direct refreshOrdersView call
+        this.debouncedRefresh();
     }
 }
