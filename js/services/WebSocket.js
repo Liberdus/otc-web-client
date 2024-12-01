@@ -358,7 +358,9 @@ export class WebSocketService {
             const age = currentTime - orderTime;
             
             // Consider both active and cancelled orders that are past expiry + grace period
-            const isEligible = (order.status === 'Active' || order.status === 'Canceled') && 
+            const isEligible = (order.status === 'Active' || 
+                               order.status === 'Canceled' || 
+                               order.status === 'Filled') && 
                               age > (orderExpiry.toNumber() + gracePeriod.toNumber());
 
             this.debug('Cleanup eligibility check:', {

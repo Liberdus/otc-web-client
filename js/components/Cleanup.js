@@ -72,6 +72,11 @@ export class Cleanup extends BaseComponent {
                                 <div>Count: <span id="cancelled-orders-count">Loading...</span></div>
                                 <div>Fees: <span id="cancelled-orders-fees">Loading...</span></div>
                             </div>
+                            <div class="cleanup-category">
+                                <h3>Filled Orders</h3>
+                                <div>Count: <span id="filled-orders-count">Loading...</span></div>
+                                <div>Fees: <span id="filled-orders-fees">Loading...</span></div>
+                            </div>
                             <div class="cleanup-total">
                                 <h3>Total</h3>
                                 <div>Orders Ready: <span id="cleanup-ready">Loading...</span></div>
@@ -123,10 +128,12 @@ export class Cleanup extends BaseComponent {
 
             const eligibleOrders = {
                 active: [],
-                cancelled: []
+                cancelled: [],
+                filled: []
             };
             let activeFees = 0;
             let cancelledFees = 0;
+            let filledFees = 0;
             
             for (const order of orders) {
                 const { isEligible, order: orderDetails } = await this.webSocket.checkCleanupEligibility(order.id);
@@ -137,12 +144,17 @@ export class Cleanup extends BaseComponent {
                     } else if (orderDetails.status === 'Canceled') {
                         eligibleOrders.cancelled.push(orderDetails);
                         cancelledFees += Number(orderDetails.orderCreationFee || 0);
+                    } else if (orderDetails.status === 'Filled') {
+                        eligibleOrders.filled.push(orderDetails);
+                        filledFees += Number(orderDetails.orderCreationFee || 0);
                     }
                 }
             }
             
-            const totalEligible = eligibleOrders.active.length + eligibleOrders.cancelled.length;
-            const totalFees = activeFees + cancelledFees;
+            const totalEligible = eligibleOrders.active.length + 
+                eligibleOrders.cancelled.length + 
+                eligibleOrders.filled.length;
+            const totalFees = activeFees + cancelledFees + filledFees;
             
             // Update UI elements
             const elements = {
@@ -150,6 +162,8 @@ export class Cleanup extends BaseComponent {
                 activeFees: document.getElementById('active-orders-fees'),
                 cancelledCount: document.getElementById('cancelled-orders-count'),
                 cancelledFees: document.getElementById('cancelled-orders-fees'),
+                filledCount: document.getElementById('filled-orders-count'),
+                filledFees: document.getElementById('filled-orders-fees'),
                 totalReward: document.getElementById('cleanup-reward'),
                 totalReady: document.getElementById('cleanup-ready'),
                 cleanupButton: document.getElementById('cleanup-button')
@@ -167,6 +181,12 @@ export class Cleanup extends BaseComponent {
             if (elements.cancelledFees) {
                 elements.cancelledFees.textContent = `${this.formatEth(cancelledFees)} POL`;
             }
+            if (elements.filledCount) {
+                elements.filledCount.textContent = eligibleOrders.filled.length.toString();
+            }
+            if (elements.filledFees) {
+                elements.filledFees.textContent = `${this.formatEth(filledFees)} POL`;
+            }
             if (elements.totalReward) {
                 elements.totalReward.textContent = `${this.formatEth(totalFees)} POL`;
             }
@@ -175,7 +195,12 @@ export class Cleanup extends BaseComponent {
             }
             if (elements.cleanupButton) {
                 elements.cleanupButton.disabled = totalEligible === 0;
-                elements.cleanupButton.textContent = `Clean ${totalEligible} Order${totalEligible !== 1 ? 's' : ''}`;
+                const batchSize = Math.min(totalEligible, 10); // Using contract's MAX_CLEANUP_BATCH
+                if (totalEligible > 10) {
+                    elements.cleanupButton.textContent = `Clean ${batchSize} of ${totalEligible} Orders`;
+                } else {
+                    elements.cleanupButton.textContent = `Clean ${batchSize} Order${batchSize !== 1 ? 's' : ''}`;
+                }
             }
 
             this.debug('Cleanup stats:', {
@@ -186,6 +211,10 @@ export class Cleanup extends BaseComponent {
                 cancelled: {
                     count: eligibleOrders.cancelled.length,
                     fees: this.formatEth(cancelledFees)
+                },
+                filled: {
+                    count: eligibleOrders.filled.length,
+                    fees: this.formatEth(filledFees)
                 },
                 total: {
                     count: totalEligible,
@@ -204,6 +233,7 @@ export class Cleanup extends BaseComponent {
         const errorText = 'Error';
         ['active-orders-count', 'active-orders-fees', 
          'cancelled-orders-count', 'cancelled-orders-fees',
+         'filled-orders-count', 'filled-orders-fees',
          'cleanup-reward', 'cleanup-ready'].forEach(id => {
             const element = document.getElementById(id);
             if (element) element.textContent = errorText;
