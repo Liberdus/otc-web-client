@@ -519,77 +519,79 @@ export class CreateOrder extends BaseComponent {
     async loadTokens() {
         try {
             this.tokens = await getTokenList();
-            // Update the modal content after tokens are loaded
+            
             ['sell', 'buy'].forEach(type => {
                 const modal = document.getElementById(`${type}TokenModal`);
-                if (modal) {
-                    const tokenList = modal.querySelector('.token-list');
-                    if (tokenList) {
-                        if (this.tokens.length === 0) {
-                            tokenList.innerHTML = `
-                                <div class="token-list-empty">
-                                    No tokens found in wallet
+                if (!modal) return;
+
+                // Get references to all token lists
+                const nativeList = modal.querySelector(`#${type}NativeTokenList`);
+                const userList = modal.querySelector(`#${type}UserTokenList`);
+                const allList = modal.querySelector(`#${type}AllTokenList`);
+
+                // Separate native token
+                const nativeToken = this.tokens.find(t => 
+                    t.address.toLowerCase() === '0x0000000000000000000000000000000000001010'
+                );
+
+                // Filter out native token from other tokens
+                const otherTokens = this.tokens.filter(t => 
+                    t.address.toLowerCase() !== '0x0000000000000000000000000000000000001010'
+                );
+
+                // Display native token
+                if (nativeToken) {
+                    nativeList.innerHTML = `
+                        <div class="token-item" data-address="${nativeToken.address}">
+                            <div class="token-item-left">
+                                <div class="token-icon">
+                                    ${this.getTokenIcon(nativeToken)}
                                 </div>
-                            `;
-                        } else {
-                            tokenList.innerHTML = this.tokens.map(token => `
-                                <div class="token-item" data-address="${token.address}">
-                                    <div class="token-item-left">
-                                        <div class="token-icon">
-                                            ${this.getTokenIcon(token)}
-                                        </div>
-                                        <div class="token-item-info">
-                                            <div class="token-item-symbol">${token.symbol}</div>
-                                            <div class="token-item-name">
-                                                ${token.name}
-                                                <a href="${this.getExplorerUrl(token.address)}" 
-                                                   class="token-explorer-link"
-                                                   target="_blank"
-                                                   title="View contract on explorer">
-                                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                                    </svg>
-                                                </a>
-                                            </div>
-                                        </div>
+                                <div class="token-item-info">
+                                    <div class="token-item-symbol">${nativeToken.symbol}</div>
+                                    <div class="token-item-name">
+                                        ${nativeToken.name}
+                                        <a href="${this.getExplorerUrl(nativeToken.address)}" 
+                                           class="token-explorer-link"
+                                           target="_blank"
+                                           title="View contract on explorer">
+                                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                            </svg>
+                                        </a>
                                     </div>
-                                    ${token.balance ? `
-                                        <div class="token-item-balance">
-                                            ${Number(token.balance).toFixed(2)}
-                                        </div>
-                                    ` : ''}
                                 </div>
-                            `).join('');
-                            
-                            // Reattach event listeners to new token items
-                            tokenList.querySelectorAll('.token-item').forEach(item => {
-                                item.addEventListener('click', () => {
-                                    const address = item.dataset.address;
-                                    const input = document.getElementById(`${type}Token`);
-                                    input.value = address;
-                                    this.updateTokenBalance(address, `${type}TokenBalance`);
-                                    modal.classList.remove('show');
-                                });
-                            });
-                        }
-                    }
+                            </div>
+                            ${nativeToken.balance ? `
+                                <div class="token-item-balance">
+                                    ${Number(nativeToken.balance).toFixed(4)}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
                 }
+
+                // Display tokens in wallet (tokens with balance)
+                const walletTokens = otherTokens.filter(t => t.balance && Number(t.balance) > 0);
+                this.displayTokens(walletTokens, userList);
+
+                // Display all other tokens
+                this.displayTokens(otherTokens, allList);
+
+                // Add click handlers
+                modal.querySelectorAll('.token-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        const address = item.dataset.address;
+                        const input = document.getElementById(`${type}Token`);
+                        input.value = address;
+                        this.updateTokenBalance(address, `${type}TokenBalance`);
+                        modal.classList.remove('show');
+                    });
+                });
             });
         } catch (error) {
             console.error('[CreateOrder] Error loading tokens:', error);
-            ['sell', 'buy'].forEach(type => {
-                const modal = document.getElementById(`${type}TokenModal`);
-                if (modal) {
-                    const tokenList = modal.querySelector('.token-list');
-                    if (tokenList) {
-                        tokenList.innerHTML = `
-                            <div class="token-list-error">
-                                Error loading tokens. Please try again.
-                            </div>
-                        `;
-                    }
-                }
-            });
+            this.showError('Failed to load tokens. Please try again.');
         }
     }
 
@@ -675,16 +677,50 @@ export class CreateOrder extends BaseComponent {
                     <h3>Select Token</h3>
                     <button class="token-modal-close">&times;</button>
                 </div>
-                <div class="token-list">
-                    <div class="token-list-loading">
-                        <div class="spinner"></div>
-                        <div>Loading tokens...</div>
+                <div class="token-modal-search">
+                    <span class="search-info-text">
+                        Search by token name, symbol, or paste contract address
+                    </span>
+                    <input type="text" 
+                           class="token-search-input" 
+                           placeholder="0x... or search token name"
+                           id="${type}TokenSearch">
+                </div>
+                <div class="token-sections">
+                    <div id="${type}ContractResult"></div>
+                    <div class="token-section">
+                        <div class="token-section-header">
+                            <h4>Native Token</h4>
+                            <span class="token-section-subtitle">Chain's native currency</span>
+                        </div>
+                        <div class="token-list" id="${type}NativeTokenList">
+                            <div class="token-list-loading">
+                                <div class="spinner"></div>
+                                <div>Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="token-section">
+                        <div class="token-section-header">
+                            <h4>Tokens in Wallet</h4>
+                            <span class="token-section-subtitle">Your available tokens</span>
+                        </div>
+                        <div class="token-list" id="${type}UserTokenList">
+                            <div class="token-list-loading">
+                                <div class="spinner"></div>
+                                <div>Loading tokens...</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         `;
+
+        // Add search functionality
+        const searchInput = modal.querySelector(`#${type}TokenSearch`);
+        searchInput.addEventListener('input', (e) => this.handleTokenSearch(e.target.value, type));
         
-        // Add event listeners
+        // Add modal close handlers
         modal.querySelector('.token-modal-close').addEventListener('click', () => {
             modal.classList.remove('show');
         });
@@ -698,6 +734,213 @@ export class CreateOrder extends BaseComponent {
         return modal;
     }
 
+    async handleTokenSearch(searchTerm, type) {
+        const contractResult = document.getElementById(`${type}ContractResult`);
+        
+        // Clear previous results
+        contractResult.innerHTML = '';
+        
+        // If input looks like an address
+        if (ethers.utils.isAddress(searchTerm)) {
+            // Show loading state first
+            contractResult.innerHTML = `
+                <div class="contract-address-result">
+                    <div class="contract-loading">
+                        <div class="spinner"></div>
+                        <span>Checking contract...</span>
+                    </div>
+                </div>
+            `;
+
+            try {
+                const tokenContract = new ethers.Contract(
+                    searchTerm,
+                    [
+                        'function name() view returns (string)',
+                        'function symbol() view returns (string)',
+                        'function decimals() view returns (uint8)',
+                        'function balanceOf(address) view returns (uint256)'
+                    ],
+                    this.provider
+                );
+
+                const [name, symbol, decimals, balance] = await Promise.all([
+                    tokenContract.name().catch(() => null),
+                    tokenContract.symbol().catch(() => null),
+                    tokenContract.decimals().catch(() => null),
+                    tokenContract.balanceOf(this.account).catch(() => null)
+                ]);
+
+                if (name && symbol && decimals !== null) {
+                    // Format balance if available
+                    const formattedBalance = balance ? 
+                        ethers.utils.formatUnits(balance, decimals) : '0';
+
+                    // Create token object matching the structure used in tokens.js
+                    const token = {
+                        address: searchTerm,
+                        name,
+                        symbol,
+                        decimals,
+                        balance: formattedBalance
+                    };
+
+                    // Display the token in the same format as listed tokens
+                    contractResult.innerHTML = `
+                        <div class="token-item" data-address="${searchTerm}">
+                            <div class="token-item-left">
+                                <div class="token-icon">
+                                    ${this.getTokenIcon(token)}
+                                </div>
+                                <div class="token-item-info">
+                                    <div class="token-item-symbol">${symbol}</div>
+                                    <div class="token-item-name">
+                                        ${name}
+                                        <a href="${this.getExplorerUrl(searchTerm)}" 
+                                           class="token-explorer-link"
+                                           target="_blank"
+                                           title="View contract on explorer">
+                                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                            </svg>
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                            ${balance ? `
+                                <div class="token-item-balance">
+                                    ${Number(formattedBalance).toFixed(4)}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+
+                    // Add click handler
+                    const tokenItem = contractResult.querySelector('.token-item');
+                    tokenItem.addEventListener('click', () => {
+                        const input = document.getElementById(`${type}Token`);
+                        input.value = searchTerm;
+                        this.updateTokenBalance(searchTerm, `${type}TokenBalance`);
+                        document.getElementById(`${type}TokenModal`).classList.remove('show');
+                    });
+                }
+            } catch (error) {
+                // Just clear the contract result if there's an error
+                contractResult.innerHTML = '';
+            }
+        }
+
+        // Filter and display wallet tokens
+        const searchTermLower = searchTerm.toLowerCase().trim();
+        const filteredWalletTokens = this.walletTokens.filter(token => 
+            token.symbol.toLowerCase().includes(searchTermLower) ||
+            token.name.toLowerCase().includes(searchTermLower) ||
+            token.address.toLowerCase().includes(searchTermLower)
+        );
+
+        // Display wallet tokens
+        if (filteredWalletTokens.length > 0) {
+            userTokenList.innerHTML = filteredWalletTokens.map(token => `
+                <div class="token-item" data-address="${token.address}">
+                    <div class="token-item-left">
+                        <div class="token-icon">
+                            ${this.getTokenIcon(token)}
+                        </div>
+                        <div class="token-item-info">
+                            <div class="token-item-symbol">${token.symbol}</div>
+                            <div class="token-item-name">
+                                ${token.name}
+                                <a href="${this.getExplorerUrl(token.address)}" 
+                                   class="token-explorer-link"
+                                   target="_blank"
+                                   title="View contract on explorer">
+                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                    </svg>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="token-item-balance">
+                        ${Number(token.balance).toFixed(4)}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            userTokenList.innerHTML = `
+                <div class="token-list-empty">
+                    No tokens found in wallet
+                </div>
+            `;
+        }
+    }
+
+    displayTokens(tokens, container) {
+        if (!container) return; // Guard against null container
+
+        if (!tokens || tokens.length === 0) {
+            container.innerHTML = `
+                <div class="token-list-empty">
+                    No tokens found
+                </div>
+            `;
+            return;
+        }
+
+        try {
+            container.innerHTML = tokens.map(token => `
+                <div class="token-item" data-address="${token.address}">
+                    <div class="token-item-left">
+                        <div class="token-icon">
+                            ${this.getTokenIcon(token)}
+                        </div>
+                        <div class="token-item-info">
+                            <div class="token-item-symbol">${token.symbol}</div>
+                            <div class="token-item-name">
+                                ${token.name}
+                                <a href="${this.getExplorerUrl(token.address)}" 
+                                   class="token-explorer-link"
+                                   target="_blank"
+                                   title="View contract on explorer">
+                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                    </svg>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    ${token.balance ? `
+                        <div class="token-item-balance">
+                            ${Number(token.balance).toFixed(4)}
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+
+            // Add click handlers
+            container.querySelectorAll('.token-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const address = item.dataset.address;
+                    const type = container.id.includes('sell') ? 'sell' : 'buy';
+                    const input = document.getElementById(`${type}Token`);
+                    if (input) {
+                        input.value = address;
+                        this.updateTokenBalance(address, `${type}TokenBalance`);
+                        const modal = document.getElementById(`${type}TokenModal`);
+                        if (modal) modal.classList.remove('show');
+                    }
+                });
+            });
+        } catch (error) {
+            console.error('Error displaying tokens:', error);
+            container.innerHTML = `
+                <div class="token-list-empty">
+                    Error loading tokens
+                </div>
+            `;
+        }
+    }
+
     getExplorerUrl(address) {
         const networkConfig = getNetworkConfig();
         if (!networkConfig?.explorer) {
@@ -709,6 +952,15 @@ export class CreateOrder extends BaseComponent {
 
     // Add helper method for token icons
     getTokenIcon(token) {
+        if (token.iconUrl) {
+            return `
+                <div class="token-icon">
+                    <img src="${token.iconUrl}" alt="${token.symbol}" class="token-icon-image">
+                </div>
+            `;
+        }
+
+        // Fallback to letter-based icon
         const symbol = token.symbol || '?';
         const firstLetter = symbol.charAt(0).toUpperCase();
         const colors = [
@@ -719,16 +971,6 @@ export class CreateOrder extends BaseComponent {
         // Generate consistent color based on address
         const colorIndex = parseInt(token.address.slice(-6), 16) % colors.length;
         const backgroundColor = colors[colorIndex];
-        
-        if (token.iconUrl) {
-            return `
-                <div class="token-icon" style="background: ${backgroundColor}">
-                    <img src="${token.iconUrl}" 
-                         alt="${symbol}"
-                         onerror="this.parentElement.innerHTML='<div class=\'token-icon-fallback\' style=\'background: ${backgroundColor}\'>${firstLetter}</div>'">
-                </div>
-            `;
-        }
         
         return `
             <div class="token-icon">
