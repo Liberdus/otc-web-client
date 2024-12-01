@@ -301,15 +301,54 @@ th[data-sort].active-sort .sort-icon {
 
 /* Zebra striping for rows */
 .orders-table tbody tr:nth-child(even) {
-    background-color: #f9fafb;  /* Very light gray with slight blue tint */
+  background-color: #f9fafb; /* Very light gray with slight blue tint */
 }
 
 .orders-table tbody tr:nth-child(odd) {
-    background-color: #ffffff;  /* White */
+  background-color: #ffffff; /* White */
 }
 
 /* Hover effect for rows */
 .orders-table tbody tr:hover {
-    background-color: #f3f4f6;  /* Slightly darker on hover */
-    transition: background-color 0.15s ease-in-out;
+  background-color: #f3f4f6; /* Slightly darker on hover */
+  transition: background-color 0.15s ease-in-out;
+}
+
+/* Loading State Styles */
+.loading-message {
+  padding: 2rem;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  margin: 20px auto;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-text {
+  text-align: center;
+  color: #666;
+  margin-top: 10px;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Place this with other responsive adjustments */
+@media (max-width: 768px) {
+  .loading-spinner {
+    width: 2rem;
+    height: 2rem;
+  }
 }
