@@ -176,23 +176,109 @@
 }
 
 .token-input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.token-input {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid #e8ecf4;
+  border-radius: 12px;
+  font-size: 16px;
+  background: #ffffff;
+  transition: border-color 0.2s;
+}
+
+.token-select-button {
+  background: #f8f9fe;
+  border: 1px solid #e8ecf4;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.token-select-button:hover {
+  background: #e8ecf4;
+}
+
+/* Token modal styling */
+.token-modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+}
+
+.token-modal.show {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.token-modal-content {
+  background: white;
+  padding: 24px;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 480px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.token-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  margin-bottom: 16px;
 }
 
-.input-box input {
-  background: transparent;
+.token-modal-close {
+  background: none;
   border: none;
   font-size: 24px;
-  width: 100%;
-  outline: none;
-  color: #1a1a1a;
+  cursor: pointer;
+  padding: 4px;
 }
 
-.input-box input::placeholder {
-  color: #bdbdbd;
+.token-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.token-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #e8ecf4;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.token-item:hover {
+  background-color: #f8f9fe;
+}
+
+.token-item-info {
+  margin-left: 12px;
+}
+
+.token-item-symbol {
+  font-weight: 600;
+}
+
+.token-item-name {
+  font-size: 14px;
+  color: #666;
 }
 
 .token-selector {
@@ -386,4 +472,54 @@
   border-width: 5px;
   border-style: solid;
   border-color: #333 transparent transparent transparent;
+}
+
+.token-select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: white;
+  font-size: 14px;
+}
+
+.token-select:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.token-list-loading,
+.token-list-empty,
+.token-list-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+    color: #666;
+}
+
+.spinner {
+    width: 30px;
+    height: 30px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 12px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.token-list-error {
+    color: #dc3545;
+}
+
+.token-list-empty {
+    color: #666;
+    font-style: italic;
 }
