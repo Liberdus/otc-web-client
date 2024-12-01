@@ -467,10 +467,13 @@ export class CreateOrder extends BaseComponent {
     }
 
     resetForm() {
-        ['sellAmount', 'buyAmount'].forEach(id => {
+        // Clear all input fields
+        ['partner', 'sellToken', 'sellAmount', 'buyToken', 'buyAmount'].forEach(id => {
             const element = document.getElementById(id);
             if (element) element.value = '';
         });
+        
+        // Clear balance displays
         ['sellTokenBalance', 'buyTokenBalance'].forEach(id => {
             const element = document.getElementById(id);
             if (element) element.textContent = '';
