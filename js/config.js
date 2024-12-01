@@ -7,7 +7,7 @@ const networkConfig = {
         displayName: "Amoy Testnet",
         contractAddress: "0x58EB5dD12B3D8c7F7A463680892CAc4E5255B628", // 0x3e6326657B7130613c943D013EC84cE1F33027Ba 0x8d65112BA50B600c6495c4C199561AD74752D7eE 0x58EB5dD12B3D8c7F7A463680892CAc4E5255B628
         contractABI: CONTRACT_ABI,
-        explorer: "https://www.oklink.com/amoy",
+        explorer: "https://amoy.polygonscan.com",
         rpcUrl: "https://rpc.ankr.com/polygon_amoy",
         fallbackRpcUrls: [
             "https://rpc.ankr.com/polygon_amoy",
