@@ -80,9 +80,9 @@ export class TakerOrders extends ViewOrders {
             if (!filteredOrders.length) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" class="no-orders-message">
+                        <td colspan="8" class="no-orders-message">
                             <div class="placeholder-text">
-                                No orders found where you are the designated taker
+                                No orders found for you
                             </div>
                         </td>
                     </tr>`;
@@ -189,11 +189,6 @@ export class TakerOrders extends ViewOrders {
         }
 
         return tr;
-    }
-
-    isOrderForTaker(order, userAddress) {
-        if (!order || !userAddress) return false;
-        return order.taker.toLowerCase() === userAddress.toLowerCase();
     }
 
     // Override fillOrder to add specific handling for taker orders
@@ -361,9 +356,9 @@ export class TakerOrders extends ViewOrders {
             if (!ordersToDisplay || ordersToDisplay.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" class="no-orders-message">
+                        <td colspan="8" class="no-orders-message">
                             <div class="placeholder-text">
-                                ${showOnlyFillable ? 'No fillable orders found' : 'No orders found where you are the designated taker'}
+                                ${showOnlyFillable ? 'No fillable orders found' : 'No orders found for you'}
                             </div>
                         </td>
                     </tr>`;
@@ -423,7 +418,6 @@ export class TakerOrders extends ViewOrders {
                 <th>Amount</th>
                 <th>Expires</th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
-                <th>Taker</th>
                 <th>Action</th>
             `;
 

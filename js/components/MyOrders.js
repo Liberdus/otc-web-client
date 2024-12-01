@@ -189,67 +189,59 @@ export class MyOrders extends ViewOrders {
         const statusCell = tr.querySelector('.order-status');
         const expiresCell = tr.querySelector('td:nth-child(6)'); // Expires column
         
-        if (actionCell && statusCell) {
-            try {
-                const currentTime = Math.floor(Date.now() / 1000);
-                const orderTime = Number(order.timestamp);
-                const contract = await this.getContract();
-                
-                // Get expiry times directly from contract
-                const orderExpiry = await contract.ORDER_EXPIRY();
-                const gracePeriod = await contract.GRACE_PERIOD();
-                
-                const expiryTime = orderTime + orderExpiry.toNumber();
-                const timeDiff = expiryTime - currentTime;
-                
-                // Format time difference for expires column
-                const formatTimeDiff = (diff) => {
-                    const absHours = Math.floor(Math.abs(diff) / 3600);
-                    const absMinutes = Math.floor((Math.abs(diff) % 3600) / 60);
-                    const sign = diff < 0 ? '-' : '';
-                    return `${sign}${absHours}h ${absMinutes}m`;
-                };
-
-                // Update expires column with the time difference
-                if (expiresCell) {
-                    expiresCell.textContent = formatTimeDiff(timeDiff);
-                }
-
-                const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
-                
-                // Status column only shows contract states
-                if (order.status === 'Canceled') {
-                    statusCell.textContent = 'Canceled';
-                    statusCell.className = 'order-status canceled';
-                } else if (order.status === 'Filled') {
-                    statusCell.textContent = 'Filled';
-                    statusCell.className = 'order-status filled';
-                } else {
-                    statusCell.textContent = 'Active';
-                    statusCell.className = 'order-status active';
-                }
-
-                // Keep existing action column logic
-                if (order.status === 'Canceled') {
-                    actionCell.innerHTML = '<span class="order-status">Canceled</span>';
-                } else if (order.status === 'Filled') {
-                    actionCell.innerHTML = '<span class="order-status">Filled</span>';
-                } else if (isGracePeriodExpired) {
-                    actionCell.innerHTML = '<span class="order-status">Await Cleanup</span>';
-                } else {
-                    actionCell.innerHTML = `
-                        <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
-                    `;
-                    const cancelButton = actionCell.querySelector('.cancel-button');
-                    if (cancelButton) {
-                        cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
-                    }
-                }
-            } catch (error) {
-                console.error('[MyOrders] Error in createOrderRow:', error);
-                actionCell.innerHTML = '<span class="order-status error">Error</span>';
-            }
+        // Remove the existing action column if it exists (from parent class)
+        if (actionCell) {
+            actionCell.remove();
         }
+
+        // Create new taker cell
+        const takerCell = document.createElement('td');
+        // Check if order is open to anyone (taker is zero address)
+        const isPublicOrder = order.taker === ethers.constants.AddressZero;
+        
+        if (isPublicOrder) {
+            takerCell.innerHTML = '<span class="open-order">Public</span>';
+        } else {
+            // For private orders, show truncated address
+            const shortAddress = `${order.taker.slice(0, 6)}...${order.taker.slice(-4)}`;
+            takerCell.innerHTML = `<span class="targeted-order" title="${order.taker}">${shortAddress}</span>`;
+        }
+
+        // Create new action cell
+        const newActionCell = document.createElement('td');
+        newActionCell.className = 'action-column';
+
+        try {
+            const currentTime = Math.floor(Date.now() / 1000);
+            const orderTime = Number(order.timestamp);
+            const contract = await this.getContract();
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
+            const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
+
+            if (order.status === 'Canceled') {
+                newActionCell.innerHTML = '<span class="order-status">Canceled</span>';
+            } else if (order.status === 'Filled') {
+                newActionCell.innerHTML = '<span class="order-status">Filled</span>';
+            } else if (isGracePeriodExpired) {
+                newActionCell.innerHTML = '<span class="order-status">Await Cleanup</span>';
+            } else {
+                newActionCell.innerHTML = `
+                    <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
+                `;
+                const cancelButton = newActionCell.querySelector('.cancel-button');
+                if (cancelButton) {
+                    cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
+                }
+            }
+        } catch (error) {
+            console.error('[MyOrders] Error in createOrderRow:', error);
+            newActionCell.innerHTML = '<span class="order-status error">Error</span>';
+        }
+
+        // Append both cells in correct order
+        tr.appendChild(takerCell);
+        tr.appendChild(newActionCell);
 
         return tr;
     }
@@ -379,13 +371,17 @@ export class MyOrders extends ViewOrders {
                 <th>Action</th>
             `;
 
-            // Re-add click handlers for sorting after updating innerHTML
+            // Re-add click handlers for sorting
             thead.querySelectorAll('th[data-sort]').forEach(th => {
                 th.addEventListener('click', () => this.handleSort(th.dataset.sort));
             });
         }
 
-        // Replace the filter toggle text
+        // Replace the filter toggle text and ensure it's unchecked by default
+        const filterToggle = this.container.querySelector('#fillable-orders-toggle');
+        if (filterToggle) {
+            filterToggle.checked = false;  // Set to unchecked by default
+        }
         const filterToggleSpan = this.container.querySelector('.filter-toggle span');
         if (filterToggleSpan) {
             filterToggleSpan.textContent = 'Show only cancellable orders';

@@ -409,7 +409,6 @@ export class ViewOrders extends BaseComponent {
                 <th>Amount</th>
                 <th>Expires</th>
                 <th data-sort="status">Status <span class="sort-icon">↕</span></th>
-                <th>Taker</th>
                 <th>Action</th>
             </tr>
         `;
@@ -780,11 +779,6 @@ export class ViewOrders extends BaseComponent {
         const currentAccount = accounts[0]?.toLowerCase();
         const isUserOrder = order.maker?.toLowerCase() === currentAccount;
 
-        // Format taker display
-        const takerDisplay = order.taker === ethers.constants.AddressZero 
-            ? '<span class="open-order">Open to All</span>'
-            : `<span class="targeted-order" title="${order.taker}">Private</span>`;
-
         tr.innerHTML = `
             <td>${order.id}</td>
             <td>${sellTokenDetails?.symbol || 'Unknown'}</td>
@@ -793,7 +787,6 @@ export class ViewOrders extends BaseComponent {
             <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
             <td>${formattedExpiry}</td>
             <td class="order-status">${status}</td>
-            <td class="taker-column">${takerDisplay}</td>
             <td class="action-column">${canFill ? 
                 `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>` : 
                 isUserOrder ?

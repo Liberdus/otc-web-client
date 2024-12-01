@@ -6,6 +6,8 @@
   border-radius: 0.75rem;
   box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
   padding: 0.5rem;
+  min-width: 48rem;
+  background: #ffffff;
 }
 
 /* Table base styles */
@@ -14,7 +16,6 @@
   border-collapse: collapse;
   background: #ffffff;
   table-layout: fixed;
-  min-width: 56rem;
 }
 
 .orders-table thead {
@@ -23,31 +24,28 @@
 
 /* Column widths - with wider ID column */
 .orders-table th:nth-child(1) {
-  width: 7%;
+  width: 10%;
 } /* ID */
 .orders-table th:nth-child(2) {
-  width: 11%;
+  width: 15%;
 } /* Buy Token */
 .orders-table th:nth-child(3) {
-  width: 11%;
+  width: 15%;
 } /* Buy Amount */
 .orders-table th:nth-child(4) {
-  width: 11%;
+  width: 15%;
 } /* Sell Token */
 .orders-table th:nth-child(5) {
-  width: 11%;
+  width: 15%;
 } /* Sell Amount */
 .orders-table th:nth-child(6) {
-  width: 12%;
+  width: 10%;
 } /* Expires */
 .orders-table th:nth-child(7) {
-  width: 12%;
+  width: 10%;
 } /* Status */
 .orders-table th:nth-child(8) {
-  width: 12%;
-} /* Maker */
-.orders-table th:nth-child(9) {
-  width: 13%;
+  width: 10%;
 } /* Action */
 
 /* Cell styles */
@@ -300,18 +298,39 @@ th[data-sort].active-sort .sort-icon {
 }
 
 /* Zebra striping for rows */
-.orders-table tbody tr:nth-child(even) {
-  background-color: #f9fafb; /* Very light gray with slight blue tint */
+.orders-table tbody tr {
+  width: 100%;
+  background-color: #ffffff;
 }
 
-.orders-table tbody tr:nth-child(odd) {
-  background-color: #ffffff; /* White */
+.orders-table tbody tr:nth-child(even) {
+  background-color: #f9fafb;
+}
+
+/* Remove any potential conflicting styles */
+.orders-table tr,
+.orders-table td,
+.orders-table th {
+  border: none;
+  margin: 0;
+  padding: 0.75rem;
+}
+
+/* Ensure the table container spans full width */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin-bottom: 1.25rem;
+  border-radius: 0.75rem;
+  box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.1);
+  padding: 0.5rem;
+  min-width: 48rem;
+  background: #ffffff;
 }
 
 /* Hover effect for rows */
 .orders-table tbody tr:hover {
-  background-color: #f3f4f6; /* Slightly darker on hover */
-  transition: background-color 0.15s ease-in-out;
+  background-color: #f3f4f6;
 }
 
 /* Loading State Styles */
@@ -352,3 +371,32 @@ th[data-sort].active-sort .sort-icon {
     height: 2rem;
   }
 }
+
+/* MyOrders specific column widths */
+#my-orders .orders-table th:nth-child(1) {
+  width: 8%;
+} /* ID */
+#my-orders .orders-table th:nth-child(2) {
+  width: 12%;
+} /* Buy Token */
+#my-orders .orders-table th:nth-child(3) {
+  width: 12%;
+} /* Buy Amount */
+#my-orders .orders-table th:nth-child(4) {
+  width: 12%;
+} /* Sell Token */
+#my-orders .orders-table th:nth-child(5) {
+  width: 12%;
+} /* Sell Amount */
+#my-orders .orders-table th:nth-child(6) {
+  width: 10%;
+} /* Expires */
+#my-orders .orders-table th:nth-child(7) {
+  width: 10%;
+} /* Status */
+#my-orders .orders-table th:nth-child(8) {
+  width: 12%;
+} /* Taker */
+#my-orders .orders-table th:nth-child(9) {
+  width: 12%;
+} /* Action */
