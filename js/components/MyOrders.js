@@ -249,8 +249,6 @@ export class MyOrders extends ViewOrders {
 
     async refreshOrdersView() {
         try {
-            this.debug('Refreshing orders view with sort config:', this.sortConfig);
-            
             // Get contract instance first
             this.contract = await this.getContract();
             if (!this.contract) {
@@ -260,18 +258,75 @@ export class MyOrders extends ViewOrders {
             // Get current account
             const userAddress = await window.walletManager.getAccount();
             if (!userAddress) {
-                this.debug('No account connected');
-                return;
+                throw new Error('No wallet connected');
             }
 
-            // Get filter state
-            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            // Clear existing orders from table
+            const tbody = this.container.querySelector('tbody');
+            if (!tbody) {
+                console.warn('[MyOrders] Table body not found');
+                return;
+            }
+            tbody.innerHTML = '';
 
-            // Filter orders for the current user
-            let ordersToDisplay = Array.from(this.orders.values()).filter(order => 
-                order?.maker && userAddress && 
+            // Get ALL orders from WebSocket cache without filtering
+            const allOrders = window.webSocket?.getOrders() || [];
+            
+            // Filter orders only by maker address
+            let ordersToDisplay = allOrders.filter(order => 
+                order?.maker && 
                 order.maker.toLowerCase() === userAddress.toLowerCase()
             );
+
+            // Check if we should filter for cancellable orders
+            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            if (showOnlyCancellable) {
+                // Filter for active orders that can be cancelled
+                const currentTime = Math.floor(Date.now() / 1000);
+                const contract = await this.getContract();
+                const orderExpiry = await contract.ORDER_EXPIRY();
+                const gracePeriod = await contract.GRACE_PERIOD();
+
+                ordersToDisplay = ordersToDisplay.filter(order => {
+                    const orderTime = Number(order.timestamp);
+                    const isExpiredWithoutGrace = currentTime > orderTime + orderExpiry.toNumber();
+                    const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
+
+                    // Show orders that are:
+                    // 1. Active/Open AND not expired, OR
+                    // 2. Active/Open AND expired but still within grace period
+                    return (order.status === 'Active' || order.status === 'Open') && 
+                           (!isExpiredWithoutGrace || !isGracePeriodExpired);
+                });
+            }
+
+            // Get token details for display
+            const tokenAddresses = new Set();
+            ordersToDisplay.forEach(order => {
+                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
+                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
+            });
+
+            const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
+            const tokenDetailsMap = new Map();
+            Array.from(tokenAddresses).forEach((address, index) => {
+                if (tokenDetails[index]) {
+                    tokenDetailsMap.set(address, tokenDetails[index]);
+                }
+            });
+
+            // Check if we have any orders after filtering
+            if (!ordersToDisplay.length) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="9" class="no-orders-message">
+                            <div class="placeholder-text">
+                                No orders found
+                            </div>
+                        </td>
+                    </tr>`;
+                return;
+            }
 
             // Sort orders based on sortConfig
             ordersToDisplay.sort((a, b) => {
@@ -303,27 +358,70 @@ export class MyOrders extends ViewOrders {
                     : Number(b.id) - Number(a.id);
             });
 
-            // Update the orders Map with sorted orders
-            this.orders.clear();
-            ordersToDisplay.forEach(order => {
-                this.orders.set(order.id, order);
-            });
-
-            await super.refreshOrdersView();
+            // Create and append order rows
+            for (const order of ordersToDisplay) {
+                try {
+                    const orderWithLowercase = {
+                        ...order,
+                        sellToken: order.sellToken.toLowerCase(),
+                        buyToken: order.buyToken.toLowerCase()
+                    };
+                    const row = await this.createOrderRow(orderWithLowercase, tokenDetailsMap);
+                    if (row) {
+                        tbody.appendChild(row);
+                    }
+                } catch (error) {
+                    console.error('[MyOrders] Error creating row for order:', order.id, error);
+                }
+            }
 
         } catch (error) {
-            console.error('[MyOrders] Initialization error:', error);
-            this.container.innerHTML = `
-                <div class="tab-content-wrapper">
-                    <h2>My Orders</h2>
-                    <p class="error-message">Failed to load orders. Please try again later.</p>
-                </div>`;
+            this.debug('Error refreshing orders view:', error);
+            throw error;
         }
+    }
+
+    handleSort(column) {
+        this.debug('Sorting by column:', column);
+        
+        if (this.sortConfig.column === column) {
+            this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.sortConfig.column = column;
+            this.sortConfig.direction = 'asc';
+        }
+
+        const headers = this.container.querySelector('thead').querySelectorAll('th[data-sort]');
+        headers.forEach(header => {
+            const icon = header.querySelector('.sort-icon');
+            if (header.dataset.sort === column) {
+                header.classList.add('active-sort');
+                icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
+            } else {
+                header.classList.remove('active-sort');
+                icon.textContent = '↕';
+            }
+        });
+
+        // Use parent's debouncedRefresh instead of direct refreshOrdersView call
+        this.debouncedRefresh();
     }
 
     async setupTable() {
         // Call parent's setupTable to get basic structure
         await super.setupTable();
+        
+        // Update the filter toggle text to be more specific
+        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
+        if (filterToggleSpan) {
+            filterToggleSpan.textContent = 'Show only cancellable orders';
+        }
+
+        // Show the filter toggle
+        const filterToggle = this.container.querySelector('.filter-toggle');
+        if (filterToggle) {
+            filterToggle.style.display = 'flex';
+        }
         
         // Update the table header to show maker's perspective
         const thead = this.container.querySelector('thead tr');
@@ -342,29 +440,8 @@ export class MyOrders extends ViewOrders {
 
             // Re-add click handlers for sorting
             thead.querySelectorAll('th[data-sort]').forEach(th => {
-                th.addEventListener('click', () => {
-                    const column = th.dataset.sort;
-                    
-                    // Toggle direction if clicking same column
-                    if (this.sortConfig.column === column) {
-                        this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
-                    } else {
-                        this.sortConfig.column = column;
-                        this.sortConfig.direction = 'asc';
-                    }
-                    
-                    this.sortConfig.isColumnClick = true;
-                    this.debug('Sort config updated:', this.sortConfig);
-                    this.refreshOrdersView();
-                });
+                th.addEventListener('click', () => this.handleSort(th.dataset.sort));
             });
-        }
-
-        // Hide the filter toggle but keep the element for future use
-        const filterToggle = this.container.querySelector('#fillable-orders-toggle');
-        if (filterToggle) {
-            filterToggle.parentElement.style.display = 'none';
-            filterToggle.checked = false;
         }
     }
 }
