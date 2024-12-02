@@ -159,23 +159,34 @@ export class CreateOrder extends BaseComponent {
 
     async updateTokenBalance(tokenAddress, elementId) {
         try {
+            const balanceElement = document.getElementById(elementId);
             if (!tokenAddress || !ethers.utils.isAddress(tokenAddress)) {
-                document.getElementById(elementId).textContent = '';
+                balanceElement.textContent = '';
                 return;
             }
 
             const tokenDetails = await this.getTokenDetails([tokenAddress]);
             if (tokenDetails && tokenDetails[0]?.symbol) {
-                const balanceElement = document.getElementById(elementId);
-                const formattedBalance = parseFloat(tokenDetails[0].formattedBalance).toFixed(4);
-                balanceElement.innerHTML = `
-                    <div class="balance-with-icon">
+                const token = tokenDetails[0];
+                const formattedBalance = parseFloat(token.formattedBalance).toFixed(4);
+                
+                // Update token selector button
+                const type = elementId.includes('sell') ? 'sell' : 'buy';
+                const selector = document.getElementById(`${type}TokenSelector`);
+                selector.innerHTML = `
+                    <span class="token-selector-content">
                         <div class="token-icon small">
-                            ${this.getTokenIcon(tokenDetails[0])}
+                            ${this.getTokenIcon(token)}
                         </div>
-                        <span>Balance: ${formattedBalance} ${tokenDetails[0].symbol}</span>
-                    </div>
+                        <span>${token.symbol}</span>
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                    </span>
                 `;
+                
+                // Update balance display
+                balanceElement.innerHTML = `Balance: ${formattedBalance}`;
             }
         } catch (error) {
             console.error(`Error updating token balance:`, error);
@@ -244,38 +255,56 @@ export class CreateOrder extends BaseComponent {
             }
 
             // Get form values
-            const partner = document.getElementById('partner').value.trim();
-            const sellToken = document.getElementById('sellToken').value.trim();
+            const takerAddress = document.getElementById('takerAddress')?.value.trim() || '';
+            const sellToken = document.getElementById('sellToken').value;
             const sellAmount = document.getElementById('sellAmount').value.trim();
-            const buyToken = document.getElementById('buyToken').value.trim();
+            const buyToken = document.getElementById('buyToken').value;
             const buyAmount = document.getElementById('buyAmount').value.trim();
 
             // Validation
-            if (!ethers.utils.isAddress(sellToken)) {
-                throw new Error('Invalid sell token address');
+            if (!sellToken || !ethers.utils.isAddress(sellToken)) {
+                throw new Error('Please select a token to sell');
             }
-            if (!ethers.utils.isAddress(buyToken)) {
-                throw new Error('Invalid buy token address');
+            if (!buyToken || !ethers.utils.isAddress(buyToken)) {
+                throw new Error('Please select a token to buy');
             }
-            if (!sellAmount || isNaN(sellAmount)) {
-                throw new Error('Invalid sell amount');
+            if (!sellAmount || isNaN(sellAmount) || parseFloat(sellAmount) <= 0) {
+                throw new Error('Please enter a valid sell amount');
             }
-            if (!buyAmount || isNaN(buyAmount)) {
-                throw new Error('Invalid buy amount');
+            if (!buyAmount || isNaN(buyAmount) || parseFloat(buyAmount) <= 0) {
+                throw new Error('Please enter a valid buy amount');
             }
-            if (partner && !ethers.utils.isAddress(partner)) {
-                throw new Error('Invalid partner address');
+            if (takerAddress && !ethers.utils.isAddress(takerAddress)) {
+                throw new Error('Invalid taker address');
+            }
+            if (sellToken.toLowerCase() === buyToken.toLowerCase()) {
+                throw new Error('Cannot swap the same token');
             }
 
-            // Get token contracts with full ERC20 ABI for better interaction
+            // Verify token selection was made through the UI
+            const sellSelector = document.querySelector('#sellTokenSelector .token-selector-content span');
+            const buySelector = document.querySelector('#buyTokenSelector .token-selector-content span');
+            if (sellSelector.textContent === 'Select token') {
+                throw new Error('Please select a token to sell');
+            }
+            if (buySelector.textContent === 'Select token') {
+                throw new Error('Please select a token to buy');
+            }
+
+            // Get token contracts
             const sellTokenContract = new ethers.Contract(
                 sellToken,
-                erc20Abi, // Use full ERC20 ABI
+                [
+                    'function decimals() view returns (uint8)',
+                    'function balanceOf(address) view returns (uint256)',
+                    'function allowance(address,address) view returns (uint256)',
+                    'function approve(address,uint256) returns (bool)'
+                ],
                 this.provider
             );
             const buyTokenContract = new ethers.Contract(
                 buyToken,
-                erc20Abi, // Use full ERC20 ABI
+                ['function decimals() view returns (uint8)'],
                 this.provider
             );
             
@@ -289,71 +318,49 @@ export class CreateOrder extends BaseComponent {
             const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellDecimals);
             const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyDecimals);
 
-            // Check balance first
-            const signer = await this.getSigner();
+            // Check balance
+            const signer = await this.provider.getSigner();
             const signerAddress = await signer.getAddress();
             const balance = await sellTokenContract.balanceOf(signerAddress);
             
-            this.debug('Balance check:', {
-                balance: balance.toString(),
-                required: sellAmountWei.toString(),
-                decimals: sellDecimals
-            });
-
             if (balance.lt(sellAmountWei)) {
                 throw new Error(
-                    `Insufficient token balance. Have ${ethers.utils.formatUnits(balance, sellDecimals)}, ` +
-                    `need ${ethers.utils.formatUnits(sellAmountWei, sellDecimals)}`
+                    `Insufficient balance. You have ${ethers.utils.formatUnits(balance, sellDecimals)} tokens, ` +
+                    `but the order requires ${sellAmount}`
                 );
             }
 
-            // Check and request token approval if needed
+            // Check and handle token approval
             const allowance = await sellTokenContract.allowance(signerAddress, this.contract.address);
-            this.debug('Current allowance:', allowance.toString());
-
             if (allowance.lt(sellAmountWei)) {
                 this.showSuccess('Requesting token approval...');
                 
                 try {
-                    // Skip gas estimation and use standard parameters
                     const approveTx = await sellTokenContract.connect(signer).approve(
                         this.contract.address,
-                        sellAmountWei,
-                        {
-                            gasLimit: 70000,  // Standard gas limit for ERC20 approvals
-                            gasPrice: await this.provider.getGasPrice()
-                        }
+                        sellAmountWei, // Approve exact amount needed
+                        { gasLimit: 70000 }
                     );
                     
                     this.debug('Approval transaction sent:', approveTx.hash);
                     await approveTx.wait();
                     this.showSuccess('Token approval granted');
                 } catch (error) {
-                    // Check if the error is due to user rejection
-                    if (error.code === 4001) { // MetaMask user rejected
-                        this.showError('Token approval was rejected');
+                    if (error.code === 4001) {
                         throw new Error('Token approval rejected by user');
                     }
-                    
-                    // If it's a revert with specific error code
-                    if (error?.error?.data?.data === '0xe602df050000000000000000000000000000000000000000000000000000000000000000') {
-                        this.debug('Known contract error during approval:', error);
-                        throw new Error('Token approval failed - contract rejected the transaction');
-                    }
-                    
-                    this.debug('Approval failed:', error);
                     throw new Error('Token approval failed. Please try again.');
                 }
             }
 
-            // Get the order creation fee
+            // Get order creation fee
             const fee = await this.contract.orderCreationFee();
-
-            // Estimate gas for createOrder with fallback
+            
+            // Create order
             let createOrderGasLimit;
             try {
                 const createOrderGasEstimate = await this.contract.estimateGas.createOrder(
-                    partner || ethers.constants.AddressZero,
+                    takerAddress || ethers.constants.AddressZero,
                     sellToken,
                     sellAmountWei,
                     buyToken,
@@ -368,7 +375,7 @@ export class CreateOrder extends BaseComponent {
             }
 
             this.debug('Sending create order transaction with params:', {
-                taker: partner || ethers.constants.AddressZero,
+                taker: takerAddress || ethers.constants.AddressZero,
                 sellToken,
                 sellAmount: sellAmountWei.toString(),
                 buyToken,
@@ -379,7 +386,7 @@ export class CreateOrder extends BaseComponent {
             });
 
             const tx = await this.contract.createOrder(
-                partner || ethers.constants.AddressZero,
+                takerAddress || ethers.constants.AddressZero,
                 sellToken,
                 sellAmountWei,
                 buyToken,
@@ -391,79 +398,16 @@ export class CreateOrder extends BaseComponent {
                 }
             );
 
-            this.debug('Transaction sent:', tx.hash);
             this.showSuccess('Order creation transaction submitted');
-
             const receipt = await tx.wait();
-            this.debug('Transaction confirmed:', receipt);
             
-            // Refresh the fee after order creation
-            await this.loadOrderCreationFee();
-
-            // Look for OrderCreated event
-            const orderCreatedEvent = receipt.events?.find(e => e.event === 'OrderCreated');
-            if (orderCreatedEvent) {
-                this.debug('OrderCreated event found:', orderCreatedEvent);
-            } else {
-                console.warn('[CreateOrder] No OrderCreated event found in receipt');
-            }
-
+            // Reset form and show success
             this.showSuccess('Order created successfully!');
             this.resetForm();
             
         } catch (error) {
-            this.debug('Create order error details:', {
-                message: error.message,
-                code: error.code,
-                data: error?.error?.data,
-                reason: error?.reason,
-                stack: error.stack,
-                transactionHash: error?.transaction?.hash
-            });
-            
-            // Check for specific revert code 0xe602df05
-            if (error?.error?.data?.data === '0xe602df050000000000000000000000000000000000000000000000000000000000000000') {
-                try {
-                    // Try to decode the error using contract interface
-                    const decodedError = this.contract.interface.parseError(error.error.data.data);
-                    this.debug('Decoded contract error:', decodedError);
-                    
-                    // If transaction actually succeeded despite the error
-                    if (error?.transaction?.hash) {
-                        const receipt = await this.provider.getTransactionReceipt(error.transaction.hash);
-                        if (receipt && receipt.status === 1) {
-                            this.showSuccess('Order created successfully despite RPC error');
-                            this.resetForm();
-                            return;
-                        }
-                    }
-                    
-                    // If we get here, it's a real error
-                    this.showError(`Contract error: ${decodedError.name}`);
-                } catch (decodeError) {
-                    this.debug('Failed to decode contract error:', decodeError);
-                    this.showError('Failed to create order: Contract reverted');
-                }
-                return;
-            }
-
-            let errorMessage = 'Failed to create order: ';
-            
-            // Try to decode the error
-            if (error?.error?.data) {
-                try {
-                    const decodedError = this.contract.interface.parseError(error.error.data);
-                    errorMessage += `${decodedError.name}: ${decodedError.args}`;
-                    this.debug('Decoded error:', decodedError);
-                } catch (e) {
-                    // If we can't decode the error, fall back to basic messages
-                    errorMessage += this.getReadableError(error);
-                }
-            } else {
-                errorMessage += this.getReadableError(error);
-            }
-            
-            this.showError(errorMessage);
+            console.error('Create order error:', error);
+            this.showError(error.message || 'Failed to create order');
         } finally {
             this.isSubmitting = false;
             createOrderBtn.disabled = false;
@@ -503,17 +447,36 @@ export class CreateOrder extends BaseComponent {
     }
 
     resetForm() {
-        // Clear all input fields
-        ['partner', 'sellToken', 'sellAmount', 'buyToken', 'buyAmount'].forEach(id => {
-            const element = document.getElementById(id);
-            if (element) element.value = '';
+        // Reset token selectors
+        ['sell', 'buy'].forEach(type => {
+            const selector = document.getElementById(`${type}TokenSelector`);
+            if (selector) {
+                selector.innerHTML = `
+                    <span class="token-selector-content">
+                        <span>Select token</span>
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                    </span>
+                `;
+            }
+            
+            // Reset amount inputs
+            const amountInput = document.getElementById(`${type}Amount`);
+            if (amountInput) amountInput.value = '';
+            
+            // Reset hidden token inputs
+            const tokenInput = document.getElementById(`${type}Token`);
+            if (tokenInput) tokenInput.value = '';
+            
+            // Reset balance displays
+            const balanceDisplay = document.getElementById(`${type}TokenBalance`);
+            if (balanceDisplay) balanceDisplay.textContent = '';
         });
         
-        // Clear balance displays
-        ['sellTokenBalance', 'buyTokenBalance'].forEach(id => {
-            const element = document.getElementById(id);
-            if (element) element.textContent = '';
-        });
+        // Reset partner address if it exists
+        const partnerInput = document.getElementById('partner');
+        if (partnerInput) partnerInput.value = '';
     }
 
     async loadTokens() {
@@ -597,72 +560,75 @@ export class CreateOrder extends BaseComponent {
 
     populateTokenDropdowns() {
         ['sell', 'buy'].forEach(type => {
-            const currentInput = document.getElementById(`${type}Token`);
+            const currentContainer = document.getElementById(`${type}Container`);
+            if (!currentContainer) return;
             
-            // Check if already initialized
-            if (currentInput.parentElement.classList.contains('token-input-container')) {
-                return; // Skip if already set up
-            }
-            
-            // Create container
+            // Create the unified input container
             const container = document.createElement('div');
-            container.className = 'token-input-container';
+            container.className = 'unified-token-input';
             
-            // Create input
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.id = `${type}Token`;
-            input.className = 'token-input';
-            input.placeholder = 'Enter token address (0x...)';
+            // Create input wrapper with label
+            const inputWrapper = document.createElement('div');
+            inputWrapper.className = 'token-input-wrapper';
             
-            // Create token select button
-            const selectButton = document.createElement('button');
-            selectButton.className = 'token-select-button';
-            selectButton.innerHTML = `
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <path d="M12 3v18M3 12h18" stroke-width="2" stroke-linecap="round"/>
-                </svg>
+            // Add the label
+            const label = document.createElement('span');
+            label.className = 'token-input-label';
+            label.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+            
+            // Create amount input
+            const amountInput = document.createElement('input');
+            amountInput.type = 'text';
+            amountInput.id = `${type}Amount`;
+            amountInput.className = 'token-amount-input';
+            amountInput.placeholder = '0.0';
+            
+            // Assemble input wrapper
+            inputWrapper.appendChild(label);
+            inputWrapper.appendChild(amountInput);
+            
+            // Create token selector button
+            const tokenSelector = document.createElement('button');
+            tokenSelector.className = 'token-selector-button';
+            tokenSelector.id = `${type}TokenSelector`;
+            tokenSelector.innerHTML = `
+                <span class="token-selector-content">
+                    <span>Select token</span>
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </span>
             `;
-            selectButton.title = 'Select known token';
             
-            // Create modal (only if it doesn't exist)
+            // Hidden input for token address
+            const tokenInput = document.createElement('input');
+            tokenInput.type = 'hidden';
+            tokenInput.id = `${type}Token`;
+            
+            // Assemble the components
+            container.appendChild(inputWrapper);
+            container.appendChild(tokenSelector);
+            container.appendChild(tokenInput);
+            
+            // Create balance display
+            const balanceDisplay = document.createElement('div');
+            balanceDisplay.id = `${type}TokenBalance`;
+            balanceDisplay.className = 'token-balance-display';
+            
+            currentContainer.appendChild(container);
+            currentContainer.appendChild(balanceDisplay);
+            
+            // Add event listeners
+            tokenSelector.addEventListener('click', () => {
+                const modal = document.getElementById(`${type}TokenModal`);
+                if (modal) modal.classList.add('show');
+            });
+            
+            // Create modal if it doesn't exist
             if (!document.getElementById(`${type}TokenModal`)) {
                 const modal = this.createTokenModal(type);
                 document.body.appendChild(modal);
             }
-            
-            // Add event listeners
-            selectButton.addEventListener('click', () => {
-                const modal = document.getElementById(`${type}TokenModal`);
-                modal.classList.add('show');
-            });
-            
-            input.addEventListener('input', (e) => {
-                if (ethers.utils.isAddress(e.target.value)) {
-                    this.updateTokenBalance(e.target.value, `${type}TokenBalance`);
-                }
-            });
-            
-            input.addEventListener('change', (e) => {
-                if (ethers.utils.isAddress(e.target.value)) {
-                    const tooltip = document.createElement('div');
-                    tooltip.className = 'token-address-tooltip';
-                    tooltip.innerHTML = `
-                        Verify token at: 
-                        <a href="${this.getExplorerUrl(e.target.value)}" 
-                           target="_blank"
-                           style="color: #fff; text-decoration: underline;">
-                           ${e.target.value.slice(0, 6)}...${e.target.value.slice(-4)}
-                        </a>
-                    `;
-                    container.appendChild(tooltip);
-                }
-            });
-            
-            // Replace existing input
-            container.appendChild(input);
-            container.appendChild(selectButton);
-            currentInput.parentNode.replaceChild(container, currentInput);
         });
     }
 

@@ -144,52 +144,46 @@
 
           <div id="create-order" class="tab-content active">
             <div class="form-container">
-              <div class="swap-box">
-                <h2>Create OTC Swap Order</h2>
-                <div class="form-group">
-                  <label>
-                    Partner Address (optional):
-                    <span class="info-tooltip">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <circle cx="12" cy="12" r="10" stroke-width="2"/>
-                        <path d="M12 16v-4" stroke-width="2" stroke-linecap="round"/>
-                        <circle cx="12" cy="8" r="1" fill="currentColor"/>
-                      </svg>
-                      <span class="tooltip-text">
-                        <strong>Partner Address:</strong> If you want only a specific address to be able to fill this order, enter their wallet address here. Leave empty to allow anyone to fill the order.
-                        <br><br>
-                        💡 Use this for private trades with a specific trading partner.
+              <div class="swap-section">
+                <div id="sellContainer" class="swap-input-container">
+                  <!-- Will be populated by JavaScript -->
+                </div>
+
+                <div class="swap-arrow">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M12 5l0 14M5 12l7 7 7-7" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </div>
+
+                <div id="buyContainer" class="swap-input-container">
+                  <!-- Will be populated by JavaScript -->
+                </div>
+
+                <div class="taker-input-container">
+                  <button class="taker-toggle">
+                    <div class="taker-toggle-content">
+                      <span class="taker-toggle-text">Specify Taker Address</span>
+                      <span class="info-tooltip">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                          <circle cx="12" cy="12" r="10" stroke-width="2" />
+                          <path d="M12 16v-4" stroke-width="2" stroke-linecap="round" />
+                          <circle cx="12" cy="8" r="1" fill="currentColor" />
+                        </svg>
+                        <span class="tooltip-text">
+                          Specify a wallet address that can take this order. Leave empty to allow anyone to take it.
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                  <input type="text" id="partner" placeholder="0x..." />
+                      <span class="optional-text">(optional)</span>
+                    </div>
+                    <svg class="chevron-down" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                  <div class="taker-input-content hidden">
+                    <input type="text" id="takerAddress" class="taker-address-input" placeholder="0x..." />
+                  </div>
                 </div>
-                <div class="form-group">
-                  <label for="sellToken">Sell Token Address:</label>
-                  <input type="text" id="sellToken" placeholder="0x..." />
-                  <span id="sellTokenBalance"></span>
-                </div>
-                <div class="form-group">
-                  <label for="sellAmount">Sell Amount:</label>
-                  <input
-                    type="text"
-                    id="sellAmount"
-                    placeholder="Enter amount"
-                  />
-                </div>
-                <div class="form-group">
-                  <label for="buyToken">Buy Token Address:</label>
-                  <input type="text" id="buyToken" placeholder="0x..." />
-                  <span id="buyTokenBalance"></span>
-                </div>
-                <div class="form-group">
-                  <label for="buyAmount">Buy Amount:</label>
-                  <input
-                    type="text"
-                    id="buyAmount"
-                    placeholder="Enter amount"
-                  />
-                </div>
+
                 <div class="form-group fee-group">
                   <label>
                     Order Creation Fee:

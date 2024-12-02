@@ -1,14 +1,14 @@
 .form-container {
   max-width: 480px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 20px;
   background: #ffffff;
   border-radius: 16px;
   box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.05);
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   background: #f8f9fe;
   padding: 16px;
   border-radius: 12px;
@@ -50,6 +50,7 @@
   font-size: 16px;
   font-weight: 600;
   transition: background-color 0.2s;
+  margin-top: 20px;
 }
 
 .action-button:hover {
@@ -64,20 +65,20 @@
 
 /* Status message styling */
 .status {
-  margin-top: 20px;
-  padding: 16px;
-  border-radius: 12px;
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 8px;
   text-align: center;
 }
 
 .status.error {
-  background-color: #fef3f2;
-  color: #b91c1c;
+  background: #fee2e2;
+  color: #dc2626;
 }
 
 .status.success {
-  background-color: #f0f7ff;
-  color: #4b6bfb;
+  background: #dcfce7;
+  color: #16a34a;
 }
 
 /* Token symbol display */
@@ -149,11 +150,20 @@
 }
 
 .swap-box {
-  background: white;
+  background: #fff;
   border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0px 0px 1px rgba(0, 0, 0, 0.01), 0px 4px 8px rgba(0, 0, 0, 0.04),
-    0px 16px 24px rgba(0, 0, 0, 0.04), 0px 24px 32px rgba(0, 0, 0, 0.01);
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.swap-box h2 {
+  margin: 0 0 24px 0;
+  font-size: 20px;
+  color: #333;
+}
+
+.swap-input-container {
+  margin-bottom: 4px;
 }
 
 .input-box {
@@ -329,6 +339,7 @@
 .swap-arrow {
   display: flex;
   justify-content: center;
+  height: 20px;
   margin: 4px 0;
   color: #7d7d7d;
   font-size: 20px;
@@ -336,18 +347,15 @@
 
 .fee-container {
   margin-top: 16px;
-  padding: 12px;
+  margin-bottom: 24px;
+  padding: 16px;
   background: #f7f8fa;
   border-radius: 12px;
-  display: flex;
-  justify-content: space-between;
-  font-size: 14px;
-  color: #7d7d7d;
 }
 
 .create-order-button {
+  margin-top: 24px;
   width: 100%;
-  margin-top: 16px;
   padding: 16px;
   background: #4b6bfb;
   color: white;
@@ -423,45 +431,39 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  margin-left: 5px;
-  cursor: help;
 }
 
-.info-tooltip svg {
-  color: #666;
-  transition: color 0.2s;
-}
-
-.info-tooltip:hover svg {
-  color: #333;
-}
-
-.tooltip-text {
+.info-tooltip .tooltip-text {
   visibility: hidden;
   position: absolute;
   bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 300px;
-  padding: 12px;
-  background-color: #333;
+  right: 0;
+  background: #333;
   color: white;
-  text-align: left;
-  line-height: 1.5;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.tooltip-text strong {
-  color: #fff;
-  display: block;
-  margin-bottom: 4px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  z-index: 1000;
+  margin-bottom: 8px;
+  width: 240px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
 }
 
 .info-tooltip:hover .tooltip-text {
   visibility: visible;
-  opacity: 1;
+}
+
+/* Arrow for tooltip */
+.info-tooltip .tooltip-text::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 10px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: #333 transparent transparent transparent;
 }
 
 .fee-details {
@@ -804,77 +806,286 @@
 
 /* Token section header styling */
 .token-section-header {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
 }
 
 .token-section-header h4 {
-    margin: 0;
-    color: #333333;
-    font-size: 16px;
-    font-weight: 600;
+  margin: 0;
+  color: #333333;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .token-section-subtitle {
-    color: #666666;
-    font-size: 12px;
+  color: #666666;
+  font-size: 12px;
 }
 
 .token-section {
-    padding: 16px;
-    border-bottom: 1px solid #e8ecf4;
+  padding: 16px;
+  border-bottom: 1px solid #e8ecf4;
 }
 
 .token-section:last-child {
-    border-bottom: none;
+  border-bottom: none;
 }
 
 /* Update existing token list styling */
 .token-list {
-    background: #ffffff;
-    border-radius: 8px;
+  background: #ffffff;
+  border-radius: 8px;
 }
 
 .token-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-    border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border-radius: 8px;
 }
 
 .token-item:hover {
-    background-color: #f8f9fe;
+  background-color: #f8f9fe;
 }
 
 .token-item-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .token-item-info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .token-item-symbol {
-    font-weight: 500;
-    color: #333333;
+  font-weight: 500;
+  color: #333333;
 }
 
 .token-item-name {
-    font-size: 12px;
-    color: #666666;
+  font-size: 12px;
+  color: #666666;
 }
 
 .token-item-balance {
-    font-size: 14px;
-    color: #333333;
-    font-weight: 500;
+  font-size: 14px;
+  color: #333333;
+  font-weight: 500;
 }
+
+.unified-token-input {
+  display: flex;
+  align-items: flex-end;
+  background: #f8f9fe;
+  border-radius: 12px;
+  padding: 16px;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.token-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 8px;
+}
+
+.token-input-label {
+  font-size: 14px;
+  color: #666;
+  padding-left: 2px;
+}
+
+.token-amount-input {
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  outline: none;
+  padding: 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.token-selector-button {
+  padding: 8px 16px;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e8ecf4;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  font-size: 16px;
+  gap: 8px;
+}
+
+.token-selector-button:hover {
+  background: #f0f0f0;
+}
+
+.token-selector-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.token-balance-display {
+  font-size: 14px;
+  color: #666;
+  padding: 8px 12px;
+}
+
+/* Update existing token icon styles */
+.token-icon.small {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+}
+
+/* Input container spacing */
+.swap-input-container {
+  margin-bottom: 24px;
+}
+
+/* Swap arrow spacing */
+.swap-arrow {
+  display: flex;
+  justify-content: center;
+  margin: 24px 0;
+  color: #7d7d7d;
+  font-size: 20px;
+}
+
+/* Add spacing after the last swap-input-container */
+.swap-input-container:last-of-type {
+  margin-bottom: 24px;
+}
+
+/* Container for the entire swap section */
+.swap-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+
+/* Input container */
+.swap-input-container {
+  width: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+/* Swap arrow styling */
+.swap-arrow {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 24px;
+  color: #7d7d7d;
+  line-height: 0;
+  margin-top: -12px;
+  margin-bottom: 4px;
+  position: relative;
+  z-index: 2;
+  background: white;
+  padding: 4px 0;
+}
+
+.swap-arrow svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Balance text positioning */
+.balance-text {
+  position: relative;
+  z-index: 1;
+}
+
+/* Unified token input */
+.unified-token-input {
+  display: flex;
+  align-items: flex-end;
+  background: #f8f9fe;
+  border-radius: 12px;
+  padding: 16px;
+  gap: 12px;
+}
+
+/* Fee container spacing */
+.fee-container {
+  margin-top: 20px;
+  padding: 16px;
+  background: #f7f8fa;
+  border-radius: 12px;
+}
+
+/* Action button spacing */
+.action-button {
+  margin-top: 20px;
+}
+
+/* Taker input styling */
+.taker-input-container {
+    margin-top: 16px;
+    background: #f8f9fe;
+    border-radius: 12px;
+    overflow: visible;
+    position: relative;
+}
+
+.taker-toggle {
+    width: 100%;
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #666;
+    font-size: 14px;
+    gap: 8px;
+}
+
+.taker-input-content {
+    padding: 0 16px 16px;
+}
+
+.taker-input-content.hidden {
+    display: none;
+}
+
+.taker-address-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid #e8ecf4;
+    border-radius: 12px;
+    font-size: 16px;
+    font-family: monospace;
+    background: white;
+    color: #333;
+}
+
+.taker-address-input:focus {
+    outline: none;
+    border-color: #4b6bfb;
+    box-shadow: 0 0 0 1px #4b6bfb;
+}
+
+.taker-address-input::placeholder {
+    color: #999;
+}
+
+/* Rest of the existing styles remain the same */

@@ -124,6 +124,12 @@ class App {
 
         // Update initial tab visibility
         this.updateTabVisibility(false);
+
+        // Add this to your existing JavaScript
+        document.querySelector('.taker-toggle').addEventListener('click', function() {
+            this.classList.toggle('active');
+            document.querySelector('.taker-input-content').classList.toggle('hidden');
+        });
     }
 
     initializeEventListeners() {

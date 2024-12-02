@@ -867,23 +867,6 @@ export class ViewOrders extends BaseComponent {
             <td>
                 <div class="token-info">
                     <div class="token-icon small">
-                        ${this.getTokenIcon(buyTokenDetails)}
-                    </div>
-                    <a href="${this.getExplorerUrl(order.buyToken)}" 
-                       class="token-link" 
-                       target="_blank" 
-                       title="View token contract">
-                        ${buyTokenDetails?.symbol || 'Unknown'}
-                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                        </svg>
-                    </a>
-                </div>
-            </td>
-            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
-            <td>
-                <div class="token-info">
-                    <div class="token-icon small">
                         ${this.getTokenIcon(sellTokenDetails)}
                     </div>
                     <a href="${this.getExplorerUrl(order.sellToken)}" 
@@ -898,6 +881,23 @@ export class ViewOrders extends BaseComponent {
                 </div>
             </td>
             <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
+            <td>
+                <div class="token-info">
+                    <div class="token-icon small">
+                        ${this.getTokenIcon(buyTokenDetails)}
+                    </div>
+                    <a href="${this.getExplorerUrl(order.buyToken)}" 
+                       class="token-link" 
+                       target="_blank" 
+                       title="View token contract">
+                        ${buyTokenDetails?.symbol || 'Unknown'}
+                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                        </svg>
+                    </a>
+                </div>
+            </td>
+            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
             <td>${formattedExpiry}</td>
             <td class="order-status">${status}</td>
             <td class="action-column">${canFill ? 
