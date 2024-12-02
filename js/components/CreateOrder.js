@@ -336,10 +336,26 @@ export class CreateOrder extends BaseComponent {
                 this.showSuccess('Requesting token approval...');
                 
                 try {
+                    // Add gas estimation for approval
+                    let approveGasLimit;
+                    try {
+                        const approveGasEstimate = await sellTokenContract.estimateGas.approve(
+                            this.contract.address,
+                            sellAmountWei
+                        );
+                        approveGasLimit = Math.floor(approveGasEstimate.toNumber() * 1.2); // 20% buffer
+                    } catch (error) {
+                        this.debug('Gas estimation failed for approval, using default:', error);
+                        approveGasLimit = 70000; // More conservative default
+                    }
+
                     const approveTx = await sellTokenContract.connect(signer).approve(
                         this.contract.address,
-                        sellAmountWei, // Approve exact amount needed
-                        { gasLimit: 70000 }
+                        sellAmountWei,
+                        { 
+                            gasLimit: approveGasLimit,
+                            gasPrice: await this.provider.getGasPrice() // Add current gas price
+                        }
                     );
                     
                     this.debug('Approval transaction sent:', approveTx.hash);
@@ -349,16 +365,26 @@ export class CreateOrder extends BaseComponent {
                     if (error.code === 4001) {
                         throw new Error('Token approval rejected by user');
                     }
-                    throw new Error('Token approval failed. Please try again.');
+                    throw new Error(`Token approval failed: ${this.getReadableError(error)}`);
                 }
             }
 
             // Get order creation fee
             const fee = await this.contract.orderCreationFee();
             
-            // Create order
+            // Improved order creation gas handling
             let createOrderGasLimit;
             try {
+                // First try with static call to check if transaction would fail
+                await this.contract.callStatic.createOrder(
+                    takerAddress || ethers.constants.AddressZero,
+                    sellToken,
+                    sellAmountWei,
+                    buyToken,
+                    buyAmountWei,
+                    { value: fee }
+                );
+
                 const createOrderGasEstimate = await this.contract.estimateGas.createOrder(
                     takerAddress || ethers.constants.AddressZero,
                     sellToken,
@@ -367,40 +393,55 @@ export class CreateOrder extends BaseComponent {
                     buyAmountWei,
                     { value: fee }
                 );
+                
                 this.debug('Create order gas estimate:', createOrderGasEstimate.toString());
                 createOrderGasLimit = Math.floor(createOrderGasEstimate.toNumber() * 1.2); // 20% buffer
             } catch (error) {
-                this.debug('Gas estimation failed for create order, using default:', error);
-                createOrderGasLimit = 300000; // Default gas limit for order creation
+                this.debug('Gas estimation failed for create order:', error);
+                // Check for specific error conditions
+                if (error.message.includes('insufficient allowance')) {
+                    throw new Error('Token approval amount is insufficient');
+                }
+                if (error.message.includes('insufficient balance')) {
+                    throw new Error('Insufficient token balance');
+                }
+                // Use higher default gas limit for unknown failures
+                createOrderGasLimit = 350000; // Increased default gas limit
+                this.debug('Using default gas limit:', createOrderGasLimit);
             }
 
-            this.debug('Sending create order transaction with params:', {
-                taker: takerAddress || ethers.constants.AddressZero,
-                sellToken,
-                sellAmount: sellAmountWei.toString(),
-                buyToken,
-                buyAmount: buyAmountWei.toString(),
-                fee: fee.toString(),
-                gasLimit: createOrderGasLimit,
-                gasPrice: (await this.provider.getGasPrice()).toString()
-            });
+            // Add current gas price and retry logic
+            const maxRetries = 3;
+            let attempt = 0;
+            while (attempt < maxRetries) {
+                try {
+                    const currentGasPrice = await this.provider.getGasPrice();
+                    const tx = await this.contract.createOrder(
+                        takerAddress || ethers.constants.AddressZero,
+                        sellToken,
+                        sellAmountWei,
+                        buyToken,
+                        buyAmountWei,
+                        {
+                            value: fee,
+                            gasLimit: createOrderGasLimit,
+                            gasPrice: currentGasPrice
+                        }
+                    );
 
-            const tx = await this.contract.createOrder(
-                takerAddress || ethers.constants.AddressZero,
-                sellToken,
-                sellAmountWei,
-                buyToken,
-                buyAmountWei,
-                {
-                    value: fee,
-                    gasLimit: createOrderGasLimit,
-                    gasPrice: await this.provider.getGasPrice()
+                    this.showSuccess('Order creation transaction submitted');
+                    const receipt = await tx.wait();
+                    break; // Success, exit loop
+                } catch (error) {
+                    attempt++;
+                    if (attempt === maxRetries) {
+                        throw new Error(`Failed after ${maxRetries} attempts: ${this.getReadableError(error)}`);
+                    }
+                    // Wait before retrying
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
-            );
+            }
 
-            this.showSuccess('Order creation transaction submitted');
-            const receipt = await tx.wait();
-            
             // Reset form and show success
             this.showSuccess('Order created successfully!');
             this.resetForm();

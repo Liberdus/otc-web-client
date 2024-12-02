@@ -6,10 +6,11 @@ export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
         
-        // Initialize sort config
+        // Initialize sort config with id as default sort, descending
         this.sortConfig = {
             column: 'id',
-            direction: 'asc'
+            direction: 'desc',
+            isColumnClick: false
         };
         
         // Initialize debug logger
@@ -247,23 +248,8 @@ export class MyOrders extends ViewOrders {
     }
 
     async refreshOrdersView() {
-        const tbody = this.container.querySelector('tbody');
-        if (!tbody) {
-            this.debug('Table body not found');
-            return;
-        }
-
-        // Show loading state immediately
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="9" class="loading-message">
-                    <div class="loading-spinner"></div>
-                    <div class="loading-text">Loading your orders...</div>
-                </td>
-            </tr>`;
-
         try {
-            this.debug('Refreshing orders view');
+            this.debug('Refreshing orders view with sort config:', this.sortConfig);
             
             // Get contract instance first
             this.contract = await this.getContract();
@@ -287,68 +273,51 @@ export class MyOrders extends ViewOrders {
                 order.maker.toLowerCase() === userAddress.toLowerCase()
             );
 
-            if (showOnlyCancellable) {
-                const currentTime = Math.floor(Date.now() / 1000);
-                const orderExpiry = await this.contract.ORDER_EXPIRY();
-                const gracePeriod = await this.contract.GRACE_PERIOD();
-
-                ordersToDisplay = ordersToDisplay.filter(order => {
-                    // Only show orders that are:
-                    // 1. Not cancelled
-                    // 2. Not filled
-                    // 3. Not expired beyond grace period
-                    const isGracePeriodExpired = currentTime > Number(order.timestamp) + orderExpiry.toNumber() + gracePeriod.toNumber();
-                    return order.status !== 'Canceled' && 
-                           order.status !== 'Filled' && 
-                           !isGracePeriodExpired;
-                });
-            }
-
-            // Get all token details at once
-            const tokenAddresses = new Set();
-            ordersToDisplay.forEach(order => {
-                if (order?.sellToken) tokenAddresses.add(order.sellToken);
-                if (order?.buyToken) tokenAddresses.add(order.buyToken);
-            });
-
-            const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
-            const tokenDetailsMap = new Map();
-            tokenDetails.forEach((details, index) => {
-                if (details) {
-                    tokenDetailsMap.set(Array.from(tokenAddresses)[index], details);
+            // Sort orders based on sortConfig
+            ordersToDisplay.sort((a, b) => {
+                if (this.sortConfig.column === 'id') {
+                    return this.sortConfig.direction === 'asc'
+                        ? Number(a.id) - Number(b.id)
+                        : Number(b.id) - Number(a.id);
+                } else if (this.sortConfig.column === 'status') {
+                    const statusPriority = {
+                        'Open': 1,
+                        'Active': 1,
+                        'Pending': 2,
+                        'Filled': 3,
+                        'Canceled': 4,
+                        'Await Cleanup': 5
+                    };
+                    
+                    const priorityA = statusPriority[a.status] || 999;
+                    const priorityB = statusPriority[b.status] || 999;
+                    
+                    return this.sortConfig.direction === 'asc'
+                        ? priorityA - priorityB
+                        : priorityB - priorityA;
                 }
+                
+                // Default to ID sort if no other criteria
+                return this.sortConfig.direction === 'asc'
+                    ? Number(a.id) - Number(b.id)
+                    : Number(b.id) - Number(a.id);
             });
 
-            // Create all rows first before adding to DOM
-            const rows = await Promise.all(ordersToDisplay.map(order => 
-                this.createOrderRow(order, tokenDetailsMap)
-            ));
+            // Update the orders Map with sorted orders
+            this.orders.clear();
+            ordersToDisplay.forEach(order => {
+                this.orders.set(order.id, order);
+            });
 
-            // Clear loading state and add all rows at once
-            tbody.innerHTML = '';
-            if (!rows.length) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="9" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyCancellable ? 'No cancellable orders found' : 'No orders found'}
-                            </div>
-                        </td>
-                    </tr>`;
-            } else {
-                rows.forEach(row => {
-                    if (row) tbody.appendChild(row);
-                });
-            }
+            await super.refreshOrdersView();
 
         } catch (error) {
-            console.error('[MyOrders] Error refreshing orders view:', error);
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="9" class="no-orders-message">
-                        <div class="placeholder-text">Failed to load orders</div>
-                    </td>
-                </tr>`;
+            console.error('[MyOrders] Initialization error:', error);
+            this.container.innerHTML = `
+                <div class="tab-content-wrapper">
+                    <h2>My Orders</h2>
+                    <p class="error-message">Failed to load orders. Please try again later.</p>
+                </div>`;
         }
     }
 
@@ -373,7 +342,21 @@ export class MyOrders extends ViewOrders {
 
             // Re-add click handlers for sorting
             thead.querySelectorAll('th[data-sort]').forEach(th => {
-                th.addEventListener('click', () => this.handleSort(th.dataset.sort));
+                th.addEventListener('click', () => {
+                    const column = th.dataset.sort;
+                    
+                    // Toggle direction if clicking same column
+                    if (this.sortConfig.column === column) {
+                        this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        this.sortConfig.column = column;
+                        this.sortConfig.direction = 'asc';
+                    }
+                    
+                    this.sortConfig.isColumnClick = true;
+                    this.debug('Sort config updated:', this.sortConfig);
+                    this.refreshOrdersView();
+                });
             });
         }
 
