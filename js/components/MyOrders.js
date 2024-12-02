@@ -360,14 +360,11 @@ export class MyOrders extends ViewOrders {
             });
         }
 
-        // Replace the filter toggle text and ensure it's unchecked by default
+        // Hide the filter toggle but keep the element for future use
         const filterToggle = this.container.querySelector('#fillable-orders-toggle');
         if (filterToggle) {
-            filterToggle.checked = false;  // Set to unchecked by default
-        }
-        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
-        if (filterToggleSpan) {
-            filterToggleSpan.textContent = 'Show only cancellable orders';
+            filterToggle.parentElement.style.display = 'none';
+            filterToggle.checked = false;
         }
     }
 }
