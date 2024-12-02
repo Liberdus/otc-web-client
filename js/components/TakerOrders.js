@@ -304,6 +304,12 @@ export class TakerOrders extends ViewOrders {
                 throw new Error('Contract not initialized');
             }
 
+            // Get current account
+            const userAddress = await window.walletManager.getAccount();
+            if (!userAddress) {
+                throw new Error('No wallet connected');
+            }
+
             // Clear existing orders from table
             const tbody = this.container.querySelector('tbody');
             if (!tbody) {
@@ -312,60 +318,29 @@ export class TakerOrders extends ViewOrders {
             }
             tbody.innerHTML = '';
 
-            // Get filter and pagination state
+            // Get ALL orders from WebSocket cache without filtering
+            const allOrders = window.webSocket?.getOrders() || [];
+            
+            // Filter orders only by taker address
+            let ordersToDisplay = allOrders.filter(order => 
+                order?.taker && 
+                order.taker.toLowerCase() === userAddress.toLowerCase()
+            );
+
+            // Check if we should filter for fillable orders
             const showOnlyFillable = this.container.querySelector('#fillable-orders-toggle')?.checked;
-            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-
-            // Filter orders if necessary
-            let ordersToDisplay = Array.from(this.orders.values());
             if (showOnlyFillable) {
-                ordersToDisplay = await Promise.all(ordersToDisplay.map(async order => {
-                    const status = this.getOrderStatus(order, this.getExpiryTime(order.timestamp));
-                    return status === 'Active' ? order : null;
-                }));
-                ordersToDisplay = ordersToDisplay.filter(order => order !== null);
+                // Filter for fillable orders
+                const fillableChecks = await Promise.all(
+                    ordersToDisplay.map(async order => {
+                        const canFill = await this.canFillOrder(order);
+                        return canFill ? order : null;
+                    })
+                );
+                ordersToDisplay = fillableChecks.filter(order => order !== null);
             }
 
-            // Sort orders based on current sort configuration
-            ordersToDisplay = ordersToDisplay.sort((a, b) => {
-                const direction = this.sortConfig.direction === 'asc' ? 1 : -1;
-                
-                switch (this.sortConfig.column) {
-                    case 'id':
-                        return (Number(a.id) - Number(b.id)) * direction;
-                    case 'status':
-                        const statusA = this.getOrderStatus(a, this.getExpiryTime(a.timestamp));
-                        const statusB = this.getOrderStatus(b, this.getExpiryTime(b.timestamp));
-                        return statusA.localeCompare(statusB) * direction;
-                    default:
-                        return 0;
-                }
-            });
-
-            // Apply pagination if not viewing all
-            const totalOrders = ordersToDisplay.length;
-            if (pageSize !== -1) {
-                const startIndex = (this.currentPage - 1) * pageSize;
-                ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
-            }
-
-            // Update pagination controls
-            this.updatePaginationControls(totalOrders);
-
-            // Check if we have any orders after filtering
-            if (!ordersToDisplay || ordersToDisplay.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="8" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyFillable ? 'No fillable orders found' : 'No orders found for you'}
-                            </div>
-                        </td>
-                    </tr>`;
-                return;
-            }
-
-            // Get token details
+            // Get token details for display
             const tokenAddresses = new Set();
             ordersToDisplay.forEach(order => {
                 if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
@@ -379,6 +354,19 @@ export class TakerOrders extends ViewOrders {
                     tokenDetailsMap.set(address, tokenDetails[index]);
                 }
             });
+
+            // Check if we have any orders after filtering
+            if (!ordersToDisplay.length) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="no-orders-message">
+                            <div class="placeholder-text">
+                                No orders found for you
+                            </div>
+                        </td>
+                    </tr>`;
+                return;
+            }
 
             // Create and append order rows
             for (const order of ordersToDisplay) {
@@ -407,7 +395,13 @@ export class TakerOrders extends ViewOrders {
         // Call parent's setupTable to get basic structure
         await super.setupTable();
         
-        // Update the table header with only ID and Status sorting
+        // Update the filter toggle text to be more specific
+        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
+        if (filterToggleSpan) {
+            filterToggleSpan.textContent = 'Show only fillable orders';
+        }
+
+        // Update the table header
         const thead = this.container.querySelector('thead tr');
         if (thead) {
             thead.innerHTML = `
@@ -431,12 +425,6 @@ export class TakerOrders extends ViewOrders {
             thead.querySelectorAll('th[data-sort]').forEach(th => {
                 th.addEventListener('click', () => this.handleSort(th.dataset.sort));
             });
-        }
-
-        // Update filter toggle text
-        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
-        if (filterToggleSpan) {
-            filterToggleSpan.textContent = 'Show only fillable orders';
         }
     }
 
