@@ -135,18 +135,22 @@ export class Cleanup extends BaseComponent {
             let cancelledFees = 0;
             let filledFees = 0;
             
+            const currentTime = Math.floor(Date.now() / 1000);
+            const ORDER_EXPIRY = 7 * 60; // 7 minutes in seconds
+            const GRACE_PERIOD = 7 * 60; // 7 minutes in seconds
+
             for (const order of orders) {
-                const { isEligible, order: orderDetails } = await this.webSocket.checkCleanupEligibility(order.id);
-                if (isEligible) {
-                    if (orderDetails.status === 'Active') {
-                        eligibleOrders.active.push(orderDetails);
-                        activeFees += Number(orderDetails.orderCreationFee || 0);
-                    } else if (orderDetails.status === 'Canceled') {
-                        eligibleOrders.cancelled.push(orderDetails);
-                        cancelledFees += Number(orderDetails.orderCreationFee || 0);
-                    } else if (orderDetails.status === 'Filled') {
-                        eligibleOrders.filled.push(orderDetails);
-                        filledFees += Number(orderDetails.orderCreationFee || 0);
+                // Check if grace period has passed (now 14 minutes total)
+                if (currentTime > order.timestamp + ORDER_EXPIRY + GRACE_PERIOD) {
+                    if (order.status === 'Active') {
+                        eligibleOrders.active.push(order);
+                        activeFees += Number(order.orderCreationFee || 0);
+                    } else if (order.status === 'Canceled') {
+                        eligibleOrders.cancelled.push(order);
+                        cancelledFees += Number(order.orderCreationFee || 0);
+                    } else if (order.status === 'Filled') {
+                        eligibleOrders.filled.push(order);
+                        filledFees += Number(order.orderCreationFee || 0);
                     }
                 }
             }
@@ -297,36 +301,65 @@ export class Cleanup extends BaseComponent {
             this.cleanupButton.disabled = true;
             this.cleanupButton.textContent = 'Cleaning...';
 
-            // Get number of eligible orders to estimate gas better
+            // Get eligible orders first
             const orders = this.webSocket.getOrders();
-            const eligibleOrderCount = orders.filter(order => 
-                order.isEligible && (order.status === 'Active' || order.status === 'Canceled')
-            ).length;
+            const currentTime = Math.floor(Date.now() / 1000);
+            const ORDER_EXPIRY = 7 * 60; // 7 minutes in seconds
+            const GRACE_PERIOD = 7 * 60; // 7 minutes in seconds
 
-            // Dynamic base gas estimate based on number of orders
-            const baseGasEstimate = ethers.BigNumber.from('100000') // Base cost
-                .add(ethers.BigNumber.from('50000').mul(eligibleOrderCount)); // Per-order cost
+            const eligibleOrders = orders.filter(order => 
+                currentTime > order.timestamp + ORDER_EXPIRY + GRACE_PERIOD
+            );
 
-            // Try to get actual gas estimate, fall back to calculated estimate
-            const gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders()
-                .catch(error => {
-                    console.log('[Cleanup] Gas estimation failed:', error);
-                    return baseGasEstimate;
-                });
+            if (eligibleOrders.length === 0) {
+                throw new Error('No eligible orders to clean');
+            }
 
-            // Add 20% buffer to gas estimate
-            const gasLimit = gasEstimate.mul(120).div(100);
+            const batchSize = Math.min(eligibleOrders.length, 10); // MAX_CLEANUP_BATCH
+            
+            // More accurate base gas calculation
+            const baseGasEstimate = ethers.BigNumber.from('85000')  // Base transaction cost
+                .add(ethers.BigNumber.from('65000').mul(batchSize)) // Per-order cost
+                .add(ethers.BigNumber.from('25000'));              // Buffer for contract state changes
+
+            // Try multiple gas estimation attempts with fallback
+            let gasEstimate;
+            try {
+                // Try actual contract estimation first
+                gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders();
+            } catch (estimateError) {
+                this.debug('Primary gas estimation failed:', estimateError);
+                try {
+                    // Fallback: Try estimation with higher gas limit
+                    gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders({
+                        gasLimit: baseGasEstimate.mul(2) // Double the base estimate
+                    });
+                } catch (fallbackError) {
+                    this.debug('Fallback gas estimation failed:', fallbackError);
+                    // Use calculated estimate as last resort
+                    gasEstimate = baseGasEstimate;
+                }
+            }
+
+            // Add 30% buffer for safety (increased from 20%)
+            const gasLimit = gasEstimate.mul(130).div(100);
 
             const feeData = await contract.provider.getFeeData();
-            if (!feeData || !feeData.gasPrice) {
+            if (!feeData?.gasPrice) {
                 throw new Error('Unable to get current gas prices');
             }
 
             const txOptions = {
                 gasLimit,
                 gasPrice: feeData.gasPrice,
-                type: 0  // Force legacy transaction
+                type: 0  // Legacy transaction
             };
+
+            this.debug('Transaction options:', {
+                gasLimit: gasLimit.toString(),
+                gasPrice: feeData.gasPrice.toString(),
+                estimatedCost: ethers.utils.formatEther(gasLimit.mul(feeData.gasPrice)) + ' ETH'
+            });
 
             console.log('[Cleanup] Sending transaction with options:', txOptions);
             const tx = await contractWithSigner.cleanupExpiredOrders(txOptions);
