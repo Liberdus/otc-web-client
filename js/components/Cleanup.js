@@ -8,7 +8,7 @@ export class Cleanup extends BaseComponent {
         this.webSocket = window.webSocket;
         
         this.debug = (message, ...args) => {
-            if (isDebugEnabled('CLEANUP')) {
+            if (isDebugEnabled('CLEANUP_ORDERS')) {
                 console.log('[Cleanup]', message, ...args);
             }
         };
@@ -136,12 +136,13 @@ export class Cleanup extends BaseComponent {
             let filledFees = 0;
             
             const currentTime = Math.floor(Date.now() / 1000);
-            const ORDER_EXPIRY = 7 * 60; // 7 minutes in seconds
-            const GRACE_PERIOD = 7 * 60; // 7 minutes in seconds
+            const contract = await this.getContract();
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
 
             for (const order of orders) {
                 // Check if grace period has passed (now 14 minutes total)
-                if (currentTime > order.timestamp + ORDER_EXPIRY + GRACE_PERIOD) {
+                if (currentTime > order.timestamp + orderExpiry.toNumber() + gracePeriod.toNumber()) {
                     if (order.status === 'Active') {
                         eligibleOrders.active.push(order);
                         activeFees += Number(order.orderCreationFee || 0);
@@ -304,11 +305,11 @@ export class Cleanup extends BaseComponent {
             // Get eligible orders first
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
-            const ORDER_EXPIRY = 7 * 60; // 7 minutes in seconds
-            const GRACE_PERIOD = 7 * 60; // 7 minutes in seconds
+            const orderExpiry = await contract.ORDER_EXPIRY();
+            const gracePeriod = await contract.GRACE_PERIOD();
 
             const eligibleOrders = orders.filter(order => 
-                currentTime > order.timestamp + ORDER_EXPIRY + GRACE_PERIOD
+                currentTime > order.timestamp + orderExpiry.toNumber() + gracePeriod.toNumber()
             );
 
             if (eligibleOrders.length === 0) {
