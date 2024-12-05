@@ -5,7 +5,11 @@ const networkConfig = {
     "80002": {
         name: "Amoy",
         displayName: "Amoy Testnet",
-        contractAddress: "0x58EB5dD12B3D8c7F7A463680892CAc4E5255B628", // 0x3e6326657B7130613c943D013EC84cE1F33027Ba 0x8d65112BA50B600c6495c4C199561AD74752D7eE 0x58EB5dD12B3D8c7F7A463680892CAc4E5255B628
+        contractAddress: "0x3085cd92888e9d49879947cbc3abd5d11f842271",
+        // Previous addresses for reference:
+        // 0x875341AdFF14bEc821df41B5a2D9a967D8F881Df
+        // 0x5a11d676d5Df246CB7A661DAB7e06f01965b29Bd
+        
         contractABI: CONTRACT_ABI,
         explorer: "https://amoy.polygonscan.com",
         rpcUrl: "https://rpc.ankr.com/polygon_amoy",
@@ -21,24 +25,29 @@ const networkConfig = {
             symbol: "POL",
             decimals: 18
         },
-        wsUrl: 'wss://polygon-amoy-bor.publicnode.com'
+        wsUrl: `wss://polygon-amoy.gateway.tenderly.co`,
+        fallbackWsUrls: [
+            `wss://polygon-amoy.g.alchemy.com/v2/SiEh1ZidfpxItbVCgPN573bPGOqQee9r`,
+            'wss://polygon-bor-amoy-rpc.publicnode.com',
+            'wss://polygon-amoy-bor.publicnode.com',
+        ]
     },
 };
 
 export const getAllNetworks = () => Object.values(networkConfig);
 
 export const DEBUG_CONFIG = {
-    APP: false,
-    WEBSOCKET: false,
-    COMPONENTS: false,
-    WALLET: false,
-    VIEW_ORDERS: false,
-    CREATE_ORDER: false,
-    MY_ORDERS: false,
-    TAKER_ORDERS: false,
-    CLEANUP_ORDERS: false,
-    WALLET_UI: false,
-    BASE_COMPONENT: false,
+    APP: true,
+    WEBSOCKET: true,
+    COMPONENTS: true,
+    WALLET: true,
+    VIEW_ORDERS: true,
+    CREATE_ORDER: true,
+    MY_ORDERS: true,
+    TAKER_ORDERS: true,
+    CLEANUP_ORDERS: true,
+    WALLET_UI: true,
+    BASE_COMPONENT: true,
     // Add more specific flags as needed
 };
 
@@ -159,8 +168,9 @@ export class WalletManager {
     }
 
     async connect() {
-        if (!window.ethereum) {
-            throw new Error("MetaMask is not installed!");
+        if (this.isConnecting) {
+            console.log('[WalletManager] Connection already in progress');
+            return null;
         }
 
         this.isConnecting = true;

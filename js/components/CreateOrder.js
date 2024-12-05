@@ -57,7 +57,6 @@ export class CreateOrder extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
-        if (this.initialized) return;
         try {
             this.debug('Starting initialization...');
             
@@ -65,6 +64,12 @@ export class CreateOrder extends BaseComponent {
                 this.setReadOnlyMode();
                 return;
             }
+
+            // Clear existing content before re-populating
+            const sellContainer = document.getElementById('sellContainer');
+            const buyContainer = document.getElementById('buyContainer');
+            if (sellContainer) sellContainer.innerHTML = '';
+            if (buyContainer) buyContainer.innerHTML = '';
 
             // Enable form when wallet is connected
             this.setConnectedMode();
@@ -238,7 +243,6 @@ export class CreateOrder extends BaseComponent {
     async handleCreateOrder(event) {
         event.preventDefault();
         
-        // Prevent double submission
         if (this.isSubmitting) {
             this.debug('Order submission already in progress');
             return;
@@ -336,25 +340,11 @@ export class CreateOrder extends BaseComponent {
                 this.showSuccess('Requesting token approval...');
                 
                 try {
-                    // Add gas estimation for approval
-                    let approveGasLimit;
-                    try {
-                        const approveGasEstimate = await sellTokenContract.estimateGas.approve(
-                            this.contract.address,
-                            sellAmountWei
-                        );
-                        approveGasLimit = Math.floor(approveGasEstimate.toNumber() * 1.2); // 20% buffer
-                    } catch (error) {
-                        this.debug('Gas estimation failed for approval, using default:', error);
-                        approveGasLimit = 70000; // More conservative default
-                    }
-
                     const approveTx = await sellTokenContract.connect(signer).approve(
                         this.contract.address,
                         sellAmountWei,
                         { 
-                            gasLimit: approveGasLimit,
-                            gasPrice: await this.provider.getGasPrice() // Add current gas price
+                            gasLimit: 70000  // Standard gas limit for ERC20 approvals
                         }
                     );
                     
@@ -369,11 +359,22 @@ export class CreateOrder extends BaseComponent {
                 }
             }
 
-            // Get order creation fee
+            // Get order creation fee and calculate min/max acceptable fees
             const fee = await this.contract.orderCreationFee();
+            const minFee = fee.mul(90).div(100);  // 90% of expected fee
+            const maxFee = fee.mul(150).div(100); // 150% of expected fee
             
-            // Improved order creation gas handling
-            let createOrderGasLimit;
+            this.debug('Fee calculations:', {
+                baseFee: ethers.utils.formatEther(fee),
+                minFee: ethers.utils.formatEther(minFee),
+                maxFee: ethers.utils.formatEther(maxFee)
+            });
+
+            // Get current gas price
+            const gasPrice = await this.provider.getGasPrice();
+            
+            // Estimate gas for order creation
+            let gasLimit;
             try {
                 // First try with static call to check if transaction would fail
                 await this.contract.callStatic.createOrder(
@@ -385,7 +386,7 @@ export class CreateOrder extends BaseComponent {
                     { value: fee }
                 );
 
-                const createOrderGasEstimate = await this.contract.estimateGas.createOrder(
+                const gasEstimate = await this.contract.estimateGas.createOrder(
                     takerAddress || ethers.constants.AddressZero,
                     sellToken,
                     sellAmountWei,
@@ -394,28 +395,22 @@ export class CreateOrder extends BaseComponent {
                     { value: fee }
                 );
                 
-                this.debug('Create order gas estimate:', createOrderGasEstimate.toString());
-                createOrderGasLimit = Math.floor(createOrderGasEstimate.toNumber() * 1.2); // 20% buffer
+                // Add 20% buffer to estimated gas
+                gasLimit = gasEstimate.mul(120).div(100);
+                this.debug('Gas estimate with buffer:', gasLimit.toString());
             } catch (error) {
-                this.debug('Gas estimation failed for create order:', error);
-                // Check for specific error conditions
-                if (error.message.includes('insufficient allowance')) {
-                    throw new Error('Token approval amount is insufficient');
-                }
-                if (error.message.includes('insufficient balance')) {
-                    throw new Error('Insufficient token balance');
-                }
-                // Use higher default gas limit for unknown failures
-                createOrderGasLimit = 350000; // Increased default gas limit
-                this.debug('Using default gas limit:', createOrderGasLimit);
+                this.debug('Gas estimation failed:', error);
+                gasLimit = ethers.BigNumber.from(300000); // Conservative fallback
+                this.debug('Using fallback gas limit:', gasLimit.toString());
             }
 
-            // Add current gas price and retry logic
+            // Create order with retry mechanism
             const maxRetries = 3;
             let attempt = 0;
+            let lastError;
+
             while (attempt < maxRetries) {
                 try {
-                    const currentGasPrice = await this.provider.getGasPrice();
                     const tx = await this.contract.createOrder(
                         takerAddress || ethers.constants.AddressZero,
                         sellToken,
@@ -424,30 +419,30 @@ export class CreateOrder extends BaseComponent {
                         buyAmountWei,
                         {
                             value: fee,
-                            gasLimit: createOrderGasLimit,
-                            gasPrice: currentGasPrice
+                            gasLimit,
+                            gasPrice
                         }
                     );
 
-                    this.showSuccess('Order creation transaction submitted');
-                    const receipt = await tx.wait();
-                    break; // Success, exit loop
+                    this.debug('Transaction sent:', tx.hash);
+                    await tx.wait();
+                    this.showSuccess('Order created successfully!');
+                    this.resetForm();
+                    return;
                 } catch (error) {
+                    lastError = error;
                     attempt++;
-                    if (attempt === maxRetries) {
-                        throw new Error(`Failed after ${maxRetries} attempts: ${this.getReadableError(error)}`);
+                    if (attempt < maxRetries) {
+                        this.debug(`Attempt ${attempt} failed, retrying...`, error);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     }
-                    // Wait before retrying
-                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
 
-            // Reset form and show success
-            this.showSuccess('Order created successfully!');
-            this.resetForm();
-            
+            throw new Error(`Failed after ${maxRetries} attempts: ${this.getReadableError(lastError)}`);
+
         } catch (error) {
-            console.error('Create order error:', error);
+            this.debug('Create order error:', error);
             this.showError(error.message || 'Failed to create order');
         } finally {
             this.isSubmitting = false;
@@ -986,6 +981,26 @@ export class CreateOrder extends BaseComponent {
                 </div>
             </div>
         `;
+    }
+
+    cleanup() {
+        // Remove event listeners
+        if (this.boundCreateOrderHandler) {
+            const createOrderBtn = document.getElementById('createOrderBtn');
+            if (createOrderBtn) {
+                createOrderBtn.removeEventListener('click', this.boundCreateOrderHandler);
+            }
+        }
+        
+        // Clear containers
+        const sellContainer = document.getElementById('sellContainer');
+        const buyContainer = document.getElementById('buyContainer');
+        if (sellContainer) sellContainer.innerHTML = '';
+        if (buyContainer) buyContainer.innerHTML = '';
+        
+        // Reset state
+        this.initialized = false;
+        this.isSubmitting = false;
     }
 }
 

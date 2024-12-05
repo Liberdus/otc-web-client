@@ -61,23 +61,44 @@ export class WalletUI extends BaseComponent {
         try {
             this.debug('Handle connect click called');
             e.preventDefault();
+            
+            // Disable connect button while connecting
+            if (this.connectButton) {
+                this.connectButton.disabled = true;
+                this.connectButton.textContent = 'Connecting...';
+            }
+
             const result = await this.connectWallet();
             this.debug('Connect result:', result);
             if (result && result.account) {
                 this.updateUI(result.account);
-                // Trigger app-level wallet connection handler
                 if (window.app && typeof window.app.handleWalletConnect === 'function') {
                     await window.app.handleWalletConnect(result.account);
                 }
             }
         } catch (error) {
             console.error('[WalletUI] Error in handleConnectClick:', error);
+        } finally {
+            // Re-enable connect button
+            if (this.connectButton) {
+                this.connectButton.disabled = false;
+                this.connectButton.textContent = 'Connect Wallet';
+            }
         }
     }
 
     async connectWallet() {
         try {
             this.debug('Connecting wallet...');
+            
+            if (walletManager.isConnecting) {
+                this.debug('Connection already in progress, skipping...');
+                return null;
+            }
+
+            // Add a small delay to ensure any previous pending requests are cleared
+            await new Promise(resolve => setTimeout(resolve, 500));
+
             const result = await walletManager.connect();
             return result;
         } catch (error) {
@@ -119,8 +140,21 @@ export class WalletUI extends BaseComponent {
             e.preventDefault();
             this.debug('Disconnect button clicked');
             try {
+                // Clean up CreateOrder component before disconnecting
+                if (window.app?.components['create-order']?.cleanup) {
+                    window.app.components['create-order'].cleanup();
+                }
+                
+                await walletManager.disconnect();
+                this.showConnectButton();
+                
                 // Clear our app's connection state
                 await walletManager.disconnect();
+                
+                // Clean up CreateOrder component
+                if (window.app?.components['create-order']?.cleanup) {
+                    window.app.components['create-order'].cleanup();
+                }
                 
                 // Reset UI
                 this.showConnectButton();
@@ -175,6 +209,10 @@ export class WalletUI extends BaseComponent {
                     break;
                 case 'accountsChanged':
                     this.debug('Account change event received');
+                    // Clean up CreateOrder component when account changes
+                    if (window.app?.components['create-order']?.cleanup) {
+                        window.app.components['create-order'].cleanup();
+                    }
                     this.updateUI(data.account);
                     break;
                 case 'chainChanged':

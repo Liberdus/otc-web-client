@@ -27,7 +27,7 @@ export class WebSocketService {
             this.debug('Starting initialization...');
             
             const config = getNetworkConfig();
-            this.debug('Network config loaded, connecting to:', config.wsUrl);
+            this.debug('Network config loaded, attempting WebSocket connection...');
             
             this.contractAddress = config.contractAddress;
             this.contractABI = config.contractABI;
@@ -36,17 +36,38 @@ export class WebSocketService {
                 throw new Error('Contract ABI not found in network config');
             }
             
-            this.provider = new ethers.providers.WebSocketProvider(config.wsUrl);
+            const wsUrls = [config.wsUrl, ...config.fallbackWsUrls];
+            let connected = false;
             
-            // Wait for provider to be ready
-            await this.provider.ready;
-            this.debug('Provider ready');
+            for (const url of wsUrls) {
+                try {
+                    this.debug('Attempting to connect to WebSocket URL:', url);
+                    this.provider = new ethers.providers.WebSocketProvider(url);
+                    
+                    // Wait for provider to be ready
+                    await this.provider.ready;
+                    this.debug('Connected to WebSocket:', url);
+                    connected = true;
+                    break;
+                } catch (error) {
+                    this.debug('Failed to connect to WebSocket URL:', url, error);
+                }
+            }
+            
+            if (!connected) {
+                throw new Error('Failed to connect to any WebSocket URL');
+            }
 
             this.contract = new ethers.Contract(
                 this.contractAddress,
                 this.contractABI,
                 this.provider
             );
+
+            this.debug('Contract initialized:', {
+                address: this.contract.address,
+                abi: this.contract.interface.format()
+            });
 
             this.debug('Contract initialized, starting order sync...');
             await this.syncAllOrders(this.contract);
@@ -59,7 +80,10 @@ export class WebSocketService {
             
             return true;
         } catch (error) {
-            this.debug('Initialization failed:', error);
+            this.debug('Initialization failed:', {
+                message: error.message,
+                stack: error.stack
+            });
             return this.reconnect();
         }
     }

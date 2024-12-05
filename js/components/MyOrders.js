@@ -126,7 +126,6 @@ export class MyOrders extends ViewOrders {
 
     async cancelOrder(orderId) {
         const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
-        
         try {
             if (button) {
                 button.disabled = true;
@@ -134,52 +133,71 @@ export class MyOrders extends ViewOrders {
             }
 
             this.debug('Starting cancel order process for orderId:', orderId);
-            const contract = await this.getContract();
+
+            // Get current gas price
+            const gasPrice = await this.provider.getGasPrice();
             
-            // Estimate gas for cancelOrder with fallback
-            let cancelGasLimit;
+            // Estimate gas for the cancelOrder transaction
+            let gasLimit;
             try {
-                const cancelGasEstimate = await contract.estimateGas.cancelOrder(orderId);
-                cancelGasLimit = Math.floor(cancelGasEstimate.toNumber() * 1.2); // 20% buffer
+                // First try with static call to check if transaction would fail
+                await this.contract.callStatic.cancelOrder(orderId);
+                
+                gasLimit = await this.contract.estimateGas.cancelOrder(orderId);
+                // Add 20% buffer to the estimated gas
+                gasLimit = gasLimit.mul(120).div(100);
+                this.debug('Estimated gas limit with buffer:', gasLimit.toString());
             } catch (error) {
-                this.debug('Gas estimation failed for cancel order, using default:', error);
-                cancelGasLimit = 100000; // Default gas limit for cancel orders
+                this.debug('Gas estimation failed:', error);
+                gasLimit = ethers.BigNumber.from(200000); // Conservative fallback for cancel
+                this.debug('Using fallback gas limit:', gasLimit.toString());
             }
 
-            const tx = await contract.cancelOrder(orderId, {
-                gasLimit: cancelGasLimit,
-                gasPrice: await this.provider.getGasPrice()
-            });
-            
-            this.debug('Cancel transaction sent:', tx.hash);
-            this.showSuccess('Cancel transaction submitted');
-            
-            await tx.wait();
-            this.debug('Transaction confirmed');
+            // Execute the cancel order transaction with retry mechanism
+            const maxRetries = 3;
+            let attempt = 0;
+            let lastError;
 
-        } catch (error) {
-            this.debug('Cancel order error:', error);
-            let errorMessage = 'Failed to cancel order: ';
-            
-            if (error?.error?.data) {
+            while (attempt < maxRetries) {
                 try {
-                    const decodedError = this.contract.interface.parseError(error.error.data);
-                    errorMessage += `${decodedError.name}: ${decodedError.args}`;
-                } catch (e) {
-                    if (error.code === -32603) {
-                        errorMessage += 'Transaction would fail. Please try again.';
-                    } else {
-                        errorMessage += error.message;
+                    const tx = await this.contract.cancelOrder(orderId, {
+                        gasLimit,
+                        gasPrice
+                    });
+                    
+                    this.debug('Transaction sent:', tx.hash);
+                    await tx.wait();
+                    this.debug('Transaction confirmed');
+
+                    // Update order status in memory
+                    const orderToUpdate = this.orders.get(Number(orderId));
+                    if (orderToUpdate) {
+                        orderToUpdate.status = 'Canceled';
+                        this.orders.set(Number(orderId), orderToUpdate);
+                        await this.refreshOrdersView();
+                    }
+
+                    this.showSuccess(`Order ${orderId} canceled successfully!`);
+                    return;
+                } catch (error) {
+                    lastError = error;
+                    attempt++;
+                    if (attempt < maxRetries) {
+                        this.debug(`Attempt ${attempt} failed, retrying...`, error);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     }
                 }
             }
-            
-            this.showError(errorMessage);
-            
-            // Reset button state on error
+
+            throw lastError;
+
+        } catch (error) {
+            this.debug('Cancel order error:', error);
+            this.showError(this.getReadableError(error));
+        } finally {
             if (button) {
                 button.disabled = false;
-                button.textContent = 'Cancel';
+                button.textContent = 'Cancel Order';
             }
         }
     }

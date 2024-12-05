@@ -16,19 +16,32 @@ export class Cleanup extends BaseComponent {
 
     async initialize(readOnlyMode = true) {
         try {
-            this.debug('Initializing cleanup component...');
+            this.debug('Starting Cleanup initialization...');
+            this.debug('ReadOnly mode:', readOnlyMode);
             
             // Wait for both WebSocket and Contract to be ready
             if (!this.webSocket?.isInitialized || !this.webSocket?.contract) {
-                this.debug('Waiting for WebSocket service and contract to initialize...');
+                this.debug('WebSocket status:', {
+                    exists: !!this.webSocket,
+                    isInitialized: this.webSocket?.isInitialized,
+                    hasContract: !!this.webSocket?.contract
+                });
+                
                 let attempts = 0;
                 while (attempts < 10) {
                     if (window.webSocket?.isInitialized && window.webSocket?.contract) {
                         this.webSocket = window.webSocket;
-                        this.debug('WebSocket service and contract found');
+                        this.debug('WebSocket connection successful:', {
+                            isInitialized: this.webSocket.isInitialized,
+                            contractAddress: this.webSocket.contract.address
+                        });
                         break;
                     }
-                    this.debug(`Attempt ${attempts + 1}: Waiting for WebSocket...`);
+                    this.debug(`Attempt ${attempts + 1}: WebSocket status:`, {
+                        windowWebSocket: !!window.webSocket,
+                        isInitialized: window.webSocket?.isInitialized,
+                        hasContract: !!window.webSocket?.contract
+                    });
                     await new Promise(resolve => setTimeout(resolve, 500));
                     attempts++;
                 }
@@ -36,7 +49,14 @@ export class Cleanup extends BaseComponent {
 
             // Verify both WebSocket and Contract are available
             if (!this.webSocket?.isInitialized || !this.webSocket?.contract) {
-                throw new Error('WebSocket service or contract not properly initialized');
+                const error = new Error('WebSocket service or contract not properly initialized');
+                this.debug('Initialization failed:', {
+                    webSocketExists: !!this.webSocket,
+                    isInitialized: this.webSocket?.isInitialized,
+                    hasContract: !!this.webSocket?.contract,
+                    error
+                });
+                throw error;
             }
 
             // Setup WebSocket event listeners
@@ -88,6 +108,20 @@ export class Cleanup extends BaseComponent {
                         Clean Orders
                     </button>
                 </div>
+                <div class="admin-controls-toggle">
+                    <button id="toggle-admin" class="toggle-button">
+                        <span>Admin Controls</span>
+                        <svg class="chevron-icon" viewBox="0 0 24 24">
+                            <path d="M7 10l5 5 5-5z"/>
+                        </svg>
+                    </button>
+                </div>
+                <div id="admin-section" class="admin-section collapsed">
+                    <p class="admin-note">Note: These actions can only be performed by the contract owner</p>
+                    <button id="disable-contract-button" class="action-button warning">
+                        Disable Contract
+                    </button>
+                </div>
             `;
             
             this.container.appendChild(wrapper);
@@ -95,13 +129,31 @@ export class Cleanup extends BaseComponent {
             this.cleanupButton = document.getElementById('cleanup-button');
             this.cleanupButton.addEventListener('click', () => this.performCleanup());
 
+            this.disableContractButton = document.getElementById('disable-contract-button');
+            this.disableContractButton.addEventListener('click', () => this.disableContract());
+
+            this.toggleAdminButton = document.getElementById('toggle-admin');
+            this.adminSection = document.getElementById('admin-section');
+            this.toggleAdminButton.addEventListener('click', () => {
+                this.adminSection.classList.toggle('collapsed');
+                this.toggleAdminButton.classList.toggle('active');
+            });
+
             this.debug('Starting cleanup opportunities check');
             await this.checkCleanupOpportunities();
             
             this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
             this.debug('Initialization complete');
         } catch (error) {
-            this.debug('Initialization failed:', error);
+            this.debug('Initialization error details:', {
+                error,
+                stack: error.stack,
+                webSocketState: {
+                    exists: !!this.webSocket,
+                    isInitialized: this.webSocket?.isInitialized,
+                    hasContract: !!this.webSocket?.contract
+                }
+            });
             this.showError('Failed to initialize cleanup component');
             this.updateUIForError();
         }
@@ -275,19 +327,12 @@ export class Cleanup extends BaseComponent {
 
     async performCleanup() {
         try {
-            // Get contract with signer
             const contract = this.webSocket?.contract;
             if (!contract) {
                 throw new Error('Contract not initialized');
             }
 
-            // Check if provider and wallet are connected
-            if (!contract.provider) {
-                throw new Error('Provider not available');
-            }
-
-            // Add these checks for wallet connection
-            if (!window.walletManager?.isConnected) {
+            if (!window.walletManager?.provider) {
                 throw new Error('Wallet not connected');
             }
 
@@ -305,29 +350,28 @@ export class Cleanup extends BaseComponent {
             // Get eligible orders first
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
-            const orderExpiry = await contract.ORDER_EXPIRY();
-            const gracePeriod = await contract.GRACE_PERIOD();
+            const ORDER_EXPIRY = await contract.ORDER_EXPIRY();
+            const GRACE_PERIOD = await contract.GRACE_PERIOD();
 
             const eligibleOrders = orders.filter(order => 
-                currentTime > order.timestamp + orderExpiry.toNumber() + gracePeriod.toNumber()
+                currentTime > Number(order.timestamp) + ORDER_EXPIRY.toNumber() + GRACE_PERIOD.toNumber()
             );
 
             if (eligibleOrders.length === 0) {
                 throw new Error('No eligible orders to clean');
             }
 
-            const batchSize = Math.min(eligibleOrders.length, 10); // MAX_CLEANUP_BATCH
-            
-            // More accurate base gas calculation
+            // More accurate base gas calculation for single order cleanup
             const baseGasEstimate = ethers.BigNumber.from('85000')  // Base transaction cost
-                .add(ethers.BigNumber.from('65000').mul(batchSize)) // Per-order cost
-                .add(ethers.BigNumber.from('25000'));              // Buffer for contract state changes
+                .add(ethers.BigNumber.from('65000'))               // Single order cost
+                .add(ethers.BigNumber.from('25000'));             // Buffer for contract state changes
 
             // Try multiple gas estimation attempts with fallback
             let gasEstimate;
             try {
                 // Try actual contract estimation first
                 gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders();
+                this.debug('Initial gas estimation:', gasEstimate.toString());
             } catch (estimateError) {
                 this.debug('Primary gas estimation failed:', estimateError);
                 try {
@@ -335,14 +379,16 @@ export class Cleanup extends BaseComponent {
                     gasEstimate = await contractWithSigner.estimateGas.cleanupExpiredOrders({
                         gasLimit: baseGasEstimate.mul(2) // Double the base estimate
                     });
+                    this.debug('Fallback gas estimation succeeded:', gasEstimate.toString());
                 } catch (fallbackError) {
                     this.debug('Fallback gas estimation failed:', fallbackError);
                     // Use calculated estimate as last resort
                     gasEstimate = baseGasEstimate;
+                    this.debug('Using base gas estimate:', gasEstimate.toString());
                 }
             }
 
-            // Add 30% buffer for safety (increased from 20%)
+            // Add 30% buffer for safety (increased from 20% due to retry mechanism)
             const gasLimit = gasEstimate.mul(130).div(100);
 
             const feeData = await contract.provider.getFeeData();
@@ -362,41 +408,69 @@ export class Cleanup extends BaseComponent {
                 estimatedCost: ethers.utils.formatEther(gasLimit.mul(feeData.gasPrice)) + ' ETH'
             });
 
-            console.log('[Cleanup] Sending transaction with options:', txOptions);
-            const tx = await contractWithSigner.cleanupExpiredOrders(txOptions);
-            console.log('[Cleanup] Transaction sent:', tx.hash);
+            // Execute cleanup with retry mechanism
+            const maxRetries = 3;
+            let attempt = 0;
+            let lastError;
 
-            const receipt = await tx.wait();
-            console.log('[Cleanup] Transaction confirmed:', receipt);
-            console.log('[Cleanup] Events:', receipt.events);
+            while (attempt < maxRetries) {
+                try {
+                    console.log('[Cleanup] Sending transaction with options:', txOptions);
+                    const tx = await contractWithSigner.cleanupExpiredOrders(txOptions);
+                    console.log('[Cleanup] Transaction sent:', tx.hash);
 
-            if (receipt.status === 0) {
-                throw new Error('Transaction failed during execution');
+                    const receipt = await tx.wait();
+                    console.log('[Cleanup] Transaction confirmed:', receipt);
+
+                    if (receipt.status === 1) {
+                        // Parse cleanup events from receipt
+                        const events = receipt.events || [];
+                        const cleanedOrderIds = [];
+                        const retryOrderIds = new Map(); // Map old order IDs to new ones
+
+                        for (const event of events) {
+                            if (event.event === 'OrderCleanedUp') {
+                                cleanedOrderIds.push(event.args.orderId.toString());
+                            } else if (event.event === 'RetryOrder') {
+                                retryOrderIds.set(
+                                    event.args.oldOrderId.toString(),
+                                    event.args.newOrderId.toString()
+                                );
+                            }
+                        }
+
+                        if (cleanedOrderIds.length || retryOrderIds.size) {
+                            this.debug('Cleanup results:', {
+                                cleaned: cleanedOrderIds,
+                                retried: Array.from(retryOrderIds.entries())
+                            });
+
+                            // Remove cleaned orders from WebSocket cache
+                            if (cleanedOrderIds.length) {
+                                this.webSocket.removeOrders(cleanedOrderIds);
+                            }
+
+                            // Update retried orders in WebSocket cache
+                            if (retryOrderIds.size) {
+                                await this.webSocket.syncAllOrders(contract);
+                            }
+
+                            this.showSuccess('Cleanup successful! Check your wallet for rewards.');
+                        }
+                        return;
+                    }
+                    throw new Error('Transaction failed during execution');
+                } catch (error) {
+                    lastError = error;
+                    attempt++;
+                    if (attempt < maxRetries) {
+                        this.debug(`Attempt ${attempt} failed, retrying...`, error);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
             }
 
-            // Parse cleanup events from receipt
-            const cleanedOrderIds = receipt.events
-                ?.filter(event => {
-                    console.log('[Cleanup] Processing event:', event);
-                    return event.event === 'OrderCleanedUp';
-                })
-                ?.map(event => {
-                    console.log('[Cleanup] Cleaned order:', event.args);
-                    return event.args.orderId.toString();
-                });
-                
-            console.log('[Cleanup] Cleaned order IDs:', cleanedOrderIds);
-                
-            if (cleanedOrderIds?.length) {
-                this.debug('Orders cleaned:', cleanedOrderIds);
-                // Remove cleaned orders from WebSocket cache
-                this.webSocket.removeOrders(cleanedOrderIds);
-                // Force a fresh sync
-                await this.webSocket.syncAllOrders(contract);
-            }
-
-            this.showSuccess('Cleanup successful! Check your wallet for rewards.');
-            await this.checkCleanupOpportunities();
+            throw lastError;
 
         } catch (error) {
             console.error('[Cleanup] Error details:', {
@@ -410,6 +484,7 @@ export class Cleanup extends BaseComponent {
         } finally {
             this.cleanupButton.textContent = 'Clean Orders';
             this.cleanupButton.disabled = false;
+            await this.checkCleanupOpportunities();
         }
     }
 
@@ -426,5 +501,37 @@ export class Cleanup extends BaseComponent {
     // Add helper method to format ETH values
     formatEth(wei) {
         return ethers.utils.formatEther(wei.toString());
+    }
+
+    async disableContract() {
+        try {
+            const contract = this.webSocket?.contract;
+            if (!contract) {
+                throw new Error('Contract not initialized');
+            }
+
+            // Get signer from wallet manager
+            const signer = await window.walletManager.getSigner();
+            if (!signer) {
+                throw new Error('No signer available');
+            }
+
+            const contractWithSigner = contract.connect(signer);
+
+            this.disableContractButton.disabled = true;
+            this.disableContractButton.textContent = 'Disabling...';
+
+            const tx = await contractWithSigner.disableContract();
+            await tx.wait();
+
+            this.showSuccess('Contract successfully disabled');
+            this.disableContractButton.textContent = 'Contract Disabled';
+
+        } catch (error) {
+            this.debug('Error disabling contract:', error);
+            this.showError(`Failed to disable contract: ${error.message}`);
+            this.disableContractButton.disabled = false;
+            this.disableContractButton.textContent = 'Disable Contract';
+        }
     }
 } 

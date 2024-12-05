@@ -248,9 +248,25 @@ export class TakerOrders extends ViewOrders {
                 }
             }
 
-            // Fill order with standard gas limit
+            // Estimate gas for filling the order
+            let gasLimit;
+            try {
+                // First try with static call to check if transaction would fail
+                await this.contract.callStatic.fillOrder(orderId);
+
+                const gasEstimate = await this.contract.estimateGas.fillOrder(orderId);
+                // Add 20% buffer to the estimated gas
+                gasLimit = gasEstimate.mul(120).div(100);
+                this.debug('Gas estimate with buffer:', gasLimit.toString());
+            } catch (error) {
+                this.debug('Gas estimation failed:', error);
+                gasLimit = ethers.BigNumber.from(300000); // Conservative fallback
+                this.debug('Using fallback gas limit:', gasLimit.toString());
+            }
+
+            // Fill order with estimated gas limit
             const tx = await this.contract.fillOrder(orderId, {
-                gasLimit: 300000,  // Standard gas limit for fill orders
+                gasLimit,
                 gasPrice: await window.walletManager.getProvider().getGasPrice()
             });
             

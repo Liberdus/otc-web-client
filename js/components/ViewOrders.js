@@ -89,30 +89,49 @@ export class ViewOrders extends BaseComponent {
     async initialize(readOnlyMode = true) {
         try {
             this.debug('Initializing ViewOrders component');
+            
+            // Add WebSocket connection check
+            if (!window.webSocket) {
+                this.debug('ERROR: WebSocket not available');
+                this.showError('WebSocket connection not available');
+                return;
+            }
+
+            if (!window.webSocket.isInitialized) {
+                this.debug('WebSocket not yet initialized, waiting...');
+                let attempts = 0;
+                const maxAttempts = 10;
+                
+                while (!window.webSocket.isInitialized && attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    attempts++;
+                    this.debug(`Waiting for WebSocket initialization... Attempt ${attempts}/${maxAttempts}`);
+                }
+                
+                if (!window.webSocket.isInitialized) {
+                    this.debug('ERROR: WebSocket failed to initialize after waiting');
+                    this.showError('Failed to connect to WebSocket');
+                    return;
+                }
+            }
+
+            // Add cache check
+            const cachedOrders = window.webSocket.getOrders();
+            this.debug('Initial cached orders:', {
+                orderCount: cachedOrders?.length || 0,
+                orders: cachedOrders
+            });
+            
             // Cleanup previous state
             this.cleanup();
             this.container.innerHTML = '';
             
             await this.setupTable();
             
-            // Wait for WebSocket to be initialized
-            if (!window.webSocket?.isInitialized) {
-                this.debug('Waiting for WebSocket initialization...');
-                await new Promise(resolve => {
-                    const checkInterval = setInterval(() => {
-                        if (window.webSocket?.isInitialized) {
-                            clearInterval(checkInterval);
-                            resolve();
-                        }
-                    }, 100);
-                });
-            }
-            
             // Setup WebSocket event handlers
             await this.setupWebSocket();
 
             // Get initial orders from cache
-            const cachedOrders = window.webSocket.getOrders();
             if (cachedOrders && cachedOrders.length > 0) {
                 this.debug('Loading orders from cache:', cachedOrders);
                 // Clear existing orders before adding new ones
@@ -126,13 +145,26 @@ export class ViewOrders extends BaseComponent {
             await this.refreshOrdersView();
 
         } catch (error) {
-            console.error('[ViewOrders] Initialization error:', error);
+            this.debug('Initialization error:', error);
             throw error;
         }
     }
 
     async setupWebSocket() {
         this.debug('Setting up WebSocket subscriptions');
+        
+        // Add connection status check
+        if (!window.webSocket?.provider) {
+            this.debug('ERROR: WebSocket provider not available');
+            this.showError('WebSocket provider not available');
+            return;
+        }
+
+        // Add provider state logging
+        this.debug('WebSocket provider state:', {
+            connected: window.webSocket.provider._websocket?.connected,
+            readyState: window.webSocket.provider._websocket?.readyState
+        });
         
         // Clear existing subscriptions
         this.eventSubscriptions.clear();
@@ -209,6 +241,21 @@ export class ViewOrders extends BaseComponent {
         
         try {
             this.debug('Refreshing orders view');
+            
+            // Add WebSocket state check
+            if (!window.webSocket?.isInitialized) {
+                this.debug('ERROR: WebSocket not initialized during refresh');
+                this.showError('WebSocket connection not available');
+                return;
+            }
+
+            // Add order cache check
+            const cachedOrders = Array.from(this.orders.values());
+            this.debug('Current order cache:', {
+                size: this.orders.size,
+                orders: cachedOrders
+            });
+
             this.showLoadingState();
 
             // Get contract instance first
@@ -358,20 +405,8 @@ export class ViewOrders extends BaseComponent {
             }
 
         } catch (error) {
-            console.error('[ViewOrders] Error refreshing orders view:', error);
-            const tbody = this.container.querySelector('tbody');
-            if (tbody) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${!this.contract ? 
-                                    'Connect wallet to view orders' : 
-                                    'Unable to load orders. Please try again later.'}
-                            </div>
-                        </td>
-                    </tr>`;
-            }
+            this.debug('Error refreshing orders:', error);
+            this.showError('Failed to refresh orders');
         } finally {
             this.isLoading = false;
         }
@@ -666,105 +701,133 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
-    async fillOrder(orderId) {
-        const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
+    async fillOrder(orderId, button) {
         try {
             if (button) {
                 button.disabled = true;
-                button.textContent = 'Filling...';
+                button.textContent = 'Processing...';
             }
 
             this.debug('Starting fill order process for orderId:', orderId);
-            const order = this.orders.get(orderId);
+            
+            const order = this.orders.get(Number(orderId));
             this.debug('Order details:', order);
 
-            // Create token contract instance with full ERC20 ABI
-            // Use buyToken since the taker is selling what the maker wants to buy
-            const takerToken = new ethers.Contract(
-                order.buyToken,  // This is what the taker needs to sell (maker wants to buy)
+            if (!order) {
+                throw new Error('Order not found');
+            }
+
+            // Check order status first
+            const currentOrder = await this.contract.orders(orderId);
+            this.debug('Current order state:', currentOrder);
+            
+            if (currentOrder.status !== 0) {
+                throw new Error(`Order is not active (status: ${this.getOrderStatusText(currentOrder.status)})`);
+            }
+
+            // Check expiry
+            const now = Math.floor(Date.now() / 1000);
+            const orderExpiry = await this.contract.ORDER_EXPIRY();
+            const expiryTime = Number(order.timestamp) + orderExpiry.toNumber();
+            
+            if (now >= expiryTime) {
+                throw new Error('Order has expired');
+            }
+
+            // Get token contracts
+            const buyToken = new ethers.Contract(
+                order.buyToken,
                 erc20Abi,
-                this.provider
+                this.provider.getSigner()
             );
             
-            const userAddress = await window.walletManager.getAccount();
-            
-            // Check balance and allowance for what taker needs to sell
-            const balance = await takerToken.balanceOf(userAddress);
-            const allowance = await takerToken.allowance(userAddress, this.contract.address);
+            const sellToken = new ethers.Contract(
+                order.sellToken,
+                erc20Abi,
+                this.provider.getSigner()
+            );
 
-            if (balance.lt(order.buyAmount)) {
-                throw new Error(`Insufficient token balance. Have ${ethers.utils.formatEther(balance)}, need ${ethers.utils.formatEther(order.buyAmount)}`);
+            const currentAccount = await this.provider.getSigner().getAddress();
+
+            // Check balances first
+            const buyTokenBalance = await buyToken.balanceOf(currentAccount);
+            this.debug('Buy token balance:', {
+                balance: buyTokenBalance.toString(),
+                required: order.buyAmount.toString()
+            });
+
+            if (buyTokenBalance.lt(order.buyAmount)) {
+                throw new Error(`Insufficient balance of buy token. Have: ${ethers.utils.formatEther(buyTokenBalance)}, Need: ${ethers.utils.formatEther(order.buyAmount)}`);
             }
 
-            if (allowance.lt(order.buyAmount)) {
-                this.showSuccess('Requesting token approval...');
+            // Check allowances
+            const buyTokenAllowance = await buyToken.allowance(currentAccount, this.contract.address);
+            this.debug('Buy token allowance:', {
+                current: buyTokenAllowance.toString(),
+                required: order.buyAmount.toString()
+            });
+
+            if (buyTokenAllowance.lt(order.buyAmount)) {
+                this.debug('Requesting buy token approval');
+                const approveTx = await buyToken.approve(this.contract.address, order.buyAmount);
+                await approveTx.wait();
+                this.showSuccess('Token approval granted');
+            }
+
+            // Verify contract has enough sell tokens
+            const contractSellBalance = await sellToken.balanceOf(this.contract.address);
+            this.debug('Contract sell token balance:', {
+                balance: contractSellBalance.toString(),
+                required: order.sellAmount.toString()
+            });
+
+            if (contractSellBalance.lt(order.sellAmount)) {
+                throw new Error('Contract does not have enough tokens to fill order');
+            }
+
+            // Estimate gas first
+            try {
+                const gasEstimate = await this.contract.estimateGas.fillOrder(orderId);
+                this.debug('Gas estimate:', gasEstimate.toString());
                 
-                try {
-                    const approveTx = await takerToken.connect(this.provider.getSigner()).approve(
-                        this.contract.address,
-                        order.buyAmount,  // Amount the taker needs to sell (maker's buyAmount)
-                        {
-                            gasLimit: 70000,
-                            gasPrice: await this.provider.getGasPrice()
-                        }
-                    );
-                    
-                    this.debug('Approval transaction sent:', approveTx.hash);
-                    await approveTx.wait();
-                    this.showSuccess('Token approval granted');
-                } catch (error) {
-                    this.debug('Approval failed:', error);
-                    throw new Error('Token approval failed. Please try again.');
+                // Add 20% buffer to gas estimate
+                const gasLimit = gasEstimate.mul(120).div(100);
+                
+                const tx = await this.contract.fillOrder(orderId, {
+                    gasLimit
+                });
+                
+                this.debug('Transaction sent:', tx.hash);
+                const receipt = await tx.wait();
+                this.debug('Transaction receipt:', receipt);
+
+                if (receipt.status === 0) {
+                    throw new Error('Transaction reverted by contract');
                 }
-            }
 
-            // Use standard gas limit for fill order
-            const tx = await this.contract.fillOrder(orderId, {
-                gasLimit: 300000,  // Standard gas limit for fill orders
-                gasPrice: await this.provider.getGasPrice()
-            });
-            
-            this.debug('Transaction sent:', tx.hash);
-            await tx.wait();
-            this.debug('Transaction confirmed');
-
-            // Update order status in memory
-            const orderToUpdate = this.orders.get(Number(orderId));
-            if (orderToUpdate) {
-                orderToUpdate.status = 'Filled';
-                this.orders.set(Number(orderId), orderToUpdate);
+                order.status = 'Filled';
+                this.orders.set(Number(orderId), order);
                 await this.refreshOrdersView();
+
+                this.showSuccess(`Order ${orderId} filled successfully!`);
+            } catch (error) {
+                this.debug('Gas estimation/transaction error:', error);
+                throw error;
             }
 
-            this.showSuccess(`Order ${orderId} filled successfully!`);
         } catch (error) {
-            this.debug('Fill order error details:', {
-                message: error.message,
-                code: error.code,
-                data: error?.error?.data,
-                reason: error?.reason,
-                stack: error.stack
-            });
+            this.debug('Fill order error details:', error);
             
-            let errorMessage = 'Failed to fill order: ';
-            
-            // Try to decode the error
-            if (error?.error?.data) {
-                try {
-                    const decodedError = this.contract.interface.parseError(error.error.data);
-                    errorMessage += `${decodedError.name}: ${decodedError.args}`;
-                    this.debug('Decoded error:', decodedError);
-                } catch (e) {
-                    // If we can't decode the error, fall back to basic messages
-                    if (error.code === -32603) {
-                        errorMessage += 'Transaction would fail. Check order status and token approvals.';
-                    } else {
-                        errorMessage += error.message;
-                    }
+            // Handle replaced transactions that succeeded
+            if (error.code === 'TRANSACTION_REPLACED' && !error.cancelled) {
+                if (error.receipt?.status === 1) {
+                    this.showSuccess('Order filled successfully!');
+                    await this.refreshOrders();
+                    return;
                 }
             }
             
-            this.showError(errorMessage);
+            this.showError('Failed to fill order');
         } finally {
             if (button) {
                 button.disabled = false;
@@ -774,18 +837,24 @@ export class ViewOrders extends BaseComponent {
     }
 
     getReadableError(error) {
-        // Reuse the same error handling from CreateOrder
+        if (error.message?.includes('insufficient allowance')) {
+            return 'Insufficient token allowance';
+        }
+        if (error.message?.includes('insufficient balance')) {
+            return 'Insufficient token balance';
+        }
+        
         switch (error.code) {
             case 'ACTION_REJECTED':
                 return 'Transaction was rejected by user';
             case 'INSUFFICIENT_FUNDS':
-                return 'Insufficient funds for transaction';
+                return 'Insufficient funds for gas';
             case -32603:
-                return 'Network error. Please check your connection';
+                return 'Transaction would fail. Check order status and approvals.';
             case 'UNPREDICTABLE_GAS_LIMIT':
-                return 'Error estimating gas. The transaction may fail';
+                return 'Error estimating gas. The transaction may fail.';
             default:
-                return error.reason || error.message || 'Error filling order';
+                return error.reason || error.message || 'Unknown error occurred';
         }
     }
 
@@ -1168,6 +1237,22 @@ export class ViewOrders extends BaseComponent {
             this.expiryTimers = new Map();
         }
 
+        const formatTimeDiff = (timeDiff) => {
+            const absDiff = Math.abs(timeDiff);
+            const days = Math.floor(absDiff / 86400); // 86400 seconds in a day
+            const hours = Math.floor((absDiff % 86400) / 3600);
+            const minutes = Math.floor((absDiff % 3600) / 60);
+            const sign = timeDiff < 0 ? '-' : '';
+
+            // If less than 24 hours, show only hours and minutes
+            if (days === 0) {
+                return `${sign}${hours}h ${minutes}m`;
+            }
+            
+            // If days exist, show days and hours (minutes omitted for clarity)
+            return `${sign}${days}d ${hours}h`;
+        };
+
         const updateExpiry = async () => {
             const expiresCell = row.querySelector('td:nth-child(6)'); // Expires column
             if (!expiresCell) return;
@@ -1175,7 +1260,7 @@ export class ViewOrders extends BaseComponent {
             const timestamp = row.dataset.timestamp;
             const status = row.dataset.status;
 
-            // For cancelled orders, show 'Cancelled' instead of expiry time
+            // Show status instead of time for completed orders
             if (status === 'Canceled') {
                 expiresCell.textContent = 'Cancelled';
                 return;
@@ -1193,11 +1278,7 @@ export class ViewOrders extends BaseComponent {
             const expiryTime = Number(timestamp) + orderExpiry;
             const timeDiff = expiryTime - currentTime;
 
-            // Format time difference
-            const absHours = Math.floor(Math.abs(timeDiff) / 3600);
-            const absMinutes = Math.floor((Math.abs(timeDiff) % 3600) / 60);
-            const sign = timeDiff < 0 ? '-' : '';
-            const newExpiryText = `${sign}${absHours}h ${absMinutes}m`;
+            const newExpiryText = formatTimeDiff(timeDiff);
 
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
@@ -1262,5 +1343,15 @@ export class ViewOrders extends BaseComponent {
                 </div>
             </div>
         `;
+    }
+
+    getOrderStatusText(status) {
+        const statusMap = {
+            0: 'Active',
+            1: 'Filled',
+            2: 'Cancelled',
+            3: 'Expired'
+        };
+        return statusMap[status] || `Unknown (${status})`;
     }
 }
