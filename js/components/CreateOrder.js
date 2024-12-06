@@ -429,12 +429,8 @@ export class CreateOrder extends BaseComponent {
                 const userList = modal.querySelector(`#${type}UserTokenList`);
                 const allList = modal.querySelector(`#${type}AllTokenList`);
 
-                // Filter out native token and any invalid tokens
-                const tokens = this.tokens.filter(t => 
-                    t.address && 
-                    t.address.toLowerCase() !== '0x0000000000000000000000000000000000001010' &&
-                    t.address.toLowerCase() !== '0x0000000000000000000000000000000000000000'
-                );
+                // Remove filtering for native token
+                const tokens = this.tokens.filter(t => t.address);
 
                 // Display tokens in wallet (tokens with balance)
                 const walletTokens = tokens.filter(t => t.balance && Number(t.balance) > 0);
@@ -596,10 +592,8 @@ export class CreateOrder extends BaseComponent {
         // Clear previous results
         contractResult.innerHTML = '';
         
-        // If input looks like an address and is not native token
-        if (ethers.utils.isAddress(searchTerm) && 
-            searchTerm.toLowerCase() !== '0x0000000000000000000000000000000000001010' &&
-            searchTerm.toLowerCase() !== '0x0000000000000000000000000000000000000000') {
+        // If input looks like an address
+        if (ethers.utils.isAddress(searchTerm)) {
             // Show loading state first
             contractResult.innerHTML = `
                 <div class="contract-address-result">
@@ -688,11 +682,9 @@ export class CreateOrder extends BaseComponent {
             }
         }
 
-        // Filter and display wallet tokens (excluding native token)
+        // Filter and display wallet tokens
         const searchTermLower = searchTerm.toLowerCase().trim();
         const filteredWalletTokens = this.walletTokens.filter(token => 
-            token.address.toLowerCase() !== '0x0000000000000000000000000000000000001010' &&
-            token.address.toLowerCase() !== '0x0000000000000000000000000000000000000000' &&
             (token.symbol.toLowerCase().includes(searchTermLower) ||
              token.name.toLowerCase().includes(searchTermLower) ||
              token.address.toLowerCase().includes(searchTermLower))
