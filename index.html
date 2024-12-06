@@ -45,9 +45,6 @@
         </div>
         <!-- Header Right -->
         <div class="header-right">
-          <button class="network-config-button" title="Show App Parameters">
-            <i class="icon-config"></i> App Parameters
-          </button>
           <div id="wallet-container" class="wallet-container">
             <div class="network-selector">
               <button class="network-button">
@@ -145,7 +142,7 @@
               Cleanup
             </button>
             <button class="tab-button" data-tab="contract-params">
-              Contract Parameters
+              Parameters
             </button>
           </nav>
 
@@ -211,17 +208,10 @@
                         <circle cx="12" cy="8" r="1" fill="currentColor" />
                       </svg>
                       <span class="tooltip-text">
-                        <strong>Order Creation Fee:</strong> A small fee in POL
-                        is required to create an order. This prevents spam and
-                        rewards users who help clean up expired orders.
+                        <strong>Order Creation Fee:</strong> A small fee in USDC
+                        is required to create an order. This helps prevent spam and
+                        incentivizes users who assist in cleaning up expired orders.
                         <br /><br />
-                        <strong>Average Gas:</strong> This number represents the
-                        typical computational cost to process an order on the
-                        blockchain. The creation fee is automatically adjusted
-                        based on this value to ensure fair pricing regardless of
-                        network conditions. <br /><br />
-                        💡 For example: If gas is 100,000, the fee will be
-                        approximately 0.00001 POL.
                       </span>
                     </span>
                   </label>
