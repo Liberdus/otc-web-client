@@ -267,7 +267,7 @@ export class ViewOrders extends BaseComponent {
             const currentTime = Math.floor(Date.now() / 1000);
 
             // Get filter and pagination state
-            const showOnlyFillable = this.container.querySelector('#fillable-orders-toggle')?.checked;
+            const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
             const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
             
             // Process all orders first
@@ -295,12 +295,17 @@ export class ViewOrders extends BaseComponent {
             });
 
             // Do all async operations before touching the DOM
-            if (showOnlyFillable && this.contract) {
-                const fillableChecks = await Promise.all(ordersToDisplay.map(async order => {
-                    const canFill = await this.canFillOrder(order);
-                    return canFill ? order : null;
-                }));
-                ordersToDisplay = fillableChecks.filter(order => order !== null);
+            if (showOnlyActive && this.contract) {
+                ordersToDisplay = ordersToDisplay.filter(order => {
+                    // Check if order is not filled or canceled
+                    if (order.status === 'Filled' || order.status === 'Canceled') {
+                        return false;
+                    }
+
+                    // Check if order is not expired
+                    const expiryTime = Number(order.timestamp) + orderExpiry;
+                    return currentTime < expiryTime;
+                });
             }
 
             // Sort orders based on whether this is a column click or initial load
@@ -393,7 +398,7 @@ export class ViewOrders extends BaseComponent {
                     <tr>
                         <td colspan="10" class="no-orders-message">
                             <div class="placeholder-text">
-                                ${showOnlyFillable ? 'No fillable orders found' : 'No orders found'}
+                                ${showOnlyActive ? 'No fillable orders found' : 'No orders found'}
                             </div>
                         </td>
                     </tr>`;
@@ -1258,20 +1263,6 @@ export class ViewOrders extends BaseComponent {
             if (!expiresCell) return;
 
             const timestamp = row.dataset.timestamp;
-            const status = row.dataset.status;
-
-            // Show status instead of time for completed orders
-            if (status === 'Canceled') {
-                expiresCell.textContent = 'Cancelled';
-                return;
-            }
-            
-            // For filled orders, show 'Filled' instead of expiry time
-            if (status === 'Filled') {
-                expiresCell.textContent = 'Filled';
-                return;
-            }
-
             const currentTime = Math.floor(Date.now() / 1000);
             const contract = await this.getContract();
             const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
