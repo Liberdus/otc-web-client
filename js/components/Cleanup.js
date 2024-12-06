@@ -99,7 +99,7 @@ export class Cleanup extends BaseComponent {
                             </div>
                             <div class="cleanup-total">
                                 <h3>Total</h3>
-                                <div>Orders Ready: <span id="cleanup-ready">Loading...</span></div>
+                                <div>Orders: <span id="cleanup-ready">Loading...</span></div>
                                 <div>Total Reward: <span id="cleanup-reward">Loading...</span></div>
                             </div>
                         </div>
@@ -252,12 +252,7 @@ export class Cleanup extends BaseComponent {
             }
             if (elements.cleanupButton) {
                 elements.cleanupButton.disabled = totalEligible === 0;
-                const batchSize = Math.min(totalEligible, 10); // Using contract's MAX_CLEANUP_BATCH
-                if (totalEligible > 10) {
-                    elements.cleanupButton.textContent = `Clean ${batchSize} of ${totalEligible} Orders`;
-                } else {
-                    elements.cleanupButton.textContent = `Clean ${batchSize} Order${batchSize !== 1 ? 's' : ''}`;
-                }
+                elements.cleanupButton.textContent = 'Clean Order';
             }
 
             this.debug('Cleanup stats:', {
