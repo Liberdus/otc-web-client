@@ -425,59 +425,23 @@ export class CreateOrder extends BaseComponent {
                 const modal = document.getElementById(`${type}TokenModal`);
                 if (!modal) return;
 
-                // Get references to all token lists
-                const nativeList = modal.querySelector(`#${type}NativeTokenList`);
+                // Get references to token lists
                 const userList = modal.querySelector(`#${type}UserTokenList`);
                 const allList = modal.querySelector(`#${type}AllTokenList`);
 
-                // Separate native token
-                const nativeToken = this.tokens.find(t => 
-                    t.address.toLowerCase() === '0x0000000000000000000000000000000000001010'
+                // Filter out native token and any invalid tokens
+                const tokens = this.tokens.filter(t => 
+                    t.address && 
+                    t.address.toLowerCase() !== '0x0000000000000000000000000000000000001010' &&
+                    t.address.toLowerCase() !== '0x0000000000000000000000000000000000000000'
                 );
-
-                // Filter out native token from other tokens
-                const otherTokens = this.tokens.filter(t => 
-                    t.address.toLowerCase() !== '0x0000000000000000000000000000000000001010'
-                );
-
-                // Display native token
-                if (nativeToken) {
-                    nativeList.innerHTML = `
-                        <div class="token-item" data-address="${nativeToken.address}">
-                            <div class="token-item-left">
-                                <div class="token-icon">
-                                    ${this.getTokenIcon(nativeToken)}
-                                </div>
-                                <div class="token-item-info">
-                                    <div class="token-item-symbol">${nativeToken.symbol}</div>
-                                    <div class="token-item-name">
-                                        ${nativeToken.name}
-                                        <a href="${this.getExplorerUrl(nativeToken.address)}" 
-                                           class="token-explorer-link"
-                                           target="_blank"
-                                           title="View contract on explorer">
-                                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                            </svg>
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                            ${nativeToken.balance ? `
-                                <div class="token-item-balance">
-                                    ${Number(nativeToken.balance).toFixed(4)}
-                                </div>
-                            ` : ''}
-                        </div>
-                    `;
-                }
 
                 // Display tokens in wallet (tokens with balance)
-                const walletTokens = otherTokens.filter(t => t.balance && Number(t.balance) > 0);
+                const walletTokens = tokens.filter(t => t.balance && Number(t.balance) > 0);
                 this.displayTokens(walletTokens, userList);
 
                 // Display all other tokens
-                this.displayTokens(otherTokens, allList);
+                this.displayTokens(tokens, allList);
 
                 // Add click handlers
                 modal.querySelectorAll('.token-item').forEach(item => {
@@ -594,18 +558,6 @@ export class CreateOrder extends BaseComponent {
                     <div id="${type}ContractResult"></div>
                     <div class="token-section">
                         <div class="token-section-header">
-                            <h4>Native Token</h4>
-                            <span class="token-section-subtitle">Chain's native currency</span>
-                        </div>
-                        <div class="token-list" id="${type}NativeTokenList">
-                            <div class="token-list-loading">
-                                <div class="spinner"></div>
-                                <div>Loading...</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="token-section">
-                        <div class="token-section-header">
                             <h4>Tokens in Wallet</h4>
                             <span class="token-section-subtitle">Your available tokens</span>
                         </div>
@@ -644,8 +596,10 @@ export class CreateOrder extends BaseComponent {
         // Clear previous results
         contractResult.innerHTML = '';
         
-        // If input looks like an address
-        if (ethers.utils.isAddress(searchTerm)) {
+        // If input looks like an address and is not native token
+        if (ethers.utils.isAddress(searchTerm) && 
+            searchTerm.toLowerCase() !== '0x0000000000000000000000000000000000001010' &&
+            searchTerm.toLowerCase() !== '0x0000000000000000000000000000000000000000') {
             // Show loading state first
             contractResult.innerHTML = `
                 <div class="contract-address-result">
@@ -734,12 +688,14 @@ export class CreateOrder extends BaseComponent {
             }
         }
 
-        // Filter and display wallet tokens
+        // Filter and display wallet tokens (excluding native token)
         const searchTermLower = searchTerm.toLowerCase().trim();
         const filteredWalletTokens = this.walletTokens.filter(token => 
-            token.symbol.toLowerCase().includes(searchTermLower) ||
-            token.name.toLowerCase().includes(searchTermLower) ||
-            token.address.toLowerCase().includes(searchTermLower)
+            token.address.toLowerCase() !== '0x0000000000000000000000000000000000001010' &&
+            token.address.toLowerCase() !== '0x0000000000000000000000000000000000000000' &&
+            (token.symbol.toLowerCase().includes(searchTermLower) ||
+             token.name.toLowerCase().includes(searchTermLower) ||
+             token.address.toLowerCase().includes(searchTermLower))
         );
 
         // Display wallet tokens
