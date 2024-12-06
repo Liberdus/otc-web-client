@@ -5,10 +5,10 @@ const networkConfig = {
     "80002": {
         name: "Amoy",
         displayName: "Amoy Testnet",
-        contractAddress: "0x9d8776a98ad4642004EBC1bA55Dbe286456Bf76c",
+        contractAddress: "0x3D97a9F520563CCed7AF0675EEBFE91F87973956",
         // Previous addresses for reference:
-        // 0x875341AdFF14bEc821df41B5a2D9a967D8F881Df
-        // 0x5a11d676d5Df246CB7A661DAB7e06f01965b29Bd
+        // 0x9d8776a98ad4642004EBC1bA55Dbe286456Bf76c w/ fee token and 7 days expiration
+        // 0x3D97a9F520563CCed7AF0675EEBFE91F87973956 w/ fee token and 7 minutes expiration
         
         contractABI: CONTRACT_ABI,
         explorer: "https://amoy.polygonscan.com",
