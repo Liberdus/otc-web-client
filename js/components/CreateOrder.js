@@ -310,8 +310,14 @@ export class CreateOrder extends BaseComponent {
             const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDecimals);
 
             // Check and approve tokens
-            await this.checkAndApproveToken(feeToken, feeAmount);
-            await this.checkAndApproveToken(sellToken, sellAmountWei);
+            if (sellToken.toLowerCase() === this.feeToken.address.toLowerCase()) {
+                // If tokens are the same, make single approval with combined amount
+                await this.checkAndApproveToken(sellToken, sellAmountWei);
+            } else {
+                // If tokens are different, approve separately
+                await this.checkAndApproveToken(this.feeToken.address, this.feeToken.amount);
+                await this.checkAndApproveToken(sellToken, sellAmountWei);
+            }
 
             // Create order
             this.showStatus('Creating order...', 'pending');
@@ -941,6 +947,25 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Checking allowance for token: ${tokenAddress}`);
             
+            // Get sell token and amount for comparison
+            const sellToken = document.getElementById('sellToken')?.value;
+            const sellAmountStr = document.getElementById('sellAmount')?.value;
+            
+            // Calculate required amount
+            let requiredAmount = amount;
+            
+            // If this token is both fee token and sell token, combine amounts
+            if (tokenAddress.toLowerCase() === this.feeToken?.address?.toLowerCase() &&
+                sellToken?.toLowerCase() === tokenAddress.toLowerCase()) {
+                
+                const sellTokenDecimals = await this.getTokenDecimals(sellToken);
+                const sellAmountWei = ethers.utils.parseUnits(sellAmountStr || '0', sellTokenDecimals);
+                
+                // Always combine amounts when tokens are the same
+                requiredAmount = this.feeToken.amount.add(sellAmountWei);
+                this.debug(`Token is both fee and sell token. Combined amount for approval: ${requiredAmount}`);
+            }
+
             // Create token contract instance
             const tokenContract = new ethers.Contract(
                 tokenAddress,
@@ -958,14 +983,11 @@ export class CreateOrder extends BaseComponent {
             );
 
             // If allowance is insufficient, request approval
-            if (currentAllowance.lt(amount)) {
-                this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${amount}`);
+            if (currentAllowance.lt(requiredAmount)) {
+                this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${requiredAmount}`);
                 this.showStatus('Requesting token approval...', 'pending');
                 
-                // Use exact amount for better transparency
-                this.debug(`Requesting approval for exact amount: ${amount}`);
-                
-                const approveTx = await tokenContract.approve(this.contract.address, amount);
+                const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
                 
                 this.showStatus('Waiting for approval confirmation...', 'pending');
                 await approveTx.wait();
