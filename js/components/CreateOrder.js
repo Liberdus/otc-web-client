@@ -71,11 +71,11 @@ export class CreateOrder extends BaseComponent {
             if (sellContainer) sellContainer.innerHTML = '';
             if (buyContainer) buyContainer.innerHTML = '';
 
+            // Initialize contract and load fees
+            await this.initializeContract();
+            
             // Enable form when wallet is connected
             this.setConnectedMode();
-            
-            // Initialize contract and load fee
-            await this.initializeContract();
             
             // Setup UI immediately
             this.populateTokenDropdowns();
@@ -101,33 +101,52 @@ export class CreateOrder extends BaseComponent {
     async loadOrderCreationFee() {
         try {
             this.debug('Loading order creation fee...');
-            if (!this.contract) {
-                throw new Error('Contract not initialized');
-            }
-            const fee = await this.contract.orderCreationFee();
-            const averageGas = await this.contract.averageGasUsed();
-            const feeInEth = ethers.utils.formatEther(fee);
             
-            // Format the fee to be more readable
-            const formattedFee = parseFloat(feeInEth).toFixed(6); // Show 6 decimal places
-            const formattedGas = averageGas.toNumber().toLocaleString(); // Add thousands separator
+            // Get fee token address first
+            const feeTokenAddress = await this.contract.feeToken();
+            this.debug('Fee token address:', feeTokenAddress);
             
-            const orderCreationFee = document.getElementById('orderCreationFee');
-            if (orderCreationFee) {
-                orderCreationFee.innerHTML = `
-                    <div class="fee-details">
-                        <div class="fee-amount">${formattedFee} POL</div>
-                        <div class="fee-gas">Average Gas: ${formattedGas}</div>
-                    </div>`;
-                orderCreationFee.classList.remove('placeholder-text');
+            // Get fee amount - using correct function name
+            const feeAmount = await this.contract.orderCreationFeeAmount();
+            this.debug('Fee amount:', feeAmount);
+
+            // Get token details
+            const tokenDetails = await this.getTokenDetails([feeTokenAddress]);
+            const feeToken = tokenDetails[0];
+            
+            if (!feeToken) {
+                throw new Error("Failed to load fee token details");
             }
-            this.debug('Fee loaded:', feeInEth, 'Average Gas:', averageGas);
+
+            // Store fee details
+            this.feeToken = {
+                address: feeTokenAddress,
+                symbol: feeToken.symbol,
+                decimals: feeToken.decimals,
+                amount: feeAmount
+            };
+
+            // Create fee element if it doesn't exist
+            let feeElement = document.getElementById('orderFee');
+            if (!feeElement) {
+                const feeContainer = document.getElementById('orderCreationFee');
+                if (feeContainer) {
+                    feeElement = document.createElement('span');
+                    feeElement.id = 'orderFee';
+                    feeContainer.appendChild(feeElement);
+                }
+            }
+            
+            if (feeElement) {
+                const formattedFee = ethers.utils.formatUnits(feeAmount, feeToken.decimals);
+                feeElement.textContent = `${formattedFee} ${feeToken.symbol}`;
+            } else {
+                this.debug('Warning: orderFee element not found in DOM');
+            }
+
         } catch (error) {
-            console.error('[CreateOrder] Error loading fee:', error);
-            const orderCreationFee = document.getElementById('orderCreationFee');
-            if (orderCreationFee) {
-                orderCreationFee.textContent = 'Error loading fee';
-            }
+            this.debug('Error loading fee:', error);
+            throw error;
         }
     }
 
@@ -135,10 +154,10 @@ export class CreateOrder extends BaseComponent {
         const createOrderBtn = document.getElementById('createOrderBtn');
         const orderCreationFee = document.getElementById('orderCreationFee');
         
-        createOrderBtn.disabled = true;
-        createOrderBtn.textContent = 'Connect Wallet to Create Order';
-        orderCreationFee.textContent = 'Connect wallet to view fee';
-        orderCreationFee.classList.add('placeholder-text');
+        if (createOrderBtn) {
+            createOrderBtn.disabled = true;
+            createOrderBtn.textContent = 'Connect Wallet to Create Order';
+        }
         
         // Disable input fields
         ['partner', 'sellToken', 'sellAmount', 'buyToken', 'buyAmount'].forEach(id => {
@@ -151,15 +170,25 @@ export class CreateOrder extends BaseComponent {
         const createOrderBtn = document.getElementById('createOrderBtn');
         const orderCreationFee = document.getElementById('orderCreationFee');
         
-        createOrderBtn.disabled = false;
-        createOrderBtn.textContent = 'Create Order';
-        orderCreationFee.classList.remove('placeholder-text');
+        if (createOrderBtn) {
+            createOrderBtn.disabled = false;
+            createOrderBtn.textContent = 'Create Order';
+        }
         
         // Enable input fields
         ['partner', 'sellToken', 'sellAmount', 'buyToken', 'buyAmount'].forEach(id => {
             const element = document.getElementById(id);
             if (element) element.disabled = false;
         });
+
+        // Reload fee if we have it cached
+        if (this.feeToken) {
+            const feeElement = document.getElementById('orderFee');
+            if (feeElement) {
+                const formattedFee = ethers.utils.formatUnits(this.feeToken.amount, this.feeToken.decimals);
+                feeElement.textContent = `${formattedFee} ${this.feeToken.symbol}`;
+            }
+        }
     }
 
     async updateTokenBalance(tokenAddress, elementId) {
@@ -243,211 +272,73 @@ export class CreateOrder extends BaseComponent {
     async handleCreateOrder(event) {
         event.preventDefault();
         
+        const createOrderBtn = document.getElementById('createOrderBtn');
         if (this.isSubmitting) {
-            this.debug('Order submission already in progress');
+            this.debug('Already processing a transaction');
             return;
         }
-
-        const createOrderBtn = document.getElementById('createOrderBtn');
+        
         try {
             this.isSubmitting = true;
             createOrderBtn.disabled = true;
-            createOrderBtn.textContent = 'Processing...';
+            createOrderBtn.classList.add('disabled');
+            this.showStatus('Processing...', 'pending');
             
-            if (!this.provider || !this.contract) {
-                throw new Error('Contract or provider not initialized');
-            }
-
             // Get form values
-            const takerAddress = document.getElementById('takerAddress')?.value.trim() || '';
+            let taker = document.getElementById('takerAddress')?.value.trim() || '';
             const sellToken = document.getElementById('sellToken').value;
             const sellAmount = document.getElementById('sellAmount').value.trim();
             const buyToken = document.getElementById('buyToken').value;
             const buyAmount = document.getElementById('buyAmount').value.trim();
-
-            // Validation
-            if (!sellToken || !ethers.utils.isAddress(sellToken)) {
-                throw new Error('Please select a token to sell');
-            }
-            if (!buyToken || !ethers.utils.isAddress(buyToken)) {
-                throw new Error('Please select a token to buy');
-            }
-            if (!sellAmount || isNaN(sellAmount) || parseFloat(sellAmount) <= 0) {
-                throw new Error('Please enter a valid sell amount');
-            }
-            if (!buyAmount || isNaN(buyAmount) || parseFloat(buyAmount) <= 0) {
-                throw new Error('Please enter a valid buy amount');
-            }
-            if (takerAddress && !ethers.utils.isAddress(takerAddress)) {
-                throw new Error('Invalid taker address');
-            }
-            if (sellToken.toLowerCase() === buyToken.toLowerCase()) {
-                throw new Error('Cannot swap the same token');
+            
+            // If taker is empty, use zero address for public order
+            if (!taker) {
+                taker = ethers.constants.AddressZero;
+                this.debug('No taker specified, using zero address for public order');
+            } else if (!ethers.utils.isAddress(taker)) {
+                throw new Error('Invalid taker address format');
             }
 
-            // Verify token selection was made through the UI
-            const sellSelector = document.querySelector('#sellTokenSelector .token-selector-content span');
-            const buySelector = document.querySelector('#buyTokenSelector .token-selector-content span');
-            if (sellSelector.textContent === 'Select token') {
-                throw new Error('Please select a token to sell');
-            }
-            if (buySelector.textContent === 'Select token') {
-                throw new Error('Please select a token to buy');
-            }
+            // Get fee details - using orderCreationFeeAmount instead of orderCreationFee
+            const feeAmount = await this.contract.orderCreationFeeAmount();
+            const feeToken = await this.contract.feeToken();
+            
+            // Convert amounts to wei
+            const sellTokenDecimals = await this.getTokenDecimals(sellToken);
+            const buyTokenDecimals = await this.getTokenDecimals(buyToken);
+            const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellTokenDecimals);
+            const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyTokenDecimals);
 
-            // Get token contracts
-            const sellTokenContract = new ethers.Contract(
+            // Check and approve tokens
+            await this.checkAndApproveToken(feeToken, feeAmount);
+            await this.checkAndApproveToken(sellToken, sellAmountWei);
+
+            // Create order
+            this.showStatus('Creating order...', 'pending');
+            const tx = await this.contract.createOrder(
+                taker,
                 sellToken,
-                [
-                    'function decimals() view returns (uint8)',
-                    'function balanceOf(address) view returns (uint256)',
-                    'function allowance(address,address) view returns (uint256)',
-                    'function approve(address,uint256) returns (bool)'
-                ],
-                this.provider
-            );
-            const buyTokenContract = new ethers.Contract(
+                sellAmountWei,
                 buyToken,
-                ['function decimals() view returns (uint8)'],
-                this.provider
+                buyAmountWei
             );
+
+            this.showStatus('Transaction submitted...', 'pending');
+            const receipt = await tx.wait();
             
-            // Get decimals in parallel
-            const [sellDecimals, buyDecimals] = await Promise.all([
-                sellTokenContract.decimals(),
-                buyTokenContract.decimals()
-            ]);
+            this.showStatus('Order created successfully!', 'success');
+            this.debug('Transaction receipt:', receipt);
 
-            // Convert amounts to Wei
-            const sellAmountWei = ethers.utils.parseUnits(sellAmount, sellDecimals);
-            const buyAmountWei = ethers.utils.parseUnits(buyAmount, buyDecimals);
-
-            // Check balance
-            const signer = await this.provider.getSigner();
-            const signerAddress = await signer.getAddress();
-            const balance = await sellTokenContract.balanceOf(signerAddress);
-            
-            if (balance.lt(sellAmountWei)) {
-                throw new Error(
-                    `Insufficient balance. You have ${ethers.utils.formatUnits(balance, sellDecimals)} tokens, ` +
-                    `but the order requires ${sellAmount}`
-                );
-            }
-
-            // Check and handle token approval
-            const allowance = await sellTokenContract.allowance(signerAddress, this.contract.address);
-            if (allowance.lt(sellAmountWei)) {
-                this.showSuccess('Requesting token approval...');
-                
-                try {
-                    const approveTx = await sellTokenContract.connect(signer).approve(
-                        this.contract.address,
-                        sellAmountWei,
-                        { 
-                            gasLimit: 70000  // Standard gas limit for ERC20 approvals
-                        }
-                    );
-                    
-                    this.debug('Approval transaction sent:', approveTx.hash);
-                    await approveTx.wait();
-                    this.showSuccess('Token approval granted');
-                } catch (error) {
-                    if (error.code === 4001) {
-                        throw new Error('Token approval rejected by user');
-                    }
-                    throw new Error(`Token approval failed: ${this.getReadableError(error)}`);
-                }
-            }
-
-            // Get order creation fee and calculate min/max acceptable fees
-            const fee = await this.contract.orderCreationFee();
-            const minFee = fee.mul(90).div(100);  // 90% of expected fee
-            const maxFee = fee.mul(150).div(100); // 150% of expected fee
-            
-            this.debug('Fee calculations:', {
-                baseFee: ethers.utils.formatEther(fee),
-                minFee: ethers.utils.formatEther(minFee),
-                maxFee: ethers.utils.formatEther(maxFee)
-            });
-
-            // Get current gas price
-            const gasPrice = await this.provider.getGasPrice();
-            
-            // Estimate gas for order creation
-            let gasLimit;
-            try {
-                // First try with static call to check if transaction would fail
-                await this.contract.callStatic.createOrder(
-                    takerAddress || ethers.constants.AddressZero,
-                    sellToken,
-                    sellAmountWei,
-                    buyToken,
-                    buyAmountWei,
-                    { value: fee }
-                );
-
-                const gasEstimate = await this.contract.estimateGas.createOrder(
-                    takerAddress || ethers.constants.AddressZero,
-                    sellToken,
-                    sellAmountWei,
-                    buyToken,
-                    buyAmountWei,
-                    { value: fee }
-                );
-                
-                // Add 20% buffer to estimated gas
-                gasLimit = gasEstimate.mul(120).div(100);
-                this.debug('Gas estimate with buffer:', gasLimit.toString());
-            } catch (error) {
-                this.debug('Gas estimation failed:', error);
-                gasLimit = ethers.BigNumber.from(300000); // Conservative fallback
-                this.debug('Using fallback gas limit:', gasLimit.toString());
-            }
-
-            // Create order with retry mechanism
-            const maxRetries = 3;
-            let attempt = 0;
-            let lastError;
-
-            while (attempt < maxRetries) {
-                try {
-                    const tx = await this.contract.createOrder(
-                        takerAddress || ethers.constants.AddressZero,
-                        sellToken,
-                        sellAmountWei,
-                        buyToken,
-                        buyAmountWei,
-                        {
-                            value: fee,
-                            gasLimit,
-                            gasPrice
-                        }
-                    );
-
-                    this.debug('Transaction sent:', tx.hash);
-                    await tx.wait();
-                    this.showSuccess('Order created successfully!');
-                    this.resetForm();
-                    return;
-                } catch (error) {
-                    lastError = error;
-                    attempt++;
-                    if (attempt < maxRetries) {
-                        this.debug(`Attempt ${attempt} failed, retrying...`, error);
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
-            }
-
-            throw new Error(`Failed after ${maxRetries} attempts: ${this.getReadableError(lastError)}`);
+            // Clear all inputs including taker address
+            this.resetForm();
 
         } catch (error) {
             this.debug('Create order error:', error);
-            this.showError(error.message || 'Failed to create order');
+            this.showStatus(error.message || 'Failed to create order', 'error');
         } finally {
             this.isSubmitting = false;
             createOrderBtn.disabled = false;
-            createOrderBtn.textContent = 'Create Order';
+            createOrderBtn.classList.remove('disabled');
         }
     }
 
@@ -483,36 +374,23 @@ export class CreateOrder extends BaseComponent {
     }
 
     resetForm() {
-        // Reset token selectors
-        ['sell', 'buy'].forEach(type => {
-            const selector = document.getElementById(`${type}TokenSelector`);
-            if (selector) {
-                selector.innerHTML = `
-                    <span class="token-selector-content">
-                        <span>Select token</span>
-                        <svg width="12" height="12" viewBox="0 0 12 12">
-                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        </svg>
-                    </span>
-                `;
-            }
-            
-            // Reset amount inputs
-            const amountInput = document.getElementById(`${type}Amount`);
-            if (amountInput) amountInput.value = '';
-            
-            // Reset hidden token inputs
-            const tokenInput = document.getElementById(`${type}Token`);
-            if (tokenInput) tokenInput.value = '';
-            
-            // Reset balance displays
-            const balanceDisplay = document.getElementById(`${type}TokenBalance`);
-            if (balanceDisplay) balanceDisplay.textContent = '';
-        });
+        // Clear token inputs
+        document.getElementById('sellToken').value = '';
+        document.getElementById('sellAmount').value = '';
+        document.getElementById('buyToken').value = '';
+        document.getElementById('buyAmount').value = '';
         
-        // Reset partner address if it exists
-        const partnerInput = document.getElementById('partner');
-        if (partnerInput) partnerInput.value = '';
+        // Clear taker address input
+        const takerInput = document.getElementById('takerAddress');
+        if (takerInput) {
+            takerInput.value = '';
+        }
+        
+        // Clear token balances
+        const sellTokenBalance = document.getElementById('sellTokenBalance');
+        const buyTokenBalance = document.getElementById('buyTokenBalance');
+        if (sellTokenBalance) sellTokenBalance.textContent = '';
+        if (buyTokenBalance) buyTokenBalance.textContent = '';
     }
 
     async loadTokens() {
@@ -1001,6 +879,108 @@ export class CreateOrder extends BaseComponent {
         // Reset state
         this.initialized = false;
         this.isSubmitting = false;
+    }
+
+    // Add this method to the CreateOrder class
+    showStatus(message, type = 'info') {
+        const statusElement = document.getElementById('status');
+        if (statusElement) {
+            statusElement.textContent = message;
+            statusElement.className = `status ${type}`;
+        }
+        this.debug(`Status update (${type}): ${message}`);
+    }
+
+    // Also add a helper method for showing errors
+    showError(message) {
+        this.showStatus(message, 'error');
+    }
+
+    // And a helper for showing success messages
+    showSuccess(message) {
+        this.showStatus(message, 'success');
+    }
+
+    async getTokenDecimals(tokenAddress) {
+        try {
+            // Check if token is in cache
+            const normalizedAddress = tokenAddress.toLowerCase();
+            const cachedToken = this.tokenCache.get(normalizedAddress);
+            
+            if (cachedToken?.decimals) {
+                this.debug(`Cache hit for decimals: ${tokenAddress}`);
+                return cachedToken.decimals;
+            }
+
+            // If not in cache, fetch from contract
+            const tokenContract = new ethers.Contract(
+                tokenAddress,
+                ['function decimals() view returns (uint8)'],
+                this.provider
+            );
+            
+            const decimals = await tokenContract.decimals();
+            this.debug(`Fetched decimals for token ${tokenAddress}: ${decimals}`);
+            
+            // Update cache
+            if (cachedToken) {
+                cachedToken.decimals = decimals;
+                this.tokenCache.set(normalizedAddress, cachedToken);
+            } else {
+                this.tokenCache.set(normalizedAddress, { decimals });
+            }
+            
+            return decimals;
+        } catch (error) {
+            this.debug(`Error getting token decimals: ${error.message}`);
+            throw new Error(`Failed to get decimals for token ${tokenAddress}`);
+        }
+    }
+
+    async checkAndApproveToken(tokenAddress, amount) {
+        try {
+            this.debug(`Checking allowance for token: ${tokenAddress}`);
+            
+            // Create token contract instance
+            const tokenContract = new ethers.Contract(
+                tokenAddress,
+                [
+                    'function allowance(address owner, address spender) view returns (uint256)',
+                    'function approve(address spender, uint256 amount) returns (bool)'
+                ],
+                this.provider.getSigner()
+            );
+
+            // Get current allowance
+            const currentAllowance = await tokenContract.allowance(
+                await this.provider.getSigner().getAddress(),
+                this.contract.address
+            );
+
+            // If allowance is insufficient, request approval
+            if (currentAllowance.lt(amount)) {
+                this.debug(`Insufficient allowance for token ${tokenAddress}. Current: ${currentAllowance}, Required: ${amount}`);
+                this.showStatus('Requesting token approval...', 'pending');
+                
+                // Use exact amount for better transparency
+                this.debug(`Requesting approval for exact amount: ${amount}`);
+                
+                const approveTx = await tokenContract.approve(this.contract.address, amount);
+                
+                this.showStatus('Waiting for approval confirmation...', 'pending');
+                await approveTx.wait();
+                
+                this.debug(`Token ${tokenAddress} approved successfully`);
+                this.showStatus('Token approved successfully', 'success');
+            } else {
+                this.debug(`Token ${tokenAddress} already has sufficient allowance`);
+            }
+
+            return true;
+        } catch (error) {
+            this.debug('Token approval error:', error);
+            throw new Error(`Failed to approve token: ${error.message}`);
+        }
     }
 }
 

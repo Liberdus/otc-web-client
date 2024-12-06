@@ -1,200 +1,250 @@
 /* Base styles */
 body {
-    background-color: #f7f8fa;
-    color: #1a1a1a;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-        "Helvetica Neue", Arial, sans-serif;
-    margin: 0;
+  background-color: #f7f8fa;
+  color: #1a1a1a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
 }
 
 .container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
 }
 
 /* Header styles */
 .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem 2rem;
-    background-color: #f8f9fa;
-    border-bottom: 1px solid #e9ecef;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
 }
 
 .header-left .logo-container {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .logo-image {
-    height: 32px;
-    width: auto;
-    object-fit: contain;
+  height: 32px;
+  width: auto;
+  object-fit: contain;
 }
 
 .header-left h1 {
-    margin: 0;
-    font-size: 32px;
-    color: #1a1a1a;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-weight: 600;
-    letter-spacing: -0.5px;
-    line-height: 32px;
+  margin: 0;
+  font-size: 32px;
+  color: #1a1a1a;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  line-height: 32px;
 }
 
 .header-right {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
 .network-badge {
-    padding: 4px 8px;
-    border-radius: 12px;
-    font-size: 12px;
-    margin-right: 8px;
-    background-color: #666;
-    color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-right: 8px;
+  background-color: #666;
+  color: white;
 }
 
 .network-badge.connected {
-    background-color: #4CAF50;
+  background-color: #4caf50;
 }
 
 .network-badge.wrong-network {
-    background-color: #f44336;
+  background-color: #f44336;
 }
 
 .hidden {
-    display: none !important;
+  display: none !important;
 }
 
 .main-content {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
 }
 
 .content-wrapper {
-    background: white;
-    border-radius: 16px;
-    box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.05);
-    margin-top: 20px;
-    overflow: hidden;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.05);
+  margin-top: 20px;
+  overflow: hidden;
 }
 
 .tab-content-wrapper {
-    padding: 20px;
-    text-align: center;
+  padding: 20px;
+  text-align: center;
 }
 
 .tab-content-wrapper h2 {
-    margin-bottom: 16px;
-    color: #333;
+  margin-bottom: 16px;
+  color: #333;
 }
 
 .tab-content-wrapper p {
-    color: #666;
+  color: #666;
 }
 
 .network-config-button {
-    margin-left: 10px;
-    padding: 5px 10px;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
+  margin-left: 10px;
+  padding: 5px 10px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
 .network-config-button:hover {
-    background-color: #0056b3;
+  background-color: #0056b3;
 }
 
 .network-config-popup {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
 }
 
 .popup-content {
-    background: white;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    width: 600px;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 600px;
 }
 
 h2 {
-    margin-bottom: 20px;
-    text-align: center;
+  margin-bottom: 20px;
+  text-align: center;
 }
 
 .config-item {
-    margin-bottom: 15px;
+  margin-bottom: 15px;
 }
 
 label {
-    font-weight: bold;
-    display: block;
-    margin-bottom: 5px;
+  font-weight: bold;
+  display: block;
+  margin-bottom: 5px;
 }
 
 .config-input {
-    width: 100%;
-    padding: 10px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 14px;
-    background-color: #f9f9f9;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: #f9f9f9;
 }
 
 .config-input:focus {
-    border-color: #007bff;
-    outline: none;
+  border-color: #007bff;
+  outline: none;
 }
 
 .close-popup {
-    align-self: center;
-    margin-top: auto;
-    padding: 10px 20px;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background-color 0.3s;
+  align-self: center;
+  margin-top: auto;
+  padding: 10px 20px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
 }
 
 .close-popup:hover {
-    background-color: #0056b3;
+  background-color: #0056b3;
 }
 
 /* Example of browser-specific fixes */
 * {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Firefox-specific styles */
 @-moz-document url-prefix() {
-    /* Add Firefox-specific rules here */
+  /* Add Firefox-specific rules here */
 }
 
 /* Add Inter font */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
+
+/* Status message styles */
+.status {
+  margin: 1rem auto;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  max-width: 600px;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.status.info {
+  background-color: #e3f2fd;
+  color: #1976d2;
+  border: 1px solid #bbdefb;
+}
+
+.status.error {
+  background-color: #ffebee;
+  color: #d32f2f;
+  border: 1px solid #ffcdd2;
+}
+
+.status.success {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #c8e6c9;
+}
+
+.status.pending {
+  background-color: #fff3e0;
+  color: #f57c00;
+  border: 1px solid #ffe0b2;
+  animation: pulse 2s infinite;
+}
+
+/* Pulse animation for pending status */
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}

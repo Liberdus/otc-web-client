@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="css/components/tabs.css" />
     <link rel="stylesheet" href="css/components/wallet.css" />
     <link rel="stylesheet" href="css/components/cleanup.css" />
+    <link rel="stylesheet" href="css/components/contract-params.css" />
     <!-- Script -->
     <script type="importmap">
       {
@@ -143,6 +144,9 @@
             <button class="tab-button" data-tab="cleanup-orders">
               Cleanup
             </button>
+            <button class="tab-button" data-tab="contract-params">
+              Contract Parameters
+            </button>
           </nav>
 
           <div id="create-order" class="tab-content active">
@@ -221,9 +225,9 @@
                       </span>
                     </span>
                   </label>
-                  <span id="orderCreationFee" class="placeholder-text"
-                    >Connect wallet to view fee</span
-                  >
+                  <div id="orderCreationFee">
+                    <span id="orderFee"></span>
+                  </div>
                 </div>
                 <button class="action-button" id="createOrderBtn" disabled>
                   Connect Wallet to Create Order
@@ -238,6 +242,11 @@
           <div id="cleanup-orders" class="tab-content">
             <div id="cleanup-container" class="cleanup-container">
               <!-- Cleanup component will populate this -->
+            </div>
+          </div>
+          <div id="contract-params" class="tab-content">
+            <div id="contract-params-container" class="contract-params-container">
+              <!-- Content will be populated by ContractParams component -->
             </div>
           </div>
         </div>

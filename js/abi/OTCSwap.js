@@ -1,6 +1,17 @@
 export const abi = [
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_feeToken",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_feeAmount",
+        "type": "uint256"
+      }
+    ],
     "stateMutability": "nonpayable",
     "type": "constructor"
   },
@@ -77,6 +88,12 @@ export const abi = [
         "type": "address"
       },
       {
+        "indexed": true,
+        "internalType": "address",
+        "name": "feeToken",
+        "type": "address"
+      },
+      {
         "indexed": false,
         "internalType": "uint256",
         "name": "amount",
@@ -109,6 +126,31 @@ export const abi = [
       }
     ],
     "name": "ContractDisabled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "feeToken",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "feeAmount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "FeeConfigUpdated",
     "type": "event"
   },
   {
@@ -211,6 +253,12 @@ export const abi = [
         "internalType": "uint256",
         "name": "timestamp",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "feeToken",
+        "type": "address"
       },
       {
         "indexed": false,
@@ -387,37 +435,6 @@ export const abi = [
       },
       {
         "indexed": false,
-        "internalType": "bool",
-        "name": "tryCatchEntered",
-        "type": "bool"
-      },
-      {
-        "indexed": false,
-        "internalType": "bool",
-        "name": "transferSuccess",
-        "type": "bool"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "details",
-        "type": "string"
-      }
-    ],
-    "name": "TransferDebug",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "orderId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
         "internalType": "string",
         "name": "tokenType",
         "type": "string"
@@ -440,19 +457,6 @@ export const abi = [
   },
   {
     "inputs": [],
-    "name": "FEE_DAMPENING_FACTOR",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "GRACE_PERIOD",
     "outputs": [
       {
@@ -466,46 +470,7 @@ export const abi = [
   },
   {
     "inputs": [],
-    "name": "MAX_CLEANUP_BATCH",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "MAX_FEE_PERCENTAGE",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "MAX_RETRY_ATTEMPTS",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "MIN_FEE_PERCENTAGE",
     "outputs": [
       {
         "internalType": "uint256",
@@ -566,19 +531,6 @@ export const abi = [
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "averageGasUsed",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -634,7 +586,7 @@ export const abi = [
         "type": "uint256"
       }
     ],
-    "stateMutability": "payable",
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -696,6 +648,19 @@ export const abi = [
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "feeToken",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -749,7 +714,7 @@ export const abi = [
   },
   {
     "inputs": [],
-    "name": "orderCreationFee",
+    "name": "orderCreationFeeAmount",
     "outputs": [
       {
         "internalType": "uint256",
@@ -811,6 +776,11 @@ export const abi = [
         "type": "uint8"
       },
       {
+        "internalType": "address",
+        "name": "feeToken",
+        "type": "address"
+      },
+      {
         "internalType": "uint256",
         "name": "orderCreationFee",
         "type": "uint256"
@@ -858,7 +828,21 @@ export const abi = [
     "type": "function"
   },
   {
-    "stateMutability": "payable",
-    "type": "receive"
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_feeToken",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_feeAmount",
+        "type": "uint256"
+      }
+    ],
+    "name": "updateFeeConfig",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
   }
 ]; 
