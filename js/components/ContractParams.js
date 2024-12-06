@@ -59,6 +59,14 @@ export class ContractParams extends BaseComponent {
                 contract.MAX_RETRY_ATTEMPTS()
             ]);
 
+            // Get token symbol
+            const tokenContract = new ethers.Contract(
+                feeToken,
+                ['function symbol() view returns (string)'],
+                contract.provider
+            );
+            const tokenSymbol = await tokenContract.symbol();
+
             // Update UI
             const paramsContainer = this.container.querySelector('.params-container');
             paramsContainer.innerHTML = `
@@ -67,7 +75,7 @@ export class ContractParams extends BaseComponent {
                         <h3>Contract State</h3>
                         <div class="param-item">
                             <h4>Order Creation Fee</h4>
-                            <p>${this.formatEther(orderCreationFee)} ETH</p>
+                            <p>${this.formatEther(orderCreationFee)} ${tokenSymbol}</p>
                         </div>
                         <div class="param-item">
                             <h4>Fee Token</h4>
@@ -75,7 +83,7 @@ export class ContractParams extends BaseComponent {
                         </div>
                         <div class="param-item">
                             <h4>Accumulated Fees</h4>
-                            <p>${this.formatEther(accumulatedFees)} ETH</p>
+                            <p>${this.formatEther(accumulatedFees)} ${tokenSymbol}</p>
                         </div>
                         <div class="param-item">
                             <h4>Contract Status</h4>
