@@ -7,6 +7,7 @@ import { ViewOrders } from './components/ViewOrders.js';
 import { MyOrders } from './components/MyOrders.js';
 import { TakerOrders } from './components/TakerOrders.js';
 import { Cleanup } from './components/Cleanup.js';
+import { ContractParams } from './components/ContractParams.js';
 
 console.log('App.js loaded');
 
@@ -33,7 +34,8 @@ class App {
             'view-orders': new ViewOrders(),
             'my-orders': new MyOrders(),
             'taker-orders': new TakerOrders(),
-            'cleanup-orders': new Cleanup()
+            'cleanup-orders': new Cleanup(),
+            'contract-params': new ContractParams()
         };
 
         // Render wallet UI immediately

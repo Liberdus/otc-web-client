@@ -5,7 +5,7 @@ const networkConfig = {
     "80002": {
         name: "Amoy",
         displayName: "Amoy Testnet",
-        contractAddress: "0x3085cd92888e9d49879947cbc3abd5d11f842271",
+        contractAddress: "0x9d8776a98ad4642004EBC1bA55Dbe286456Bf76c",
         // Previous addresses for reference:
         // 0x875341AdFF14bEc821df41B5a2D9a967D8F881Df
         // 0x5a11d676d5Df246CB7A661DAB7e06f01965b29Bd
