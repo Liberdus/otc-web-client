@@ -279,17 +279,35 @@ export class CreateOrder extends BaseComponent {
         }
         
         try {
+            // Get form values first
+            let taker = document.getElementById('takerAddress')?.value.trim() || '';
+            const sellToken = document.getElementById('sellToken').value.trim();
+            const sellAmount = document.getElementById('sellAmount').value.trim();
+            const buyToken = document.getElementById('buyToken').value.trim();
+            const buyAmount = document.getElementById('buyAmount').value.trim();
+            
+            // Validate inputs
+            if (!sellToken || !ethers.utils.isAddress(sellToken)) {
+                this.showStatus('Please select a valid token to sell', 'error');
+                return;
+            }
+            if (!buyToken || !ethers.utils.isAddress(buyToken)) {
+                this.showStatus('Please select a valid token to buy', 'error');
+                return;
+            }
+            if (!sellAmount || isNaN(sellAmount) || parseFloat(sellAmount) <= 0) {
+                this.showStatus('Please enter a valid sell amount', 'error');
+                return;
+            }
+            if (!buyAmount || isNaN(buyAmount) || parseFloat(buyAmount) <= 0) {
+                this.showStatus('Please enter a valid buy amount', 'error');
+                return;
+            }
+
             this.isSubmitting = true;
             createOrderBtn.disabled = true;
             createOrderBtn.classList.add('disabled');
             this.showStatus('Processing...', 'pending');
-            
-            // Get form values
-            let taker = document.getElementById('takerAddress')?.value.trim() || '';
-            const sellToken = document.getElementById('sellToken').value;
-            const sellAmount = document.getElementById('sellAmount').value.trim();
-            const buyToken = document.getElementById('buyToken').value;
-            const buyAmount = document.getElementById('buyAmount').value.trim();
             
             // If taker is empty, use zero address for public order
             if (!taker) {
