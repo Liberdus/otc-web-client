@@ -1,199 +1,464 @@
 // SPDX-License-Identifier: MIT
-// OpenZeppelin Contracts (last updated v5.1.0) (token/ERC20/utils/SafeERC20.sol)
-
 pragma solidity ^0.8.20;
 
-import {IERC20} from "../IERC20.sol";
-import {IERC1363} from "../../../interfaces/IERC1363.sol";
-import {Address} from "../../../utils/Address.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-/**
- * @title SafeERC20
- * @dev Wrappers around ERC-20 operations that throw on failure (when the token
- * contract returns false). Tokens that return no value (and instead revert or
- * throw on failure) are also supported, non-reverting calls are assumed to be
- * successful.
- * To use this library you can add a `using SafeERC20 for IERC20;` statement to your contract,
- * which allows you to call the safe operations as `token.safeTransfer(...)`, etc.
- */
-library SafeERC20 {
-    /**
-     * @dev An operation with an ERC-20 token failed.
-     */
-    error SafeERC20FailedOperation(address token);
+contract OTCSwap is ReentrancyGuard, Ownable {
+    using SafeERC20 for IERC20;
 
-    /**
-     * @dev Indicates a failed `decreaseAllowance` request.
-     */
-    error SafeERC20FailedDecreaseAllowance(address spender, uint256 currentAllowance, uint256 requestedDecrease);
+    uint256 public constant ORDER_EXPIRY = 7 minutes;
+    uint256 public constant GRACE_PERIOD = 7 minutes;
+    uint256 public constant MAX_RETRY_ATTEMPTS = 10;
 
-    /**
-     * @dev Transfer `value` amount of `token` from the calling contract to `to`. If `token` returns no value,
-     * non-reverting calls are assumed to be successful.
-     */
-    function safeTransfer(IERC20 token, address to, uint256 value) internal {
-        _callOptionalReturn(token, abi.encodeCall(token.transfer, (to, value)));
+    address public feeToken;
+    uint256 public orderCreationFeeAmount;
+    uint256 public accumulatedFees;
+    uint256 public firstOrderId;
+    uint256 public nextOrderId;
+    bool public isDisabled;
+
+    enum OrderStatus {
+        Active,     // Order is active and can be filled
+        Filled,     // Order was filled
+        Canceled    // Order was canceled by maker
     }
 
-    /**
-     * @dev Transfer `value` amount of `token` from `from` to `to`, spending the approval given by `from` to the
-     * calling contract. If `token` returns no value, non-reverting calls are assumed to be successful.
-     */
-    function safeTransferFrom(IERC20 token, address from, address to, uint256 value) internal {
-        _callOptionalReturn(token, abi.encodeCall(token.transferFrom, (from, to, value)));
+    struct Order {
+        address maker;
+        address taker;  // address(0) if open to anyone
+        address sellToken;
+        uint256 sellAmount;
+        address buyToken;
+        uint256 buyAmount;
+        uint256 timestamp;
+        OrderStatus status;
+        address feeToken;
+        uint256 orderCreationFee;  // Fee paid when order was created
+        uint256 tries;             // Number of cleanup attempts
     }
 
-    /**
-     * @dev Increase the calling contract's allowance toward `spender` by `value`. If `token` returns no value,
-     * non-reverting calls are assumed to be successful.
-     *
-     * IMPORTANT: If the token implements ERC-7674 (ERC-20 with temporary allowance), and if the "client"
-     * smart contract uses ERC-7674 to set temporary allowances, then the "client" smart contract should avoid using
-     * this function. Performing a {safeIncreaseAllowance} or {safeDecreaseAllowance} operation on a token contract
-     * that has a non-zero temporary allowance (for that particular owner-spender) will result in unexpected behavior.
-     */
-    function safeIncreaseAllowance(IERC20 token, address spender, uint256 value) internal {
-        uint256 oldAllowance = token.allowance(address(this), spender);
-        forceApprove(token, spender, oldAllowance + value);
+    mapping(uint256 => Order) public orders;
+
+    event OrderCreated(
+        uint256 indexed orderId,
+        address indexed maker,
+        address indexed taker,
+        address sellToken,
+        uint256 sellAmount,
+        address buyToken,
+        uint256 buyAmount,
+        uint256 timestamp,
+        address feeToken,
+        uint256 orderCreationFee
+    );
+
+    event OrderFilled(
+        uint256 indexed orderId,
+        address indexed maker,
+        address indexed taker,
+        address sellToken,
+        uint256 sellAmount,
+        address buyToken,
+        uint256 buyAmount,
+        uint256 timestamp
+    );
+
+    event OrderCanceled(
+        uint256 indexed orderId,
+        address indexed maker,
+        uint256 timestamp
+    );
+
+    event OrderCleanedUp(
+        uint256 indexed orderId,
+        address indexed maker,
+        uint256 timestamp
+    );
+
+    event RetryOrder(
+        uint256 indexed oldOrderId,
+        uint256 indexed newOrderId,
+        address indexed maker,
+        uint256 tries,
+        uint256 timestamp
+    );
+
+    event CleanupFeesDistributed(
+        address indexed recipient,
+        address indexed feeToken,
+        uint256 amount,
+        uint256 timestamp
+    );
+
+    event CleanupError(
+        uint256 indexed orderId,
+        string reason,
+        uint256 timestamp
+    );
+
+    event ContractDisabled(
+        address indexed owner,
+        uint256 timestamp
+    );
+
+    event TransferError(
+        uint256 indexed orderId,
+        string tokenType,
+        string reason,
+        uint256 timestamp
+    );
+
+    event TokenTransferAttempt(
+        uint256 indexed orderId,
+        bool success,
+        bytes returnData,
+        uint256 fromBalance,
+        uint256 toBalance,
+        uint256 timestamp
+    );
+
+    event FeeConfigUpdated(
+        address indexed feeToken,
+        uint256 feeAmount,
+        uint256 timestamp
+    );
+
+    modifier validOrder(uint256 orderId) {
+        require(orders[orderId].maker != address(0), "Order does not exist");
+        require(orders[orderId].status == OrderStatus.Active, "Order is not active");
+        _;
     }
 
-    /**
-     * @dev Decrease the calling contract's allowance toward `spender` by `requestedDecrease`. If `token` returns no
-     * value, non-reverting calls are assumed to be successful.
-     *
-     * IMPORTANT: If the token implements ERC-7674 (ERC-20 with temporary allowance), and if the "client"
-     * smart contract uses ERC-7674 to set temporary allowances, then the "client" smart contract should avoid using
-     * this function. Performing a {safeIncreaseAllowance} or {safeDecreaseAllowance} operation on a token contract
-     * that has a non-zero temporary allowance (for that particular owner-spender) will result in unexpected behavior.
-     */
-    function safeDecreaseAllowance(IERC20 token, address spender, uint256 requestedDecrease) internal {
-        unchecked {
-            uint256 currentAllowance = token.allowance(address(this), spender);
-            if (currentAllowance < requestedDecrease) {
-                revert SafeERC20FailedDecreaseAllowance(spender, currentAllowance, requestedDecrease);
+    constructor(address _feeToken, uint256 _feeAmount) Ownable(msg.sender) {
+        require(_feeToken != address(0), "Invalid fee token");
+        require(_feeAmount > 0, "Invalid fee amount");
+        feeToken = _feeToken;
+        orderCreationFeeAmount = _feeAmount;
+        emit FeeConfigUpdated(_feeToken, _feeAmount, block.timestamp);
+    }
+
+    function updateFeeConfig(address _feeToken, uint256 _feeAmount) external onlyOwner {
+        require(_feeToken != address(0), "Invalid fee token");
+        require(_feeAmount > 0, "Invalid fee amount");
+        feeToken = _feeToken;
+        orderCreationFeeAmount = _feeAmount;
+        emit FeeConfigUpdated(_feeToken, _feeAmount, block.timestamp);
+    }
+
+    function disableContract() external onlyOwner {
+        require(!isDisabled, "Contract already disabled");
+        isDisabled = true;
+        emit ContractDisabled(msg.sender, block.timestamp);
+    }
+
+    function createOrder(
+        address taker,
+        address sellToken,
+        uint256 sellAmount,
+        address buyToken,
+        uint256 buyAmount
+    ) external nonReentrant returns (uint256) {
+        require(!isDisabled, "Contract is disabled");
+        require(sellToken != address(0), "Invalid sell token");
+        require(buyToken != address(0), "Invalid buy token");
+        require(sellAmount > 0, "Invalid sell amount");
+        require(buyAmount > 0, "Invalid buy amount");
+        require(sellToken != buyToken, "Cannot swap same token");
+
+        require(
+            IERC20(sellToken).balanceOf(msg.sender) >= sellAmount,
+            "Insufficient balance for sell token"
+        );
+        require(
+            IERC20(sellToken).allowance(msg.sender, address(this)) >= sellAmount,
+            "Insufficient allowance for sell token"
+        );
+        require(
+            IERC20(feeToken).balanceOf(msg.sender) >= orderCreationFeeAmount,
+            "Insufficient balance for fee"
+        );
+        require(
+            IERC20(feeToken).allowance(msg.sender, address(this)) >= orderCreationFeeAmount,
+            "Insufficient allowance for fee"
+        );
+        require(
+            IERC20(sellToken).allowance(msg.sender, address(this)) >= sellAmount,
+            "Insufficient allowance for sell token"
+        );
+
+        // Transfer fee token
+        IERC20(feeToken).safeTransferFrom(msg.sender, address(this), orderCreationFeeAmount);
+        accumulatedFees += orderCreationFeeAmount;
+
+        // Transfer sell token
+        IERC20(sellToken).safeTransferFrom(msg.sender, address(this), sellAmount);
+
+        uint256 orderId = nextOrderId++;
+
+        orders[orderId] = Order({
+            maker: msg.sender,
+            taker: taker,
+            sellToken: sellToken,
+            sellAmount: sellAmount,
+            buyToken: buyToken,
+            buyAmount: buyAmount,
+            timestamp: block.timestamp,
+            status: OrderStatus.Active,
+            feeToken: feeToken,
+            orderCreationFee: orderCreationFeeAmount,
+            tries: 0
+        });
+
+        emit OrderCreated(
+            orderId,
+            msg.sender,
+            taker,
+            sellToken,
+            sellAmount,
+            buyToken,
+            buyAmount,
+            block.timestamp,
+            feeToken,
+            orderCreationFeeAmount
+        );
+
+        return orderId;
+    }
+
+    function fillOrder(uint256 orderId) external nonReentrant validOrder(orderId) {
+        Order storage order = orders[orderId];
+
+        require(
+            block.timestamp <= order.timestamp + ORDER_EXPIRY,
+            "Order has expired"
+        );
+        require(
+            order.taker == address(0) || order.taker == msg.sender,
+            "Not authorized to fill this order"
+        );
+        require(
+            IERC20(order.buyToken).balanceOf(msg.sender) >= order.buyAmount,
+            "Insufficient balance for buy token"
+        );
+        require(
+            IERC20(order.buyToken).allowance(msg.sender, address(this)) >= order.buyAmount,
+            "Insufficient allowance for buy token"
+        );
+
+        // Update order status first
+        order.status = OrderStatus.Filled;
+
+        // First transfer: buyToken from buyer to maker (using transferFrom)
+        try this.externalTransferFrom(IERC20(order.buyToken), msg.sender, order.maker, order.buyAmount) {
+            // Second transfer: sellToken from contract to buyer
+            try this.externalTransfer(IERC20(order.sellToken), msg.sender, order.sellAmount) {
+                emit OrderFilled(
+                    orderId,
+                    order.maker,
+                    msg.sender,
+                    order.sellToken,
+                    order.sellAmount,
+                    order.buyToken,
+                    order.buyAmount,
+                    block.timestamp
+                );
+            } catch Error(string memory reason) {
+                // Revert order status since second transfer failed
+                order.status = OrderStatus.Active;
+                emit TransferError(orderId, "sellToken", reason, block.timestamp);
+                revert(string(abi.encodePacked("Sell token transfer failed: ", reason)));
+            } catch (bytes memory) {
+                // Revert order status since second transfer failed
+                order.status = OrderStatus.Active;
+                emit TransferError(orderId, "sellToken", "Unknown error", block.timestamp);
+                revert("Sell token transfer failed with unknown error");
             }
-            forceApprove(token, spender, currentAllowance - requestedDecrease);
+        } catch Error(string memory reason) {
+            // Revert order status since first transfer failed
+            order.status = OrderStatus.Active;
+            emit TransferError(orderId, "buyToken", reason, block.timestamp);
+            revert(string(abi.encodePacked("Buy token transfer failed: ", reason)));
+        } catch (bytes memory) {
+            // Revert order status since first transfer failed
+            order.status = OrderStatus.Active;
+            emit TransferError(orderId, "buyToken", "Unknown error", block.timestamp);
+            revert("Buy token transfer failed with unknown error");
         }
     }
 
-    /**
-     * @dev Set the calling contract's allowance toward `spender` to `value`. If `token` returns no value,
-     * non-reverting calls are assumed to be successful. Meant to be used with tokens that require the approval
-     * to be set to zero before setting it to a non-zero value, such as USDT.
-     *
-     * NOTE: If the token implements ERC-7674, this function will not modify any temporary allowance. This function
-     * only sets the "standard" allowance. Any temporary allowance will remain active, in addition to the value being
-     * set here.
-     */
-    function forceApprove(IERC20 token, address spender, uint256 value) internal {
-        bytes memory approvalCall = abi.encodeCall(token.approve, (spender, value));
+    // Public function to enable try/catch for external transfers
+    function externalTransfer(IERC20 token, address to, uint256 amount) external {
+        require(msg.sender == address(this), "Only callable by the contract itself");
+        token.safeTransfer(to, amount);
+    }
 
-        if (!_callOptionalReturnBool(token, approvalCall)) {
-            _callOptionalReturn(token, abi.encodeCall(token.approve, (spender, 0)));
-            _callOptionalReturn(token, approvalCall);
+    // Public function to enable try/catch for external transferFrom
+    function externalTransferFrom(IERC20 token, address from, address to, uint256 amount) external {
+        require(msg.sender == address(this), "Only callable by the contract itself");
+        token.safeTransferFrom(from, to, amount);
+    }
+
+    function cancelOrder(uint256 orderId) external nonReentrant validOrder(orderId) {
+        Order storage order = orders[orderId];
+        require(order.maker == msg.sender, "Only maker can cancel order");
+        require(
+            block.timestamp <= order.timestamp + ORDER_EXPIRY + GRACE_PERIOD,
+            "Grace period has expired"
+        );
+
+        // Update order status first
+        order.status = OrderStatus.Canceled;
+
+        // Then return sell tokens to maker
+        IERC20(order.sellToken).safeTransfer(msg.sender, order.sellAmount);
+
+        emit OrderCanceled(orderId, msg.sender, block.timestamp);
+    }
+
+    function _handleFailedCleanup(
+        uint256 orderId,
+        Order storage order,
+        string memory reason
+    ) internal returns (uint256, address) {
+        emit CleanupError(orderId, reason, block.timestamp);
+
+        // If max retries reached, delete order and distribute fee
+        if (order.tries >= MAX_RETRY_ATTEMPTS) {
+            emit CleanupError(orderId, "Max retries reached", block.timestamp);
+            address feeTokenAddress = order.feeToken;
+            uint256 feeAmount = order.orderCreationFee;
+            delete orders[orderId];
+            return (feeAmount, feeTokenAddress);
+        } else {
+            // check if order.maker is not a zero address
+            require(order.maker != address(0), "Order maker is zero address in cleanup");
+
+            // Create a deep copy of the order in memory before modifying it
+            Order memory tempOrder = Order({
+                maker: order.maker,
+                sellToken: order.sellToken,
+                buyToken: order.buyToken,
+                sellAmount: order.sellAmount,
+                buyAmount: order.buyAmount,
+                tries: order.tries + 1,
+                status: OrderStatus.Active,
+                timestamp: block.timestamp,
+                taker: order.taker,
+                feeToken: order.feeToken,
+                orderCreationFee: order.orderCreationFee
+            });
+            require(tempOrder.maker != address(0), "tempOrder maker is zero address in cleanup");
+
+            // Create new order with incremented tries
+            uint256 newOrderId = nextOrderId++;
+            orders[newOrderId] = tempOrder;
+
+            require(orders[newOrderId].maker != address(0), "orders[newOrderId] maker is zero address in cleanup");
+
+            emit RetryOrder(
+                orderId,
+                newOrderId,
+                orders[newOrderId].maker,
+                orders[newOrderId].tries,
+                block.timestamp
+            );
+
+            delete orders[orderId];
+
+            return (0, address(0));
         }
     }
 
-    /**
-     * @dev Performs an {ERC1363} transferAndCall, with a fallback to the simple {ERC20} transfer if the target has no
-     * code. This can be used to implement an {ERC721}-like safe transfer that rely on {ERC1363} checks when
-     * targeting contracts.
-     *
-     * Reverts if the returned value is other than `true`.
-     */
-    function transferAndCallRelaxed(IERC1363 token, address to, uint256 value, bytes memory data) internal {
-        if (to.code.length == 0) {
-            safeTransfer(token, to, value);
-        } else if (!token.transferAndCall(to, value, data)) {
-            revert SafeERC20FailedOperation(address(token));
-        }
-    }
+    function cleanupExpiredOrders() external nonReentrant {
+        require(firstOrderId < nextOrderId, "No orders to clean up");
 
-    /**
-     * @dev Performs an {ERC1363} transferFromAndCall, with a fallback to the simple {ERC20} transferFrom if the target
-     * has no code. This can be used to implement an {ERC721}-like safe transfer that rely on {ERC1363} checks when
-     * targeting contracts.
-     *
-     * Reverts if the returned value is other than `true`.
-     */
-    function transferFromAndCallRelaxed(
-        IERC1363 token,
-        address from,
-        address to,
-        uint256 value,
-        bytes memory data
-    ) internal {
-        if (to.code.length == 0) {
-            safeTransferFrom(token, from, to, value);
-        } else if (!token.transferFromAndCall(from, to, value, data)) {
-            revert SafeERC20FailedOperation(address(token));
-        }
-    }
+        Order storage order = orders[firstOrderId];
 
-    /**
-     * @dev Performs an {ERC1363} approveAndCall, with a fallback to the simple {ERC20} approve if the target has no
-     * code. This can be used to implement an {ERC721}-like safe transfer that rely on {ERC1363} checks when
-     * targeting contracts.
-     *
-     * NOTE: When the recipient address (`to`) has no code (i.e. is an EOA), this function behaves as {forceApprove}.
-     * Opposedly, when the recipient address (`to`) has code, this function only attempts to call {ERC1363-approveAndCall}
-     * once without retrying, and relies on the returned value to be true.
-     *
-     * Reverts if the returned value is other than `true`.
-     */
-    function approveAndCallRelaxed(IERC1363 token, address to, uint256 value, bytes memory data) internal {
-        if (to.code.length == 0) {
-            forceApprove(token, to, value);
-        } else if (!token.approveAndCall(to, value, data)) {
-            revert SafeERC20FailedOperation(address(token));
+        // Skip empty orders
+        if (order.maker == address(0)) {
+            firstOrderId++;
+            return;
         }
-    }
 
-    /**
-     * @dev Imitates a Solidity high-level call (i.e. a regular function call to a contract), relaxing the requirement
-     * on the return value: the return value is optional (but if data is returned, it must not be false).
-     * @param token The token targeted by the call.
-     * @param data The call data (encoded using abi.encode or one of its variants).
-     *
-     * This is a variant of {_callOptionalReturnBool} that reverts if call fails to meet the requirements.
-     */
-    function _callOptionalReturn(IERC20 token, bytes memory data) private {
-        uint256 returnSize;
-        uint256 returnValue;
-        assembly ("memory-safe") {
-            let success := call(gas(), token, 0, add(data, 0x20), mload(data), 0, 0x20)
-            // bubble errors
-            if iszero(success) {
-                let ptr := mload(0x40)
-                returndatacopy(ptr, 0, returndatasize())
-                revert(ptr, returndatasize())
+        uint256 feesToDistribute = 0;
+        address currentFeeToken;
+
+        // Check if grace period has passed
+        if (block.timestamp > order.timestamp + ORDER_EXPIRY + GRACE_PERIOD) {
+            // Only attempt token transfer for Active orders
+            if (order.status == OrderStatus.Active) {
+                IERC20 token = IERC20(order.sellToken);
+
+                bool transferSuccess;
+                try this.attemptTransfer(token, order.maker, order.sellAmount) {
+                    transferSuccess = true;
+                } catch Error(string memory reason) {
+                    transferSuccess = false;
+                    emit CleanupError(firstOrderId, reason, block.timestamp);
+                } catch (bytes memory) {
+                    transferSuccess = false;
+                    emit CleanupError(firstOrderId, "Unknown error", block.timestamp);
+                }
+
+                if (!transferSuccess) {
+                    (uint256 fees, address feeTokenAddr) = _handleFailedCleanup(firstOrderId, order, "Token transfer failed");
+                    if (fees > 0) {
+                        feesToDistribute = fees;
+                        currentFeeToken = feeTokenAddr;
+                    }
+                } else {
+                    feesToDistribute = order.orderCreationFee;
+                    currentFeeToken = order.feeToken;
+                    address maker = order.maker;
+                    delete orders[firstOrderId];
+                    emit OrderCleanedUp(firstOrderId, maker, block.timestamp);
+                }
+            } else {
+                feesToDistribute = order.orderCreationFee;
+                currentFeeToken = order.feeToken;
+                address maker = order.maker;
+                delete orders[firstOrderId];
+                emit OrderCleanedUp(firstOrderId, maker, block.timestamp);
             }
-            returnSize := returndatasize()
-            returnValue := mload(0)
+            firstOrderId++;
         }
 
-        if (returnSize == 0 ? address(token).code.length == 0 : returnValue != 1) {
-            revert SafeERC20FailedOperation(address(token));
+        if (feesToDistribute > 0 && feesToDistribute <= accumulatedFees) {
+            accumulatedFees -= feesToDistribute;
+            IERC20(currentFeeToken).safeTransfer(msg.sender, feesToDistribute);
+            emit CleanupFeesDistributed(msg.sender, currentFeeToken, feesToDistribute, block.timestamp);
         }
     }
 
-    /**
-     * @dev Imitates a Solidity high-level call (i.e. a regular function call to a contract), relaxing the requirement
-     * on the return value: the return value is optional (but if data is returned, it must not be false).
-     * @param token The token targeted by the call.
-     * @param data The call data (encoded using abi.encode or one of its variants).
-     *
-     * This is a variant of {_callOptionalReturn} that silently catches all reverts and returns a bool instead.
-     */
-    function _callOptionalReturnBool(IERC20 token, bytes memory data) private returns (bool) {
+    function attemptTransfer(IERC20 token, address to, uint256 amount) external {
+        require(msg.sender == address(this), "Only self");
+
+        // Get balances before transfer
+        uint256 fromBalance = token.balanceOf(address(this));
+        uint256 toBalance = token.balanceOf(to);
+
         bool success;
-        uint256 returnSize;
-        uint256 returnValue;
-        assembly ("memory-safe") {
-            success := call(gas(), token, 0, add(data, 0x20), mload(data), 0, 0x20)
-            returnSize := returndatasize()
-            returnValue := mload(0)
+        bytes memory returnData;
+
+        try token.transfer(to, amount) returns (bool result) {
+            success = result;
+            returnData = abi.encode(result);
+        } catch (bytes memory err) {
+            success = false;
+            returnData = err;
         }
-        return success && (returnSize == 0 ? address(token).code.length > 0 : returnValue == 1);
+
+        emit TokenTransferAttempt(
+            0,
+            success,
+            returnData,
+            fromBalance,
+            toBalance,
+            block.timestamp
+        );
+        require(success, "Token transfer failed");
     }
 }
