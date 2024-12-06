@@ -13,13 +13,12 @@ export async function getTokenList() {
             index === self.findIndex(t => t.address.toLowerCase() === token.address.toLowerCase())
         );
 
-        // Remove native token if it's already in the list
+        // Remove native token if it's in the list
         uniqueTokens = uniqueTokens.filter(token => token.address.toLowerCase() !== POL_NativeToken_Address.toLowerCase());
 
         return uniqueTokens;
     } catch (error) {
         console.error('Error getting token list:', error);
-        // Return at least the native token if everything else fails
         return [];
     }
 }
