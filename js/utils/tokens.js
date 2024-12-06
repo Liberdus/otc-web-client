@@ -3,48 +3,24 @@ import { getNetworkConfig } from '../config.js';
 
 export async function getTokenList() {
     try {
-        // Add native token (POL) as a default token
-        const defaultTokens = [{
-            address: '0x0000000000000000000000000000000000001010', // Native token contract
-            symbol: 'POL',
-            name: 'POLYGON Ecosystem Token',
-            decimals: 18,
-            isNative: true // Flag to identify native token
-        }];
 
+        const POL_NativeToken_Address = '0x0000000000000000000000000000000000001010';
         // Get user's wallet tokens
         const walletTokens = await getUserWalletTokens();
-        
-        // Add native token balance
-        if (window.ethereum) {
-            try {
-                const provider = new ethers.providers.Web3Provider(window.ethereum);
-                const address = await provider.getSigner().getAddress();
-                const balance = await provider.getBalance(address);
-                defaultTokens[0].balance = ethers.utils.formatEther(balance);
-            } catch (error) {
-                console.warn('Error getting native token balance:', error);
-                defaultTokens[0].balance = '0';
-            }
-        }
 
         // Remove duplicates
-        const uniqueTokens = [...defaultTokens, ...walletTokens].filter((token, index, self) => 
+        let uniqueTokens = walletTokens.filter((token, index, self) =>
             index === self.findIndex(t => t.address.toLowerCase() === token.address.toLowerCase())
         );
+
+        // Remove native token if it's already in the list
+        uniqueTokens = uniqueTokens.filter(token => token.address.toLowerCase() !== POL_NativeToken_Address.toLowerCase());
 
         return uniqueTokens;
     } catch (error) {
         console.error('Error getting token list:', error);
         // Return at least the native token if everything else fails
-        return [{
-            address: '0x0000000000000000000000000000000000001010',
-            symbol: 'POL',
-            name: 'POLYGON Ecosystem Token',
-            decimals: 18,
-            isNative: true,
-            balance: '0'
-        }];
+        return [];
     }
 }
 
@@ -160,7 +136,7 @@ async function getTokenIcon(address) {
             return icon;
         }
     }
-    
+
     // Cache null result to avoid future requests
     iconCache.set(address, null);
     return null;

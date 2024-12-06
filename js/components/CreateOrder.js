@@ -594,6 +594,17 @@ export class CreateOrder extends BaseComponent {
         
         // If input looks like an address
         if (ethers.utils.isAddress(searchTerm)) {
+            const POL_NativeToken_Address = '0x0000000000000000000000000000000000001010';
+            if (searchTerm.toLowerCase() === POL_NativeToken_Address.toLowerCase()) {
+                contractResult.innerHTML = `
+                  <div class="contract-address-result">
+                    <div class="contract-not-supported">
+                      <span>POL Native Token is not supported. Please use ERC20 tokens.</span>
+                    </div>
+                  </div>
+                `;
+                return;
+            }
             // Show loading state first
             contractResult.innerHTML = `
                 <div class="contract-address-result">
