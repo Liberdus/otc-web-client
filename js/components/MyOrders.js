@@ -233,7 +233,7 @@ export class MyOrders extends ViewOrders {
         try {
             const currentTime = Math.floor(Date.now() / 1000);
             const orderTime = Number(order.timestamp);
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             const orderExpiry = await contract.ORDER_EXPIRY();
             const gracePeriod = await contract.GRACE_PERIOD();
             const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
@@ -268,7 +268,7 @@ export class MyOrders extends ViewOrders {
     async refreshOrdersView() {
         try {
             // Get contract instance first
-            this.contract = await this.getContract();
+            this.contract = window.webSocket?.contract;
             if (!this.contract) {
                 throw new Error('Contract not initialized');
             }
@@ -301,7 +301,7 @@ export class MyOrders extends ViewOrders {
             if (showOnlyCancellable) {
                 // Filter for active orders that can be cancelled
                 const currentTime = Math.floor(Date.now() / 1000);
-                const contract = await this.getContract();
+                const contract = window.webSocket?.contract;
                 const orderExpiry = await contract.ORDER_EXPIRY();
                 const gracePeriod = await contract.GRACE_PERIOD();
 

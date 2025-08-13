@@ -1,4 +1,4 @@
-import { walletManager } from '../config.js';
+import { walletManager, getNetworkConfig } from '../config.js';
 import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { isDebugEnabled } from '../config.js';
@@ -66,7 +66,7 @@ export class BaseComponent {
             }
 
             await window.walletInitialized;
-            const contract = await walletManager.getContract();
+            const contract = window.webSocket?.contract;
             if (!contract) {
                 this.debug('Contract not initialized');
                 return null;

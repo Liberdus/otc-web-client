@@ -164,7 +164,7 @@ export class TakerOrders extends ViewOrders {
             try {
                 const currentTime = Math.floor(Date.now() / 1000);
                 const orderTime = Number(order.timestamp);
-                const contract = await this.getContract();
+                const contract = window.webSocket?.contract;
                 
                 const orderExpiry = await contract.ORDER_EXPIRY();
                 const isExpired = currentTime > orderTime + orderExpiry.toNumber();
@@ -315,7 +315,7 @@ export class TakerOrders extends ViewOrders {
     async refreshOrdersView() {
         try {
             // Get contract instance first
-            this.contract = await this.getContract();
+            this.contract = window.webSocket?.contract;
             if (!this.contract) {
                 throw new Error('Contract not initialized');
             }

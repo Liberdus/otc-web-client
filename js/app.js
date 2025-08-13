@@ -24,9 +24,10 @@ class App {
         this.currentTab = 'view-orders';
     }
 
-    load() {
-        /* this.initializeWalletManager(); */
-        this.initializeWebSocket();
+    async load() {
+        await this.initializeWalletManager();
+        await this.initializeWebSocket();
+        
 
         // Initialize components
         this.components = {
@@ -48,34 +49,8 @@ class App {
             await this.connectWallet();
         };
 
-
-
         // Render wallet UI immediately
         this.walletUI.render();
-
-        // Handle other components
-        Object.entries(this.components).forEach(([id, component]) => {
-            if (component instanceof BaseComponent && 
-                !(component instanceof CreateOrder) && 
-                !(component instanceof ViewOrders) &&
-                !(component instanceof TakerOrders) &&
-                !(component instanceof WalletUI) &&
-                !(component instanceof Cleanup)) {
-                component.render = function() {
-                    if (!this.initialized) {
-                        this.container.innerHTML = `
-                            <div class="tab-content-wrapper">
-                                <h2>${this.container.id.split('-').map(word => 
-                                    word.charAt(0).toUpperCase() + word.slice(1)
-                                ).join(' ')}</h2>
-                                <p>Coming soon...</p>
-                            </div>
-                        `;
-                        this.initialized = true;
-                    }
-                };
-            }
-        });
 
         // Add wallet connect button handler
         const walletConnectBtn = document.getElementById('walletConnect');
@@ -134,7 +109,6 @@ class App {
                 } else {
                     button.style.display = isConnected ? 'block' : 'none';
                 }
-                /* button.style.display = isConnected ? 'block' : 'none'; */
             });
         };
 
@@ -148,6 +122,7 @@ class App {
         });
 
         this.showTab(this.currentTab);
+        await window.webSocket.syncAllOrders();
     }
 
     initializeEventListeners() {
@@ -212,11 +187,6 @@ class App {
             if (!wsInitialized) {
                 this.debug('WebSocket initialization failed, falling back to HTTP');
             }
-            // TODO: for now invoke here since not awaiting where we are calling initializeWalletManager
-            window.webSocket.syncAllOrders();
-
-            // Initialize components in read-only mode initially
-            /* await this.initializeComponents(true); */
         } catch (error) {
             this.debug('WebSocket initialization error:', error);
         }
@@ -431,15 +401,6 @@ window.app = new App();
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         window.app.load();
-        // inside of load
-        /* window.app.initializeEventListeners(); */
-        
-        
-        // Wait for wallet initialization to complete
-        /* await window.app.initialize().catch(error => {
-            console.error('[App] Failed to initialize wallet:', error);
-            throw error;
-        }); */
         
         window.app.debug('Initialization complete');
     } catch (error) {
@@ -525,4 +486,7 @@ function showAppParametersPopup() {
 }
 
 // Add event listener for the network config button
-document.querySelector('.network-config-button').addEventListener('click', showAppParametersPopup);
+const networkConfigButton = document.querySelector('.network-config-button');
+if (networkConfigButton) {
+    networkConfigButton.addEventListener('click', showAppParametersPopup);
+}

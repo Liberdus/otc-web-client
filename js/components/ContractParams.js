@@ -28,7 +28,7 @@ export class ContractParams extends BaseComponent {
                 </div>`;
 
             // Get contract instance
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             if (!contract) {
                 this.showError('Contract not initialized');
                 return;

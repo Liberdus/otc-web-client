@@ -258,8 +258,30 @@ export class ViewOrders extends BaseComponent {
 
             this.showLoadingState();
 
-            // Get contract instance first
-            this.contract = await this.getContract();
+            // Debug WebSocket state
+            console.log('🔍 WebSocket contract availability:', {
+                webSocketExists: !!window.webSocket,
+                contractExists: !!window.webSocket?.contract,
+                contractAddress: window.webSocket?.contract?.address
+            });
+
+            // Use WebSocket contract directly instead of getContract()
+            const contract = window.webSocket?.contract;
+            if (!contract) {
+                console.log('🔍 Contract not available in WebSocket, trying getContract()');
+                const fallbackContract = window.webSocket?.contract;
+                if (!fallbackContract) {
+                    console.log('🔍 No contract available at all - showing orders without expiry calculation');
+                    // Show orders without expiry filtering
+                    const orders = Array.from(this.orders.values());
+                    await this.displayOrders(orders);
+                    return;
+                }
+                this.contract = fallbackContract;
+            } else {
+                console.log('🔍 Using WebSocket contract:', contract.address);
+                this.contract = contract;
+            }
             
             // Get contract expiry times
             const orderExpiry = (await this.contract.ORDER_EXPIRY()).toNumber();
@@ -649,7 +671,7 @@ export class ViewOrders extends BaseComponent {
 
     async formatExpiry(timestamp) {
         try {
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();  // 420 seconds (7 minutes)
             // Don't add gracePeriod here since we only want to show when it expires
             
@@ -865,7 +887,7 @@ export class ViewOrders extends BaseComponent {
 
     async getOrderDetails(orderId) {
         try {
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             if (!contract) {
                 throw new Error('Contract not initialized');
             }
@@ -995,7 +1017,7 @@ export class ViewOrders extends BaseComponent {
 
     async getContractExpiryTimes() {
         try {
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             if (!contract) {
                 throw new Error('Contract not initialized');
             }
@@ -1073,7 +1095,7 @@ export class ViewOrders extends BaseComponent {
             }
 
             // Check if order is expired - using the contract's ORDER_EXPIRY
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
             const now = Math.floor(Date.now() / 1000);
             const expiryTime = Number(order.timestamp) + orderExpiry;
@@ -1157,11 +1179,12 @@ export class ViewOrders extends BaseComponent {
             const orders = this.webSocket.getOrders() || [];
             this.debug('Orders from WebSocket:', orders);
 
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             if (!contract) {
                 throw new Error('Contract not initialized');
             }
 
+            console.log('🔍 Using WebSocket contract:', contract.address);
             const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
             const gracePeriod = (await contract.GRACE_PERIOD()).toNumber();
             const currentTime = Math.floor(Date.now() / 1000);
@@ -1194,7 +1217,7 @@ export class ViewOrders extends BaseComponent {
 
     async displayOrders(orders) {
         try {
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
             this.debug('Order expiry from contract:', {
                 orderExpiry,
@@ -1264,7 +1287,7 @@ export class ViewOrders extends BaseComponent {
 
             const timestamp = row.dataset.timestamp;
             const currentTime = Math.floor(Date.now() / 1000);
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
             const expiryTime = Number(timestamp) + orderExpiry;
             const timeDiff = expiryTime - currentTime;

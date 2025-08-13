@@ -188,7 +188,7 @@ export class Cleanup extends BaseComponent {
             let filledFees = 0;
             
             const currentTime = Math.floor(Date.now() / 1000);
-            const contract = await this.getContract();
+            const contract = window.webSocket?.contract;
             const orderExpiry = await contract.ORDER_EXPIRY();
             const gracePeriod = await contract.GRACE_PERIOD();
 

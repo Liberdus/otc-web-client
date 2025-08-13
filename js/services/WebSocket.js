@@ -25,12 +25,7 @@ export class WebSocketService {
         try {
             if (this.isInitialized) return true;
             this.debug('Starting initialization...');
-            
             const config = getNetworkConfig();
-            this.debug('Network config loaded, attempting WebSocket connection...');
-            
-            this.contractAddress = config.contractAddress;
-            
             const wsUrls = [config.wsUrl, ...config.fallbackWsUrls];
             let connected = false;
             
@@ -153,6 +148,10 @@ export class WebSocketService {
     }
 
     async syncAllOrders() {
+        const config = getNetworkConfig();
+        this.debug('Network config loaded, attempting WebSocket connection...');
+        
+        this.contractAddress = config.contractAddress;
         this.contractABI = config.contractABI;
 
         if (!this.contractABI) {
@@ -172,11 +171,11 @@ export class WebSocketService {
 
         this.debug('Contract initialized, starting order sync...');
         try {
-            this.debug('Starting order sync with contract:', contract.address);
+            this.debug('Starting order sync with contract:', this.contract.address);
             
             let nextOrderId = 0;
             try {
-                nextOrderId = await contract.nextOrderId();
+                nextOrderId = await this.contract.nextOrderId();
                 this.debug('nextOrderId result:', nextOrderId.toString());
             } catch (error) {
                 this.debug('nextOrderId call failed, using default value:', error);
@@ -188,7 +187,7 @@ export class WebSocketService {
             // Sync all orders that have a valid maker address
             for (let i = 0; i < nextOrderId; i++) {
                 try {
-                    const order = await contract.orders(i);
+                    const order = await this.contract.orders(i);
                     // Only filter out zero-address makers (non-existent orders)
                     if (order.maker !== ethers.constants.AddressZero) {
                         const orderData = {
