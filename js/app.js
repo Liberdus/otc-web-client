@@ -27,15 +27,6 @@ class App {
     load() {
         /* this.initializeWalletManager(); */
         this.initializeWebSocket();
-        // Initialize components in read-only mode initially
-        this.initializeComponents(true);
-
-        this.walletUI = new WalletUI();
-        
-        this.handleConnectWallet = async (e) => {
-            e && e.preventDefault();
-            await this.connectWallet();
-        };
 
         // Initialize components
         this.components = {
@@ -46,6 +37,18 @@ class App {
             'cleanup-orders': new Cleanup(),
             'contract-params': new ContractParams()
         };
+
+        // Initialize components in read-only mode initially
+        this.initializeComponents(true);
+
+        this.walletUI = new WalletUI();
+        
+        this.handleConnectWallet = async (e) => {
+            e && e.preventDefault();
+            await this.connectWallet();
+        };
+
+
 
         // Render wallet UI immediately
         this.walletUI.render();
@@ -143,6 +146,8 @@ class App {
             this.classList.toggle('active');
             document.querySelector('.taker-input-content').classList.toggle('hidden');
         });
+
+        this.showTab(this.currentTab);
     }
 
     initializeEventListeners() {
@@ -425,8 +430,10 @@ window.app = new App();
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        window.app.initializeEventListeners();
-        window.app.showTab(window.app.currentTab);
+        window.app.load();
+        // inside of load
+        /* window.app.initializeEventListeners(); */
+        
         
         // Wait for wallet initialization to complete
         /* await window.app.initialize().catch(error => {
