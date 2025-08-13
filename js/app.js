@@ -21,6 +21,15 @@ class App {
 
         this.debug('App constructor called');
         
+        this.currentTab = 'view-orders';
+    }
+
+    load() {
+        /* this.initializeWalletManager(); */
+        this.initializeWebSocket();
+        // Initialize components in read-only mode initially
+        this.initializeComponents(true);
+
         this.walletUI = new WalletUI();
         
         this.handleConnectWallet = async (e) => {
@@ -65,8 +74,6 @@ class App {
             }
         });
 
-        this.currentTab = 'create-order';
-
         // Add wallet connect button handler
         const walletConnectBtn = document.getElementById('walletConnect');
         if (walletConnectBtn) {
@@ -82,6 +89,10 @@ class App {
             } else if (event === 'disconnect') {
                 this.debug('Wallet disconnected, updating tab visibility...');
                 this.updateTabVisibility(false);
+                // If disconnected and not on view-orders tab, switch to it
+                if (this.currentTab !== 'view-orders') {
+                    this.showTab('view-orders');
+                }
             }
         });
 
@@ -114,14 +125,14 @@ class App {
         this.updateTabVisibility = (isConnected) => {
             const tabButtons = document.querySelectorAll('.tab-button');
             tabButtons.forEach(button => {
-                if (button.dataset.tab === 'create-order') return; // Always show create-order
-                button.style.display = isConnected ? 'block' : 'none';
+                // always show view-orders, cleanup-orders, contract-params
+                if (button.dataset.tab === 'view-orders' || button.dataset.tab === 'cleanup-orders' || button.dataset.tab === 'contract-params') {
+                    button.style.display = 'block';
+                } else {
+                    button.style.display = isConnected ? 'block' : 'none';
+                }
+                /* button.style.display = isConnected ? 'block' : 'none'; */
             });
-            
-            // If disconnected and not on create-order tab, switch to it
-            if (!isConnected && this.currentTab !== 'create-order') {
-                this.showTab('create-order');
-            }
         };
 
         // Update initial tab visibility
@@ -175,26 +186,34 @@ class App {
         });
     }
 
-    async initialize() {
+    async initializeWalletManager() {
         try {
             this.debug('Starting initialization...');
             // Initialize wallet manager with autoConnect parameter
             window.walletManager = walletManager;
             await walletManager.init(true);
             
+            this.debug('Initialization complete');
+        } catch (error) {
+            this.debug('Initialization error:', error);
+        }
+    }
+
+    async initializeWebSocket() {
+        try {
             // Initialize WebSocket service
             window.webSocket = new WebSocketService();
             const wsInitialized = await window.webSocket.initialize();
             if (!wsInitialized) {
                 this.debug('WebSocket initialization failed, falling back to HTTP');
             }
-            
+            // TODO: for now invoke here since not awaiting where we are calling initializeWalletManager
+            window.webSocket.syncAllOrders();
+
             // Initialize components in read-only mode initially
-            await this.initializeComponents(true);
-            
-            this.debug('Initialization complete');
+            /* await this.initializeComponents(true); */
         } catch (error) {
-            this.debug('Initialization error:', error);
+            this.debug('WebSocket initialization error:', error);
         }
     }
 
@@ -401,18 +420,19 @@ class App {
     }
 }
 
+window.app = new App();
+
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        window.app = new App();
         window.app.initializeEventListeners();
         window.app.showTab(window.app.currentTab);
         
         // Wait for wallet initialization to complete
-        await window.app.initialize().catch(error => {
+        /* await window.app.initialize().catch(error => {
             console.error('[App] Failed to initialize wallet:', error);
             throw error;
-        });
+        }); */
         
         window.app.debug('Initialization complete');
     } catch (error) {

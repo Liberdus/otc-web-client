@@ -30,11 +30,6 @@ export class WebSocketService {
             this.debug('Network config loaded, attempting WebSocket connection...');
             
             this.contractAddress = config.contractAddress;
-            this.contractABI = config.contractABI;
-            
-            if (!this.contractABI) {
-                throw new Error('Contract ABI not found in network config');
-            }
             
             const wsUrls = [config.wsUrl, ...config.fallbackWsUrls];
             let connected = false;
@@ -58,21 +53,6 @@ export class WebSocketService {
                 throw new Error('Failed to connect to any WebSocket URL');
             }
 
-            this.contract = new ethers.Contract(
-                this.contractAddress,
-                this.contractABI,
-                this.provider
-            );
-
-            this.debug('Contract initialized:', {
-                address: this.contract.address,
-                abi: this.contract.interface.format()
-            });
-
-            this.debug('Contract initialized, starting order sync...');
-            await this.syncAllOrders(this.contract);
-            this.debug('Setting up event listeners...');
-            await this.setupEventListeners(this.contract);
             
             this.isInitialized = true;
             this.debug('Initialization complete');
@@ -172,7 +152,25 @@ export class WebSocketService {
         }
     }
 
-    async syncAllOrders(contract) {
+    async syncAllOrders() {
+        this.contractABI = config.contractABI;
+
+        if (!this.contractABI) {
+            throw new Error('Contract ABI not found in network config');
+        }
+
+        this.contract = new ethers.Contract(
+            this.contractAddress,
+            this.contractABI,
+            this.provider
+        );
+
+        this.debug('Contract initialized:', {
+            address: this.contract.address,
+            abi: this.contract.interface.format()
+        }); 
+
+        this.debug('Contract initialized, starting order sync...');
         try {
             this.debug('Starting order sync with contract:', contract.address);
             
@@ -217,6 +215,9 @@ export class WebSocketService {
             
             this.debug('Order sync complete. Cache size:', this.orderCache.size);
             this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
+            this.debug('Setting up event listeners...');
+            // TODO move this where needed (after sync)
+            await this.setupEventListeners(this.contract);
             
         } catch (error) {
             this.debug('Order sync failed:', error);
