@@ -1,25 +1,31 @@
+<!--
+  LiberOTCSwap - Decentralized OTC Trading Interface
+  A single-page application for creating and managing peer-to-peer token swaps.
+  Features: wallet connection, token swapping, order management, and dark/light themes.
+-->
 <!DOCTYPE html>
-<html lang="en">
-  <!-- Head -->
+<html lang="en" data-theme="dark">
+  <!-- Head section contains meta info, styles, and script imports -->
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OTC Swap</title>
-    <!-- Normalize.css -->
+    <!-- Normalize.css for consistent styling across browsers -->
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css"
     />
-    <!-- Styles -->
+    <!-- Core styles -->
     <link rel="stylesheet" href="css/styles.css" />
-    <!-- Components -->
+    <!-- Component-specific styles -->
     <link rel="stylesheet" href="css/components/forms.css" />
     <link rel="stylesheet" href="css/components/orders.css" />
     <link rel="stylesheet" href="css/components/tabs.css" />
     <link rel="stylesheet" href="css/components/wallet.css" />
     <link rel="stylesheet" href="css/components/cleanup.css" />
     <link rel="stylesheet" href="css/components/contract-params.css" />
-    <!-- Script -->
+    <link rel="stylesheet" href="css/components/debug.css" />
+    <!-- Import map for ethers.js library -->
     <script type="importmap">
       {
         "imports": {
@@ -27,28 +33,68 @@
         }
       }
     </script>
-    <!-- App -->
+    <!-- Main application entry point -->
     <script type="module" src="js/app.js" defer></script>
   </head>
-  <!-- Body -->
+  <!-- Body contains the main application structure -->
   <body>
     <div class="container">
-      <!-- Header -->
-      <header class="header">
-        <!-- Header Left -->
+      <!-- Header contains branding, theme toggle, and wallet connection -->
+      <header class="header card">
+        <!-- Logo and app name -->
         <div class="header-left">
           <div class="logo-container">
-            <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image">
+            <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image" />
             <h1>LiberOTCSwap</h1>
-            <span class="version">v1.0.13</span>
+            <span class="version">v1.0.25</span>
           </div>
         </div>
-        <!-- Header Right -->
+        <!-- Theme toggle and wallet connection controls -->
         <div class="header-right">
+          <!-- Light/Dark mode toggle -->
+          <button
+            id="theme-toggle"
+            class="theme-toggle"
+            aria-label="Toggle theme"
+          >
+            <!-- Sun icon for light mode -->
+            <svg
+              class="sun-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+            >
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+            <!-- Moon icon for dark mode -->
+            <svg
+              class="moon-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+            >
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </button>
+
+          <!-- Wallet connection and network selection -->
           <div id="wallet-container" class="wallet-container">
+            <!-- Network dropdown selector -->
             <div class="network-selector">
               <button class="network-button">
-                <span class="network-badge">Amoy</span>
+                <span class="network-badge">Polygon</span>
                 <svg
                   class="chevron-down"
                   width="12"
@@ -65,19 +111,17 @@
                   />
                 </svg>
               </button>
-              <!-- Network Dropdown -->
-              <div class="network-dropdown hidden">
-                <!-- Network options will be populated dynamically -->
-              </div>
+              <!-- Network options populated dynamically -->
+              <div class="network-dropdown hidden"></div>
             </div>
-            <!-- Wallet Connect Button -->
+            <!-- Connect wallet button -->
             <button id="walletConnect" class="wallet-button">
               <span class="wallet-button-text">Connect Wallet</span>
             </button>
-            <!-- Wallet Info -->
+            <!-- Wallet info shown when connected -->
             <div id="walletInfo" class="wallet-info hidden">
               <span id="accountAddress" class="account-address"></span>
-              <!-- Wallet Disconnect Button -->
+              <!-- Disconnect wallet button -->
               <button id="walletDisconnect" class="wallet-disconnect">
                 <svg
                   width="16"
@@ -103,30 +147,108 @@
           </div>
         </div>
       </header>
-      <!-- Debug Panel -->
+      <!-- Debug panel for development (hidden by default) -->
       <div class="debug-panel" style="display: none">
+        <!-- Debug controls and options -->
         <div class="debug-controls">
-          <h3>Debug Settings</h3>
-          <!-- Select All Checkbox -->
-          <label>
-            <input type="checkbox" id="selectAll" /> Select All
-          </label>
-          <label><input type="checkbox" data-debug="APP" /> App</label>
-          <label><input type="checkbox" data-debug="WEBSOCKET" /> WebSocket</label>
-          <label><input type="checkbox" data-debug="COMPONENTS" /> Components</label>
-          <label><input type="checkbox" data-debug="WALLET" /> Wallet</label>
-          <label><input type="checkbox" data-debug="VIEW_ORDERS" /> View Orders</label>
-          <label><input type="checkbox" data-debug="CREATE_ORDER" /> Create Order</label>
-          <label><input type="checkbox" data-debug="MY_ORDERS" /> My Orders</label>
-          <label><input type="checkbox" data-debug="TAKER_ORDERS" /> Taker Orders</label>
-          <label><input type="checkbox" data-debug="CLEANUP_ORDERS" /> Cleanup Orders</label>
-          <label><input type="checkbox" data-debug="WALLET_UI" /> Wallet UI</label>
-          <button id="applyDebug">Apply</button>
+          <div class="debug-header">
+            <h3>Debug Settings</h3>
+            <div class="debug-header-actions">
+              <button id="selectAllDebug" class="select-all-button">
+                Select All
+              </button>
+              <button
+                id="closeDebug"
+                class="close-button"
+                aria-label="Close debug panel"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    d="M18 6L6 18M6 6l12 12"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="debug-options">
+            <div class="debug-column">
+              <h4>Core</h4>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="APP" />
+                <span>App</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="WEBSOCKET" />
+                <span>WebSocket</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="WALLET" />
+                <span>Wallet</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="WALLET_UI" />
+                <span>Wallet UI</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="BASE_COMPONENT" />
+                <span>Base Component</span>
+              </label>
+            </div>
+
+            <div class="debug-column">
+              <h4>Orders</h4>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="VIEW_ORDERS" />
+                <span>View Orders</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="CREATE_ORDER" />
+                <span>Create Order</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="MY_ORDERS" />
+                <span>My Orders</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="TAKER_ORDERS" />
+                <span>Taker Orders</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="CLEANUP_ORDERS" />
+                <span>Cleanup Orders</span>
+              </label>
+            </div>
+
+            <div class="debug-column">
+              <h4>Other</h4>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="PRICING" />
+                <span>Pricing</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="TOKENS" />
+                <span>Tokens</span>
+              </label>
+            </div>
+          </div>
+          <div class="debug-footer">
+            <button id="applyDebug" class="apply-button">Apply Changes</button>
+          </div>
         </div>
       </div>
-      <!-- Main Content -->
+      <!-- Main application content area -->
       <main class="main-content">
-        <div class="content-wrapper">
+        <div class="content-wrapper card">
+          <!-- Navigation tabs for different sections -->
           <nav class="nav-tabs">
             <button class="tab-button active" data-tab="create-order">
               Create Order
@@ -146,98 +268,22 @@
             </button>
           </nav>
 
-          <div id="create-order" class="tab-content active">
-            <div class="form-container">
-              <div class="swap-section">
-                <div id="sellContainer" class="swap-input-container">
-                  <!-- Will be populated by JavaScript -->
-                </div>
-
-                <div class="swap-arrow">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <path d="M12 5l0 14M5 12l7 7 7-7" stroke-width="2" stroke-linecap="round"/>
-                  </svg>
-                </div>
-
-                <div id="buyContainer" class="swap-input-container">
-                  <!-- Will be populated by JavaScript -->
-                </div>
-
-                <div class="taker-input-container">
-                  <button class="taker-toggle">
-                    <div class="taker-toggle-content">
-                      <span class="taker-toggle-text">Specify Taker Address</span>
-                      <span class="info-tooltip">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                          <circle cx="12" cy="12" r="10" stroke-width="2" />
-                          <path d="M12 16v-4" stroke-width="2" stroke-linecap="round" />
-                          <circle cx="12" cy="8" r="1" fill="currentColor" />
-                        </svg>
-                        <span class="tooltip-text">
-                          Specify a wallet address that can take this order. Leave empty to allow anyone to take it.
-                        </span>
-                      </span>
-                      <span class="optional-text">(optional)</span>
-                    </div>
-                    <svg class="chevron-down" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                      <path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </button>
-                  <div class="taker-input-content hidden">
-                    <input type="text" id="takerAddress" class="taker-address-input" placeholder="0x..." />
-                  </div>
-                </div>
-
-                <div class="form-group fee-group">
-                  <label>
-                    Order Creation Fee:
-                    <span class="info-tooltip">
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                      >
-                        <circle cx="12" cy="12" r="10" stroke-width="2" />
-                        <path
-                          d="M12 16v-4"
-                          stroke-width="2"
-                          stroke-linecap="round"
-                        />
-                        <circle cx="12" cy="8" r="1" fill="currentColor" />
-                      </svg>
-                      <span class="tooltip-text">
-                        <strong>Order Creation Fee:</strong> A small fee in USDC
-                        is required to create an order. This helps prevent spam and
-                        incentivizes users who assist in cleaning up expired orders.
-                        <br /><br />
-                      </span>
-                    </span>
-                  </label>
-                  <div id="orderCreationFee">
-                    <span id="orderFee"></span>
-                  </div>
-                </div>
-                <button class="action-button" id="createOrderBtn" disabled>
-                  Connect Wallet to Create Order
-                </button>
-                <div id="status" class="status"></div>
-              </div>
-            </div>
+          <!-- Create Order tab content -->
+          <div id="create-order" class="tab-content active card">
+            <!-- Content will be rendered by CreateOrder component -->
           </div>
-          <div id="view-orders" class="tab-content"></div>
-          <div id="my-orders" class="tab-content"></div>
-          <div id="taker-orders" class="tab-content"></div>
-          <div id="cleanup-orders" class="tab-content">
-            <div id="cleanup-container" class="cleanup-container">
-              <!-- Cleanup component will populate this -->
-            </div>
+          <!-- Other tab contents (populated dynamically) -->
+          <div id="view-orders" class="tab-content card"></div>
+          <div id="my-orders" class="tab-content card"></div>
+          <div id="taker-orders" class="tab-content card"></div>
+          <div id="cleanup-orders" class="tab-content card">
+            <div id="cleanup-container" class="cleanup-container"></div>
           </div>
-          <div id="contract-params" class="tab-content">
-            <div id="contract-params-container" class="contract-params-container">
-              <!-- Content will be populated by ContractParams component -->
-            </div>
+          <div id="contract-params" class="tab-content card">
+            <div
+              id="contract-params-container"
+              class="contract-params-container"
+            ></div>
           </div>
         </div>
       </main>

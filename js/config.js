@@ -1,55 +1,54 @@
 import { abi as CONTRACT_ABI } from './abi/OTCSwap.js';
 import { ethers } from 'ethers';
+import { createLogger } from './services/LogService.js';
 
 const networkConfig = {
-    "80002": {
-        name: "Amoy",
-        displayName: "Amoy Testnet",
-        contractAddress: "0xB533C2a0b87ffeC0a4fB835636078b0291083cC2",
-        // Previous addresses for reference:
-        // 0x9d8776a98ad4642004EBC1bA55Dbe286456Bf76c w/ fee token and 7 days expiration
-        // 0x3D97a9F520563CCed7AF0675EEBFE91F87973956 w/ fee token and 7 minutes expiration
-        
+    "137": {
+        name: "Polygon",
+        displayName: "Polygon Mainnet",
+        isDefault: true,
+        contractAddress: "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837",
         contractABI: CONTRACT_ABI,
-        explorer: "https://amoy.polygonscan.com",
-        rpcUrl: "https://rpc.ankr.com/polygon_amoy",
+        explorer: "https://polygonscan.com",
+        rpcUrl: "https://polygon-rpc.com",
         fallbackRpcUrls: [
-            "https://rpc.ankr.com/polygon_amoy",
-            "https://polygon-amoy.blockpi.network/v1/rpc/public",
-            "wss://polygon-amoy-bor-rpc.publicnode.com",
-            "https://polygon-amoy.public.blastapi.io"
+            "https://rpc-mainnet.matic.network",
+            "https://polygon-bor.publicnode.com",
+            "https://polygon.api.onfinality.io/public"
         ],
-        chainId: "0x13882",
+        chainId: "0x89",
         nativeCurrency: {
-            name: "POLYGON Ecosystem Token",
-            symbol: "POL",
+            name: "MATIC",
+            symbol: "MATIC",
             decimals: 18
         },
-        wsUrl: `wss://polygon-amoy.gateway.tenderly.co`,
+        wsUrl: "wss://polygon.gateway.tenderly.co",
         fallbackWsUrls: [
-            `wss://polygon-amoy.g.alchemy.com/v2/SiEh1ZidfpxItbVCgPN573bPGOqQee9r`,
-            'wss://polygon-bor-amoy-rpc.publicnode.com',
-            'wss://polygon-amoy-bor.publicnode.com',
+            "wss://polygon-bor.publicnode.com",
+            "wss://polygon-bor-rpc.publicnode.com",
+            "wss://polygon.api.onfinality.io/public-ws"
         ]
     },
 };
 
-export const getAllNetworks = () => Object.values(networkConfig);
 
 export const DEBUG_CONFIG = {
-    APP: true,
-    WEBSOCKET: true,
-    COMPONENTS: true,
-    WALLET: true,
-    VIEW_ORDERS: true,
-    CREATE_ORDER: true,
-    MY_ORDERS: true,
-    TAKER_ORDERS: true,
-    CLEANUP_ORDERS: true,
-    WALLET_UI: true,
-    BASE_COMPONENT: true,
+    APP: false,
+    WEBSOCKET: false,
+    WALLET: false,
+    VIEW_ORDERS: false,
+    CREATE_ORDER: false,
+    MY_ORDERS: false,
+    TAKER_ORDERS: false,
+    CLEANUP_ORDERS: false,
+    WALLET_UI: false,
+    BASE_COMPONENT: false,
+    PRICING: false,
+    TOKENS: false,
     // Add more specific flags as needed
 };
+
+export const getAllNetworks = () => Object.values(networkConfig);
 
 export const isDebugEnabled = (component) => {
     // Check if debug mode is forced via localStorage
@@ -61,8 +60,43 @@ export const isDebugEnabled = (component) => {
     return DEBUG_CONFIG[component];
 };
 
+export const getDefaultNetwork = () => {
+    // Find the first network marked as default
+    const defaultNetwork = Object.values(networkConfig).find(net => net.isDefault);
+    if (!defaultNetwork) {
+        throw new Error('No default network configured');
+    }
+    return defaultNetwork;
+};
+
+export const getNetworkById = (chainId) => {
+    // Convert hex chainId to decimal if needed
+    const decimalChainId = chainId.startsWith('0x') 
+        ? parseInt(chainId, 16).toString()
+        : chainId.toString();
+    
+    return networkConfig[decimalChainId];
+};
+
+export const getNetworkConfig = (chainId = null) => {
+    if (chainId) {
+        const network = getNetworkById(chainId);
+        if (!network) {
+            throw new Error(`Network configuration not found for chain ID: ${chainId}`);
+        }
+        return network;
+    }
+    return getDefaultNetwork();
+};
+
 export class WalletManager {
     constructor() {
+        // Initialize logger
+        const logger = createLogger('WALLET');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
+
         this.listeners = new Set();
         this.isConnecting = false;
         this.account = null;
@@ -75,14 +109,10 @@ export class WalletManager {
         this.provider = null;
         this.signer = null;
         this.contract = null;
-        this.contractAddress = networkConfig["80002"].contractAddress;
-        this.contractABI = CONTRACT_ABI;
+        this.contractAddress = getDefaultNetwork().contractAddress;
+        this.contractABI = getDefaultNetwork().contractABI;
         this.isInitialized = false;
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('WALLET')) {
-                console.log('[WalletManager]', message, ...args);
-            }
-        };
+        this.contractInitialized = false;
     }
 
     async init() {
@@ -150,6 +180,11 @@ export class WalletManager {
     }
 
     async initializeContract() {
+        if (this.contractInitialized) {
+            this.debug('Contract already initialized, skipping...');
+            return this.contract;
+        }
+
         try {
             const networkConfig = getNetworkConfig();
             this.contract = new ethers.Contract(
@@ -158,8 +193,9 @@ export class WalletManager {
                 this.signer
             );
             
-            console.log('[WalletManager] Contract initialized with ABI:', 
+            this.debug('Contract initialized with ABI:', 
                 this.contract.interface.format());
+            this.contractInitialized = true;
             return this.contract;
         } catch (error) {
             console.error('[WalletManager] Error initializing contract:', error);
@@ -190,13 +226,16 @@ export class WalletManager {
             const decimalChainId = parseInt(chainId, 16).toString();
             this.debug('Decimal Chain ID:', decimalChainId);
             
-            if (decimalChainId !== "80002") {
-                await this.switchToAmoy();
+            if (decimalChainId !== "137") {
+                await this.switchToDefaultNetwork();
             }
 
             this.account = accounts[0];
             this.chainId = chainId;
             this.isConnected = true;
+
+            // Initialize signer before notifying listeners
+            await this.initializeSigner(this.account);
 
             this.debug('Notifying listeners of connection');
             this.notifyListeners('connect', {
@@ -204,7 +243,6 @@ export class WalletManager {
                 chainId: this.chainId
             });
 
-            const result = await this.initializeSigner(this.account);
             return {
                 account: this.account,
                 chainId: this.chainId
@@ -217,23 +255,23 @@ export class WalletManager {
         }
     }
 
-    async switchToAmoy() {
-        const config = networkConfig["80002"];
+    async switchToDefaultNetwork() {
+        const targetNetwork = getDefaultNetwork();
         try {
             await window.ethereum.request({
                 method: 'wallet_switchEthereumChain',
-                params: [{ chainId: config.chainId }],
+                params: [{ chainId: targetNetwork.chainId }],
             });
         } catch (error) {
             if (error.code === 4902) {
                 await window.ethereum.request({
                     method: 'wallet_addEthereumChain',
                     params: [{
-                        chainId: config.chainId,
-                        chainName: config.name,
-                        nativeCurrency: config.nativeCurrency,
-                        rpcUrls: [config.rpcUrl, ...config.fallbackRpcUrls],
-                        blockExplorerUrls: [config.explorer]
+                        chainId: targetNetwork.chainId,
+                        chainName: targetNetwork.name,
+                        nativeCurrency: targetNetwork.nativeCurrency,
+                        rpcUrls: [targetNetwork.rpcUrl, ...targetNetwork.fallbackRpcUrls],
+                        blockExplorerUrls: [targetNetwork.explorer]
                     }],
                 });
             } else {
@@ -264,9 +302,9 @@ export class WalletManager {
             this.onChainChange(chainId);
         }
         
-        const decimalChainId = parseInt(chainId, 16).toString();
-        if (decimalChainId !== "80002") {
-            this.switchToAmoy();
+        const network = getNetworkById(chainId);
+        if (!network?.isDefault) {
+            this.switchToDefaultNetwork();
         }
     }
 
@@ -392,4 +430,3 @@ export class WalletManager {
 }
 
 export const walletManager = new WalletManager();
-export const getNetworkConfig = () => networkConfig["80002"];

@@ -1,10 +1,17 @@
 import { ViewOrders } from './ViewOrders.js';
-import { ethers } from 'ethers';
-import { isDebugEnabled } from '../config.js';
+import { PricingService } from '../services/PricingService.js';
+import { createLogger } from '../services/LogService.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
+        this.pricingService = new PricingService();
+        
+        // Initialize logger
+        const logger = createLogger('MY_ORDERS');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
         
         // Initialize sort config with id as default sort, descending
         this.sortConfig = {
@@ -12,20 +19,23 @@ export class MyOrders extends ViewOrders {
             direction: 'desc',
             isColumnClick: false
         };
-        
-        // Initialize debug logger
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('MY_ORDERS')) {
-                console.log('[MyOrders]', message, ...args);
-            }
-        };
     }
 
     async initialize(readOnlyMode = true) {
+        // Prevent concurrent initializations
+        if (this.isInitializing) {
+            this.debug('Already initializing, skipping...');
+            return;
+        }
+
+        this.isInitializing = true;
+
         try {
             this.debug('Initializing MyOrders component');
             
-            if (readOnlyMode || !window.walletManager?.provider) {
+            // Check wallet connection first
+            if (!window.walletManager.isWalletConnected()) {
+                this.warn('No wallet connected, showing connect prompt');
                 this.container.innerHTML = `
                     <div class="tab-content-wrapper">
                         <h2>My Orders</h2>
@@ -35,431 +45,762 @@ export class MyOrders extends ViewOrders {
             }
 
             // Get current account
-            let userAddress;
-            try {
-                userAddress = await window.walletManager.getAccount();
-            } catch (error) {
-                this.debug('Error getting account:', error);
-                userAddress = null;
-            }
-
+            let userAddress = window.walletManager.getAccount();
             if (!userAddress) {
-                this.debug('No account connected');
-                this.container.innerHTML = `
-                    <div class="tab-content-wrapper">
-                        <h2>My Orders</h2>
-                        <p class="connect-prompt">Connect wallet to view your orders</p>
-                    </div>`;
+                this.warn('No account connected');
                 return;
             }
 
-            // Cleanup previous state
-            this.cleanup();
-            this.container.innerHTML = '';
-            
-            await this.setupTable();
+            // Check if WebSocket cache is already available
+            if (window.webSocket?.orderCache.size > 0) {
+                this.debug('Using existing WebSocket cache');
+                await this.setupTable();
+                await this.refreshOrdersView();
+                return;
+            }
 
-            // Setup WebSocket handlers after table setup
-            this.setupWebSocket();
-
-            // Get initial orders from cache and filter for maker
-            const cachedOrders = window.webSocket?.getOrders() || [];
-            const filteredOrders = cachedOrders.filter(order => 
-                order?.maker && userAddress && 
-                order.maker.toLowerCase() === userAddress.toLowerCase()
-            );
-
-            // Clear existing orders and add filtered ones
-            this.orders.clear();
-            if (filteredOrders.length > 0) {
-                this.debug('Loading orders from cache:', filteredOrders);
-                filteredOrders.forEach(order => {
-                    this.orders.set(order.id, order);
+            // If no cache, then wait for WebSocket initialization
+            if (!window.webSocket?.isInitialized) {
+                this.warn('WebSocket not initialized, waiting...');
+                await new Promise(resolve => {
+                    const checkInterval = setInterval(() => {
+                        if (window.webSocket?.isInitialized) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 100);
                 });
             }
 
+            // Setup table and refresh view
+            await this.setupTable();
             await this.refreshOrdersView();
 
         } catch (error) {
-            console.error('[MyOrders] Initialization error:', error);
-            this.container.innerHTML = `
-                <div class="tab-content-wrapper">
-                    <h2>My Orders</h2>
-                    <p class="error-message">Failed to load orders. Please try again later.</p>
-                </div>`;
-        }
-    }
-
-    setupWebSocket() {
-        // First call parent's setupWebSocket if it exists
-        if (super.setupWebSocket) {
-            super.setupWebSocket();
-        }
-
-        // Add OrderCanceled event handler
-        this.eventSubscriptions.add({
-            event: 'OrderCanceled',
-            callback: async (orderData) => {
-                this.debug('Order canceled event received:', orderData);
-                
-                // Update the order in our local state
-                if (this.orders.has(orderData.id)) {
-                    const order = this.orders.get(orderData.id);
-                    order.status = 'Canceled';
-                    this.orders.set(orderData.id, order);
-                    
-                    // Update UI elements
-                    const statusCell = this.container.querySelector(`tr[data-order-id="${orderData.id}"] .order-status`);
-                    const actionCell = this.container.querySelector(`tr[data-order-id="${orderData.id}"] .action-column`);
-                    
-                    if (statusCell) {
-                        statusCell.textContent = 'Canceled';
-                        statusCell.className = 'order-status canceled';
-                    }
-                    if (actionCell) {
-                        actionCell.innerHTML = '<span class="order-status">Canceled</span>';
-                    }
-                }
-            }
-        });
-    }
-
-    async cancelOrder(orderId) {
-        const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
-        try {
-            if (button) {
-                button.disabled = true;
-                button.textContent = 'Canceling...';
-            }
-
-            this.debug('Starting cancel order process for orderId:', orderId);
-
-            // Get current gas price
-            const gasPrice = await this.provider.getGasPrice();
-            
-            // Estimate gas for the cancelOrder transaction
-            let gasLimit;
-            try {
-                // First try with static call to check if transaction would fail
-                await this.contract.callStatic.cancelOrder(orderId);
-                
-                gasLimit = await this.contract.estimateGas.cancelOrder(orderId);
-                // Add 20% buffer to the estimated gas
-                gasLimit = gasLimit.mul(120).div(100);
-                this.debug('Estimated gas limit with buffer:', gasLimit.toString());
-            } catch (error) {
-                this.debug('Gas estimation failed:', error);
-                gasLimit = ethers.BigNumber.from(200000); // Conservative fallback for cancel
-                this.debug('Using fallback gas limit:', gasLimit.toString());
-            }
-
-            // Execute the cancel order transaction with retry mechanism
-            const maxRetries = 3;
-            let attempt = 0;
-            let lastError;
-
-            while (attempt < maxRetries) {
-                try {
-                    const tx = await this.contract.cancelOrder(orderId, {
-                        gasLimit,
-                        gasPrice
-                    });
-                    
-                    this.debug('Transaction sent:', tx.hash);
-                    await tx.wait();
-                    this.debug('Transaction confirmed');
-
-                    // Update order status in memory
-                    const orderToUpdate = this.orders.get(Number(orderId));
-                    if (orderToUpdate) {
-                        orderToUpdate.status = 'Canceled';
-                        this.orders.set(Number(orderId), orderToUpdate);
-                        await this.refreshOrdersView();
-                    }
-
-                    this.showSuccess(`Order ${orderId} canceled successfully!`);
-                    return;
-                } catch (error) {
-                    lastError = error;
-                    attempt++;
-                    if (attempt < maxRetries) {
-                        this.debug(`Attempt ${attempt} failed, retrying...`, error);
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
-            }
-
-            throw lastError;
-
-        } catch (error) {
-            this.debug('Cancel order error:', error);
-            this.showError(this.getReadableError(error));
+            this.error('Initialization error:', error);
+            this.showError('Failed to initialize orders view');
         } finally {
-            if (button) {
-                button.disabled = false;
-                button.textContent = 'Cancel Order';
-            }
+            this.isInitializing = false;
         }
-    }
-
-    async createOrderRow(order, tokenDetailsMap) {
-        const tr = await super.createOrderRow(order, tokenDetailsMap);
-        const actionCell = tr.querySelector('.action-column');
-        const statusCell = tr.querySelector('.order-status');
-        const expiresCell = tr.querySelector('td:nth-child(6)'); // Expires column
-        
-        // Remove the existing action column if it exists (from parent class)
-        if (actionCell) {
-            actionCell.remove();
-        }
-
-        // Create new taker cell
-        const takerCell = document.createElement('td');
-        // Check if order is open to anyone (taker is zero address)
-        const isPublicOrder = order.taker === ethers.constants.AddressZero;
-        
-        if (isPublicOrder) {
-            takerCell.innerHTML = '<span class="open-order">Public</span>';
-        } else {
-            // For private orders, show truncated address
-            const shortAddress = `${order.taker.slice(0, 6)}...${order.taker.slice(-4)}`;
-            takerCell.innerHTML = `<span class="targeted-order" title="${order.taker}">${shortAddress}</span>`;
-        }
-
-        // Create new action cell
-        const newActionCell = document.createElement('td');
-        newActionCell.className = 'action-column';
-
-        try {
-            const currentTime = Math.floor(Date.now() / 1000);
-            const orderTime = Number(order.timestamp);
-            const contract = await this.getContract();
-            const orderExpiry = await contract.ORDER_EXPIRY();
-            const gracePeriod = await contract.GRACE_PERIOD();
-            const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
-
-            if (order.status === 'Canceled') {
-                newActionCell.innerHTML = '<span class="order-status">Canceled</span>';
-            } else if (order.status === 'Filled') {
-                newActionCell.innerHTML = '<span class="order-status">Filled</span>';
-            } else if (isGracePeriodExpired) {
-                newActionCell.innerHTML = '<span class="order-status">Await Cleanup</span>';
-            } else {
-                newActionCell.innerHTML = `
-                    <button class="cancel-button" data-order-id="${order.id}">Cancel</button>
-                `;
-                const cancelButton = newActionCell.querySelector('.cancel-button');
-                if (cancelButton) {
-                    cancelButton.addEventListener('click', () => this.cancelOrder(order.id));
-                }
-            }
-        } catch (error) {
-            console.error('[MyOrders] Error in createOrderRow:', error);
-            newActionCell.innerHTML = '<span class="order-status error">Error</span>';
-        }
-
-        // Append both cells in correct order
-        tr.appendChild(takerCell);
-        tr.appendChild(newActionCell);
-
-        return tr;
     }
 
     async refreshOrdersView() {
+        if (this.isLoading) return;
+        this.isLoading = true;
+        
         try {
-            // Get contract instance first
-            this.contract = await this.getContract();
-            if (!this.contract) {
-                throw new Error('Contract not initialized');
-            }
-
-            // Get current account
-            const userAddress = await window.walletManager.getAccount();
-            if (!userAddress) {
-                throw new Error('No wallet connected');
-            }
-
-            // Clear existing orders from table
-            const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                console.warn('[MyOrders] Table body not found');
-                return;
-            }
-            tbody.innerHTML = '';
-
-            // Get ALL orders from WebSocket cache without filtering
-            const allOrders = window.webSocket?.getOrders() || [];
+            // Store current filter state before refresh
+            const checkbox = this.container.querySelector('#fillable-orders-toggle');
+            const showOnlyCancellable = checkbox?.checked ?? false; // Get current state
             
-            // Filter orders only by maker address
-            let ordersToDisplay = allOrders.filter(order => 
-                order?.maker && 
-                order.maker.toLowerCase() === userAddress.toLowerCase()
+            // Get all orders first
+            let ordersToDisplay = Array.from(window.webSocket.orderCache.values());
+            
+            // Filter for user's orders only
+            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            ordersToDisplay = ordersToDisplay.filter(order => 
+                order.maker?.toLowerCase() === userAddress
             );
 
-            // Check if we should filter for cancellable orders
-            const showOnlyCancellable = this.container.querySelector('#fillable-orders-toggle')?.checked;
-            if (showOnlyCancellable) {
-                // Filter for active orders that can be cancelled
-                const currentTime = Math.floor(Date.now() / 1000);
-                const contract = await this.getContract();
-                const orderExpiry = await contract.ORDER_EXPIRY();
-                const gracePeriod = await contract.GRACE_PERIOD();
+            // Get filter states
+            const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
+            const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
+            const orderSort = this.container.querySelector('#order-sort')?.value;
 
-                ordersToDisplay = ordersToDisplay.filter(order => {
-                    const orderTime = Number(order.timestamp);
-                    const isExpiredWithoutGrace = currentTime > orderTime + orderExpiry.toNumber();
-                    const isGracePeriodExpired = currentTime > orderTime + orderExpiry.toNumber() + gracePeriod.toNumber();
+            // Apply filters
+            ordersToDisplay = ordersToDisplay.filter(order => {
+                // Apply token filters
+                if (sellTokenFilter && order.sellToken.toLowerCase() !== sellTokenFilter.toLowerCase()) return false;
+                if (buyTokenFilter && order.buyToken.toLowerCase() !== buyTokenFilter.toLowerCase()) return false;
 
-                    // Show orders that are:
-                    // 1. Active/Open AND not expired, OR
-                    // 2. Active/Open AND expired but still within grace period
-                    return (order.status === 'Active' || order.status === 'Open') && 
-                           (!isExpiredWithoutGrace || !isGracePeriodExpired);
-                });
+                // Apply cancellable filter if checked
+                if (showOnlyCancellable) {
+                    return window.webSocket.canCancelOrder(order, userAddress);
+                }
+                
+                return true;
+            });
+
+            // Set total orders after filtering
+            this.totalOrders = ordersToDisplay.length;
+
+            // Apply sorting
+            if (orderSort === 'newest') {
+                ordersToDisplay.sort((a, b) => b.id - a.id);
+            } else if (orderSort === 'best-deal') {
+                ordersToDisplay.sort((a, b) => 
+                    Number(b.dealMetrics?.deal || 0) - 
+                    Number(a.dealMetrics?.deal || 0)
+                );
             }
 
-            // Get token details for display
-            const tokenAddresses = new Set();
-            ordersToDisplay.forEach(order => {
-                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
-                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
-            });
+            // Apply pagination
+            const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
+            if (pageSize !== -1) {  // -1 means show all
+                const startIndex = (this.currentPage - 1) * pageSize;
+                const endIndex = startIndex + pageSize;
+                ordersToDisplay = ordersToDisplay.slice(startIndex, endIndex);
+            }
 
-            const tokenDetails = await this.getTokenDetails(Array.from(tokenAddresses));
-            const tokenDetailsMap = new Map();
-            Array.from(tokenAddresses).forEach((address, index) => {
-                if (tokenDetails[index]) {
-                    tokenDetailsMap.set(address, tokenDetails[index]);
+            // Update the table
+            const tbody = this.container.querySelector('tbody');
+            if (!tbody) {
+                this.warn('No tbody found in table');
+                return;
+            }
+
+            tbody.innerHTML = '';
+            
+            for (const order of ordersToDisplay) {
+                const newRow = await this.createOrderRow(order);
+                if (newRow) {
+                    tbody.appendChild(newRow);
                 }
-            });
+            }
 
-            // Check if we have any orders after filtering
-            if (!ordersToDisplay.length) {
+            // Update pagination controls
+            this.updatePaginationControls(this.totalOrders);
+
+            // Show empty state if no orders
+            if (ordersToDisplay.length === 0) {
                 tbody.innerHTML = `
-                    <tr>
+                    <tr class="empty-message">
                         <td colspan="9" class="no-orders-message">
                             <div class="placeholder-text">
-                                No orders found
+                                ${showOnlyCancellable ? 
+                                    'No cancellable orders found' : 
+                                    'No orders found'}
                             </div>
                         </td>
                     </tr>`;
-                return;
             }
 
-            // Sort orders based on sortConfig
-            ordersToDisplay.sort((a, b) => {
-                if (this.sortConfig.column === 'id') {
-                    return this.sortConfig.direction === 'asc'
-                        ? Number(a.id) - Number(b.id)
-                        : Number(b.id) - Number(a.id);
-                } else if (this.sortConfig.column === 'status') {
-                    const statusPriority = {
-                        'Open': 1,
-                        'Active': 1,
-                        'Pending': 2,
-                        'Filled': 3,
-                        'Canceled': 4,
-                        'Await Cleanup': 5
-                    };
-                    
-                    const priorityA = statusPriority[a.status] || 999;
-                    const priorityB = statusPriority[b.status] || 999;
-                    
-                    return this.sortConfig.direction === 'asc'
-                        ? priorityA - priorityB
-                        : priorityB - priorityA;
-                }
-                
-                // Default to ID sort if no other criteria
-                return this.sortConfig.direction === 'asc'
-                    ? Number(a.id) - Number(b.id)
-                    : Number(b.id) - Number(a.id);
-            });
-
-            // Create and append order rows
-            for (const order of ordersToDisplay) {
-                try {
-                    const orderWithLowercase = {
-                        ...order,
-                        sellToken: order.sellToken.toLowerCase(),
-                        buyToken: order.buyToken.toLowerCase()
-                    };
-                    const row = await this.createOrderRow(orderWithLowercase, tokenDetailsMap);
-                    if (row) {
-                        tbody.appendChild(row);
-                    }
-                } catch (error) {
-                    console.error('[MyOrders] Error creating row for order:', order.id, error);
-                }
+            // After table is rebuilt, restore checkbox state
+            if (checkbox) {
+                checkbox.checked = showOnlyCancellable;
             }
 
         } catch (error) {
-            this.debug('Error refreshing orders view:', error);
-            throw error;
+            this.error('Error refreshing orders:', error);
+            this.showError('Failed to refresh orders view');
+        } finally {
+            this.isLoading = false;
         }
     }
 
-    handleSort(column) {
-        this.debug('Sorting by column:', column);
+    getTotalPages() {
+        const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '50');
+        if (pageSize === -1) return 1; // View all
+        return Math.ceil(this.totalOrders / pageSize);
+    }
+
+    // Keep the setupTable method as is since it's specific to MyOrders view
+    async setupTable() {
+        // Get tokens from WebSocket's tokenCache first
+        const tokens = Array.from(window.webSocket.tokenCache.values())
+            .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
         
-        if (this.sortConfig.column === column) {
-            this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
-        } else {
-            this.sortConfig.column = column;
-            this.sortConfig.direction = 'asc';
+        this.debug('Available tokens:', tokens);
+
+        const paginationControls = `
+            <div class="pagination-controls">
+                <select id="page-size-select" class="page-size-select">
+                    <option value="10">10 per page</option>
+                    <option value="25">25 per page</option>
+                    <option value="50" selected>50 per page</option>
+                    <option value="100">100 per page</option>
+                    <option value="-1">View all</option>
+                </select>
+                
+                <div class="pagination-buttons">
+                    <button class="pagination-button prev-page" title="Previous page" disabled>
+                        ←
+                    </button>
+                    <span class="page-info">Page 1 of 0</span>
+                    <button class="pagination-button next-page" title="Next page" disabled>
+                        →
+                    </button>
+                </div>
+            </div>
+        `;
+
+        // Main filter controls
+        const filterControls = `
+            <div class="filter-controls">
+                <div class="filter-row">
+                    <div class="filters-left">
+                        <div class="filters-group">
+                            <button class="advanced-filters-toggle">
+                                <svg class="filter-icon" viewBox="0 0 24 24" width="16" height="16">
+                                    <path fill="currentColor" d="M14,12V19.88C14.04,20.18 13.94,20.5 13.71,20.71C13.32,21.1 12.69,21.1 12.3,20.71L10.29,18.7C10.06,18.47 9.96,18.16 10,17.87V12H9.97L4.21,4.62C3.87,4.19 3.95,3.56 4.38,3.22C4.57,3.08 4.78,3 5,3V3H19V3C19.22,3 19.43,3.08 19.62,3.22C20.05,3.56 20.13,4.19 19.79,4.62L14.03,12H14Z"/>
+                                </svg>
+                                Filters
+                                <svg class="chevron-icon" viewBox="0 0 24 24" width="16" height="16">
+                                    <path fill="currentColor" d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+                                </svg>
+                            </button>
+                            <label class="filter-toggle">
+                                <input type="checkbox" id="fillable-orders-toggle" checked>
+                                <span>Show only cancellable orders</span>
+                            </label>
+                        </div>
+                    </div>
+                    ${paginationControls}
+                </div>
+                <div class="advanced-filters" style="display: none;">
+                    <div class="filter-row">
+                        <div class="token-filters">
+                            <select id="sell-token-filter" class="token-filter">
+                                <option value="">All Sell Tokens</option>
+                                ${tokens.map(token => 
+                                    `<option value="${token.address}">${token.symbol}</option>`
+                                ).join('')}
+                            </select>
+                            <select id="buy-token-filter" class="token-filter">
+                                <option value="">All Buy Tokens</option>
+                                ${tokens.map(token => 
+                                    `<option value="${token.address}">${token.symbol}</option>`
+                                ).join('')}
+                            </select>
+                            <select id="order-sort" class="order-sort">
+                                <option value="newest">Newest First</option>
+                                <option value="best-deal">Best Deal First</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
+        const bottomControls = `
+            <div class="filter-controls bottom-controls">
+                <div class="filter-row">
+                    <div class="refresh-container">
+                        <button id="refresh-prices-btn" class="refresh-prices-button">↻ Refresh Prices</button>
+                        <span class="refresh-status"></span>
+                    </div>
+                    ${paginationControls}
+                </div>
+            </div>
+        `;
+
+        this.container.innerHTML = `
+            <div class="table-container">
+                ${filterControls}
+                <table class="orders-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Sell</th>
+                            <th>Amount</th>
+                            <th>Buy</th>
+                            <th>Amount</th>
+                            <th>
+                                Deal
+                                <span class="info-icon" title="Deal = Price × Market Rate
+
+For Your Orders (as Seller):
+• Higher deal number is better
+• Deal > 1: You're getting more than market value
+• Deal < 1: You're getting less than market value
+
+Example:
+Deal = 1.2 means you're selling at 20% above market rate
+Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
+                            </th>
+                            <th>Expires</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                ${bottomControls}
+            </div>`;
+
+        // Setup advanced filters toggle
+        const advancedFiltersToggle = this.container.querySelector('.advanced-filters-toggle');
+        const advancedFilters = this.container.querySelector('.advanced-filters');
+        
+        if (advancedFiltersToggle && advancedFilters) {
+            advancedFiltersToggle.addEventListener('click', () => {
+                const isExpanded = advancedFilters.style.display !== 'none';
+                advancedFilters.style.display = isExpanded ? 'none' : 'block';
+                advancedFiltersToggle.classList.toggle('expanded', !isExpanded);
+            });
         }
 
-        const headers = this.container.querySelector('thead').querySelectorAll('th[data-sort]');
-        headers.forEach(header => {
-            const icon = header.querySelector('.sort-icon');
-            if (header.dataset.sort === column) {
-                header.classList.add('active-sort');
-                icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
-            } else {
-                header.classList.remove('active-sort');
-                icon.textContent = '↕';
+        // Add event listeners for filters
+        const sellTokenFilter = this.container.querySelector('#sell-token-filter');
+        const buyTokenFilter = this.container.querySelector('#buy-token-filter');
+        const orderSort = this.container.querySelector('#order-sort');
+
+        if (sellTokenFilter) sellTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        if (buyTokenFilter) buyTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        if (orderSort) orderSort.addEventListener('change', () => this.refreshOrdersView());
+
+        // Initialize pagination
+        this.currentPage = 1;
+        const pageSize = this.container.querySelector('#page-size-select');
+        if (pageSize) {
+            pageSize.value = '50'; // Set default page size
+        }
+
+        // Setup pagination for both top and bottom controls
+        const setupPaginationListeners = (controls) => {
+            const prevButton = controls.querySelector('.prev-page');
+            const nextButton = controls.querySelector('.next-page');
+            const pageInfo = controls.querySelector('.page-info');
+            
+            if (prevButton) {
+                prevButton.addEventListener('click', () => {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+            
+            if (nextButton) {
+                nextButton.addEventListener('click', () => {
+                    const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+                    const totalPages = Math.ceil(this.totalOrders / pageSize);
+                    if (this.currentPage < totalPages) {
+                        this.currentPage++;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+        };
+
+        // Sync both page size selects
+        const pageSizeSelects = this.container.querySelectorAll('.page-size-select');
+        pageSizeSelects.forEach(select => {
+            select.addEventListener('change', (event) => {
+                // Update all page size selects to match
+                pageSizeSelects.forEach(otherSelect => {
+                    if (otherSelect !== event.target) {
+                        otherSelect.value = event.target.value;
+                    }
+                });
+                this.currentPage = 1; // Reset to first page when changing page size
+                this.refreshOrdersView();
+            });
+        });
+
+        // Setup pagination for both top and bottom controls
+        const controls = this.container.querySelectorAll('.filter-controls');
+        controls.forEach(setupPaginationListeners);
+
+        // Add filter toggle listener
+        const filterToggles = this.container.querySelectorAll('#fillable-orders-toggle');
+        filterToggles.forEach(toggle => {
+            toggle.addEventListener('change', (event) => {
+                filterToggles.forEach(otherToggle => {
+                    if (otherToggle !== event.target) {
+                        otherToggle.checked = event.target.checked;
+                    }
+                });
+                this.refreshOrdersView();
+            });
+        });
+
+        this.setupEventListeners();
+    }
+
+    setupEventListeners() {
+        // Add refresh button functionality
+        const refreshButton = this.container.querySelector('#refresh-prices-btn');
+        const statusIndicator = this.container.querySelector('.refresh-status');
+        
+        let refreshTimeout;
+        if (refreshButton) {
+            refreshButton.addEventListener('click', async () => {
+                if (refreshTimeout) return;
+                
+                refreshButton.disabled = true;
+                refreshButton.innerHTML = '↻ Refreshing...';
+                statusIndicator.className = 'refresh-status loading';
+                statusIndicator.style.opacity = 1;
+                
+                try {
+                    const result = await this.pricingService.refreshPrices();
+                    if (result.success) {
+                        statusIndicator.className = 'refresh-status success';
+                        statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                    } else {
+                        statusIndicator.className = 'refresh-status error';
+                        statusIndicator.textContent = result.message;
+                    }
+                } catch (error) {
+                    statusIndicator.className = 'refresh-status error';
+                    statusIndicator.textContent = 'Failed to refresh prices';
+                } finally {
+                    refreshButton.disabled = false;
+                    refreshButton.innerHTML = '↻ Refresh Prices';
+                    
+                    refreshTimeout = setTimeout(() => {
+                        refreshTimeout = null;
+                        statusIndicator.style.opacity = 0;
+                    }, 2000);
+                }
+            });
+        }
+
+        // Add pagination event listeners for both top and bottom controls
+        const controls = this.container.querySelectorAll('.filter-controls');
+        controls.forEach(control => {
+            const prevButton = control.querySelector('.prev-page');
+            const nextButton = control.querySelector('.next-page');
+            
+            if (prevButton) {
+                prevButton.addEventListener('click', () => {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                        this.refreshOrdersView();
+                    }
+                });
+            }
+            
+            if (nextButton) {
+                nextButton.addEventListener('click', () => {
+                    const totalPages = this.getTotalPages();
+                    this.debug('Next button clicked', { 
+                        currentPage: this.currentPage, 
+                        totalPages, 
+                        totalOrders: this.totalOrders 
+                    });
+                    if (this.currentPage < totalPages) {
+                        this.currentPage++;
+                        this.refreshOrdersView();
+                    }
+                });
             }
         });
 
-        // Use parent's debouncedRefresh instead of direct refreshOrdersView call
-        this.debouncedRefresh();
-    }
-
-    async setupTable() {
-        // Call parent's setupTable to get basic structure
-        await super.setupTable();
-        
-        // Update the filter toggle text to be more specific
-        const filterToggleSpan = this.container.querySelector('.filter-toggle span');
-        if (filterToggleSpan) {
-            filterToggleSpan.textContent = 'Show only cancellable orders';
-        }
-
-        // Show the filter toggle
-        const filterToggle = this.container.querySelector('.filter-toggle');
+        // Add filter toggle listener
+        const filterToggle = this.container.querySelector('#fillable-orders-toggle');
         if (filterToggle) {
-            filterToggle.style.display = 'flex';
-        }
-        
-        // Update the table header to show maker's perspective
-        const thead = this.container.querySelector('thead tr');
-        if (thead) {
-            thead.innerHTML = `
-                <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th>Sell</th>
-                <th>Amount</th>
-                <th>Buy</th>
-                <th>Amount</th>
-                <th>Expires</th>
-                <th data-sort="status">Status <span class="sort-icon">↕</span></th>
-                <th>Taker</th>
-                <th>Action</th>
-            `;
-
-            // Re-add click handlers for sorting
-            thead.querySelectorAll('th[data-sort]').forEach(th => {
-                th.addEventListener('click', () => this.handleSort(th.dataset.sort));
+            filterToggle.addEventListener('change', () => {
+                this.currentPage = 1; // Reset to first page when filter changes
+                this.refreshOrdersView();
             });
         }
+
+        // Add token filter listeners
+        const tokenFilters = this.container.querySelectorAll('.token-filter');
+        tokenFilters.forEach(filter => {
+            filter.addEventListener('change', () => {
+                this.currentPage = 1; // Reset to first page when filter changes
+                this.refreshOrdersView();
+            });
+        });
+
+        // Add sort listener
+        const sortSelect = this.container.querySelector('#order-sort');
+        if (sortSelect) {
+            sortSelect.addEventListener('change', () => {
+                this.currentPage = 1; // Reset to first page when sort changes
+                this.refreshOrdersView();
+            });
+        }
+    }
+
+    async createOrderRow(order) {
+        try {
+            // Create the row element first
+            const tr = document.createElement('tr');
+            tr.dataset.orderId = order.id.toString();
+            tr.dataset.timestamp = order.timings.createdAt.toString();
+            
+            // Get token info from WebSocket cache
+            const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
+            const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
+
+            // Use pre-formatted values from dealMetrics
+            const { 
+                formattedSellAmount, 
+                formattedBuyAmount, 
+                deal,
+                sellTokenUsdPrice,
+                buyTokenUsdPrice 
+            } = order.dealMetrics || {};
+
+            // Format USD prices with appropriate precision
+            const formatUsdPrice = (price) => {
+                if (!price) return '';
+                if (price >= 100) return `$${price.toFixed(0)}`;
+                if (price >= 1) return `$${price.toFixed(2)}`;
+                return `$${price.toFixed(4)}`;
+            };
+
+            // Format expiry time
+            const formatTimeDiff = (seconds) => {
+                const days = Math.floor(Math.abs(seconds) / 86400);
+                const hours = Math.floor((Math.abs(seconds) % 86400) / 3600);
+                const minutes = Math.floor((Math.abs(seconds) % 3600) / 60);
+                
+                const prefix = seconds < 0 ? '-' : '';
+                
+                if (days > 0) {
+                    return `${prefix}${days}D ${hours}H ${minutes}M`;
+                } else if (hours > 0) {
+                    return `${prefix}${hours}H ${minutes}M`;
+                } else {
+                    return `${prefix}${minutes}M`;
+                }
+            };
+
+            const currentTime = Math.floor(Date.now() / 1000);
+            const timeUntilExpiry = order.timings.expiresAt - currentTime;
+            const expiryText = formatTimeDiff(timeUntilExpiry);
+
+            // Add price-estimate class if using default price
+            const sellPriceClass = sellTokenUsdPrice ? '' : 'price-estimate';
+            const buyPriceClass = buyTokenUsdPrice ? '' : 'price-estimate';
+
+            // Get order status from WebSocket cache
+            const orderStatus = window.webSocket.getOrderStatus(order);
+
+            tr.innerHTML = `
+                <td>${order.id}</td>
+                <td>
+                    <div class="token-info">
+                        ${this.getTokenIcon(sellTokenInfo)}
+                        <div class="token-details">
+                            <span>${sellTokenInfo.symbol}</span>
+                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
+                        </div>
+                    </div>
+                </td>
+                <td>${formattedSellAmount}</td>
+                <td>
+                    <div class="token-info">
+                        ${this.getTokenIcon(buyTokenInfo)}
+                        <div class="token-details">
+                            <span>${buyTokenInfo.symbol}</span>
+                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
+                        </div>
+                    </div>
+                </td>
+                <td>${formattedBuyAmount}</td>
+                <td>${(deal || 0).toFixed(6)}</td>
+                <td>${expiryText}</td>
+                <td class="order-status">${orderStatus}</td>
+                <td class="action-column"></td>`;
+
+            // Add cancel button logic to action column
+            const actionCell = tr.querySelector('.action-column');
+            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            
+            // Use WebSocket helper to determine if order can be cancelled
+            if (window.webSocket.canCancelOrder(order, userAddress)) {
+                const cancelButton = document.createElement('button');
+                cancelButton.className = 'cancel-order-btn';
+                cancelButton.textContent = 'Cancel';
+                
+                cancelButton.addEventListener('click', async () => {
+                    try {
+                        cancelButton.disabled = true;
+                        cancelButton.textContent = 'Cancelling...';
+                        cancelButton.classList.add('disabled');
+
+                        // Get contract from WebSocket and connect to signer
+                        const contract = window.webSocket.contract;
+                        if (!contract) {
+                            throw new Error('Contract not available');
+                        }
+
+                        const signer = this.provider.getSigner();
+                        const contractWithSigner = contract.connect(signer);
+                        
+                        // Add gas buffer
+                        const gasEstimate = await contractWithSigner.estimateGas.cancelOrder(order.id);
+                        const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
+                        
+                        cancelButton.textContent = 'Approving...';
+                        
+                        const tx = await contractWithSigner.cancelOrder(order.id, { gasLimit });
+                        
+                        cancelButton.textContent = 'Confirming...';
+                        
+                        const receipt = await tx.wait();
+                        if (receipt.status === 0) {
+                            throw new Error('Transaction reverted by contract');
+                        }
+
+                        // Show success notification
+                        this.showSuccess(`Order ${order.id} cancelled successfully!`);
+
+                        // Update the row status immediately
+                        const statusCell = tr.querySelector('td.order-status');
+                        if (statusCell) {
+                            statusCell.textContent = 'Cancelled';
+                            statusCell.classList.add('cancelled');
+                        }
+
+                        // Remove the cancel button
+                        actionCell.textContent = '-';
+
+                        this.debouncedRefresh();
+                    } catch (error) {
+                        this.debug('Error cancelling order:', error);
+                        if (error.code === 4001) {
+                            this.showError('Transaction rejected by user');
+                        } else {
+                            this.showError(this.getReadableError(error));
+                        }
+                    } finally {
+                        cancelButton.disabled = false;
+                        cancelButton.textContent = 'Cancel';
+                        cancelButton.classList.remove('disabled');
+                    }
+                });
+                
+                actionCell.appendChild(cancelButton);
+            } else {
+                actionCell.textContent = '-';
+            }
+
+            // Start the expiry timer
+            this.startExpiryTimer(tr);
+
+            return tr;
+        } catch (error) {
+            this.error('Error creating order row:', error);
+            return null;
+        }
+    }
+
+    updatePaginationControls(totalOrders) {
+        const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
+        
+        const updateControls = (container) => {
+            const prevButton = container.querySelector('.prev-page');
+            const nextButton = container.querySelector('.next-page');
+            const pageInfo = container.querySelector('.page-info');
+            
+            if (!prevButton || !nextButton || !pageInfo) {
+                console.warn('Pagination controls not found');
+                return;
+            }
+            
+            if (pageSize === -1) {
+                // Show all orders
+                prevButton.disabled = true;
+                nextButton.disabled = true;
+                pageInfo.textContent = `Showing all ${totalOrders} orders`;
+                return;
+            }
+            
+            const totalPages = Math.max(1, Math.ceil(totalOrders / pageSize));
+            
+            // Ensure current page is within bounds
+            this.currentPage = Math.min(Math.max(1, this.currentPage), totalPages);
+            
+            prevButton.disabled = this.currentPage <= 1;
+            nextButton.disabled = this.currentPage >= totalPages;
+            
+            const startItem = ((this.currentPage - 1) * pageSize) + 1;
+            const endItem = Math.min(this.currentPage * pageSize, totalOrders);
+            
+            pageInfo.textContent = `${startItem}-${endItem} of ${totalOrders} orders (Page ${this.currentPage} of ${totalPages})`;
+        };
+        
+        // Update both top and bottom controls
+        const controls = this.container.querySelectorAll('.filter-controls');
+        controls.forEach(updateControls);
+    }
+
+    startExpiryTimer(row) {
+        // Clear any existing timer
+        const existingTimer = this.expiryTimers?.get(row.dataset.orderId);
+        if (existingTimer) {
+            clearInterval(existingTimer);
+        }
+
+        // Initialize timers Map if not exists
+        if (!this.expiryTimers) {
+            this.expiryTimers = new Map();
+        }
+
+        const updateExpiryAndButton = async () => {
+            const expiresCell = row.querySelector('td:nth-child(7)');
+            const actionCell = row.querySelector('.action-column');
+            if (!expiresCell || !actionCell) return;
+
+            const orderId = row.dataset.orderId;
+            const order = window.webSocket.orderCache.get(Number(orderId));
+            if (!order) return;
+
+            const currentTime = Math.floor(Date.now() / 1000);
+            const timeDiff = order.timings.expiresAt - currentTime;
+            const currentAccount = window.walletManager.getAccount()?.toLowerCase();
+
+            // Update expiry text
+            const newExpiryText = this.formatTimeDiff(timeDiff);
+            if (expiresCell.textContent !== newExpiryText) {
+                expiresCell.textContent = newExpiryText;
+            }
+
+            // Update action column content for MyOrders view
+            if (window.webSocket.canCancelOrder(order, currentAccount)) {
+                // Only update if there isn't already a cancel button
+                if (!actionCell.querySelector('.cancel-order-btn')) {
+                    const cancelButton = document.createElement('button');
+                    cancelButton.className = 'cancel-order-btn';
+                    cancelButton.textContent = 'Cancel';
+                    
+                    cancelButton.addEventListener('click', async () => {
+                        try {
+                            cancelButton.disabled = true;
+                            cancelButton.textContent = 'Cancelling...';
+                            
+                            // Get contract from WebSocket and connect to signer
+                            const contract = window.webSocket.contract;
+                            if (!contract) {
+                                throw new Error('Contract not available');
+                            }
+
+                            const signer = this.provider.getSigner();
+                            const contractWithSigner = contract.connect(signer);
+                            
+                            const gasEstimate = await contractWithSigner.estimateGas.cancelOrder(order.id);
+                            const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
+                            
+                            const tx = await contractWithSigner.cancelOrder(order.id, { gasLimit });
+                            this.showError(`Cancelling order ${order.id}... Transaction sent`);
+                            
+                            const receipt = await tx.wait();
+                            if (receipt.status === 0) {
+                                throw new Error('Transaction reverted by contract');
+                            }
+
+                            this.showSuccess(`Order ${order.id} cancelled successfully!`);
+                            actionCell.textContent = '-';
+                            this.debouncedRefresh();
+                        } catch (error) {
+                            console.error('Error cancelling order:', error);
+                            this.showError(this.getReadableError(error));
+                            cancelButton.disabled = false;
+                            cancelButton.textContent = 'Cancel';
+                        }
+                    });
+                    
+                    actionCell.innerHTML = '';
+                    actionCell.appendChild(cancelButton);
+                }
+            } else if (order.maker?.toLowerCase() === currentAccount) {
+                actionCell.innerHTML = '<span class="your-order">Your Order</span>';
+            } else if (currentTime > order.timings.expiresAt) {
+                actionCell.innerHTML = '<span class="expired-order">Expired</span>';
+            } else {
+                actionCell.textContent = '-';
+            }
+        };
+
+        // Update immediately and then every minute
+        updateExpiryAndButton();
+        const timerId = setInterval(updateExpiryAndButton, 60000);
+        this.expiryTimers.set(row.dataset.orderId, timerId);
     }
 }

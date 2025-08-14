@@ -2,25 +2,29 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
-import { isDebugEnabled, getNetworkConfig } from '../config.js';
+import { getNetworkConfig } from '../config.js';
+import { NETWORK_TOKENS } from '../utils/tokens.js';
+import { PricingService } from '../services/PricingService.js';
+import { walletManager } from '../config.js';
+import { createLogger } from '../services/LogService.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
         super(containerId);
-        this.orders = new Map();
-        this.tokenCache = new Map();
         this.provider = new ethers.providers.Web3Provider(window.ethereum);
         this.currentPage = 1;
+        this.totalOrders = 0;
         this.setupErrorHandling();
         this.eventSubscriptions = new Set();
         this.expiryTimers = new Map();
+        this.tokenList = [];
+        this.currentAccount = null;
         
-        // Initialize debug logger with VIEW_ORDERS flag
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('VIEW_ORDERS')) {
-                console.log('[ViewOrders]', message, ...args);
-            }
-        };
+        // Initialize logger
+        const logger = createLogger('VIEW_ORDERS');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
 
         // Add debounce mechanism
         this._refreshTimeout = null;
@@ -28,7 +32,7 @@ export class ViewOrders extends BaseComponent {
             clearTimeout(this._refreshTimeout);
             this._refreshTimeout = setTimeout(() => {
                 this.refreshOrdersView().catch(error => {
-                    this.debug('Error refreshing orders:', error);
+                    this.error('Error refreshing orders:', error);
                 });
             }, 100);
         };
@@ -36,18 +40,168 @@ export class ViewOrders extends BaseComponent {
         // Add loading state
         this.isLoading = false;
 
-        // Initialize sorting state with null values
-        this.sortConfig = {
-            column: null,
-            direction: null,
-            isColumnClick: false
-        };
+        // Add pricing service
+        this.pricingService = new PricingService();
+
+        // Subscribe to pricing updates
+        this.pricingService.subscribe((event) => {
+            if (event === 'refreshComplete') {
+                this.debug('Prices updated, refreshing orders view');
+                this.refreshOrdersView().catch(error => {
+                    this.error('Error refreshing orders after price update:', error);
+                });
+            }
+        });
+
+        // Subscribe to WebSocket updates
+        if (window.webSocket) {
+            window.webSocket.subscribe("ordersUpdated", () => {
+                this.debug('Orders updated via WebSocket, refreshing view');
+                this.refreshOrdersView().catch(error => {
+                    this.error('Error refreshing orders after WebSocket update:', error);
+                });
+            });
+        }
+    }
+
+    async init() {
+        try {
+            this.debug('Initializing ViewOrders...');
+            
+            // Wait for WebSocket initialization first
+            if (!window.webSocket) {
+                this.debug('WebSocket not available, showing loading state...');
+                this.showLoadingState();
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                return this.init(); // Retry initialization
+            }
+
+            // Wait for WebSocket to be fully initialized
+            await window.webSocket.waitForInitialization();
+            
+            // Get current account
+            this.currentAccount = walletManager.getAccount()?.toLowerCase();
+            this.debug('Current account:', this.currentAccount);
+            
+            // Initialize table and setup WebSocket
+            await super.init();
+            await this.setupWebSocket();
+            await this.refreshOrdersView();
+            
+            this.debug('ViewOrders initialization complete');
+        } catch (error) {
+            this.debug('Error in ViewOrders initialization:', error);
+            this.showError('Failed to initialize orders view');
+        }
+    }
+
+    showLoadingState() {
+        this.container.innerHTML = `
+            <div class="loading-container">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Loading orders...</div>
+            </div>`;
+    }
+
+    getTokenIcon(token) {
+        try {
+            if (!token?.address) {
+                this.debug('No token address provided:', token);
+                return this.getDefaultTokenIcon();
+            }
+
+            // Debug log the token list and search attempt
+            this.debug('Looking for token icon:', {
+                searchAddress: token.address.toLowerCase(),
+                tokenListLength: this.tokenList?.length || 0,
+                tokenList: this.tokenList
+            });
+
+            // First check if the token exists in our token list
+            const tokenFromList = this.tokenList.find(t => {
+                const matches = t.address.toLowerCase() === token.address.toLowerCase();
+                this.debug(`Comparing addresses: ${t.address.toLowerCase()} vs ${token.address.toLowerCase()} = ${matches}`);
+                return matches;
+            });
+
+            this.debug('Token from list:', tokenFromList);
+
+            // If we found a token with a logo URI, use it
+            if (tokenFromList?.logoURI) {
+                this.debug('Using logo URI from token list:', tokenFromList.logoURI);
+                return `
+                    <div class="token-icon">
+                        <img src="${tokenFromList.logoURI}" 
+                             alt="${tokenFromList.symbol}" 
+                             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+                             class="token-icon-image" />
+                        <div class="token-icon-fallback" style="display:none">
+                            ${tokenFromList.symbol.charAt(0).toUpperCase()}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // If token is in NETWORK_TOKENS, use that logo
+            const networkToken = NETWORK_TOKENS[getNetworkConfig().name]?.find(t => 
+                t.address.toLowerCase() === token.address.toLowerCase()
+            );
+
+            if (networkToken?.logoURI) {
+                this.debug('Using logo URI from NETWORK_TOKENS:', networkToken.logoURI);
+                return `
+                    <div class="token-icon">
+                        <img src="${networkToken.logoURI}" 
+                             alt="${networkToken.symbol}" 
+                             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+                             class="token-icon-image" />
+                        <div class="token-icon-fallback" style="display:none">
+                            ${networkToken.symbol.charAt(0).toUpperCase()}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Fallback to color-based icon
+            this.debug('No logo URI found, using fallback icon');
+            const symbol = token.symbol || '?';
+            const firstLetter = symbol.charAt(0).toUpperCase();
+            
+            const colors = [
+                '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+                '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+            ];
+            
+            const colorIndex = token.address ? 
+                parseInt(token.address.slice(-6), 16) % colors.length :
+                Math.floor(Math.random() * colors.length);
+            const backgroundColor = colors[colorIndex];
+            
+            return `
+                <div class="token-icon">
+                    <div class="token-icon-fallback" style="background: ${backgroundColor}">
+                        ${firstLetter}
+                    </div>
+                </div>
+            `;
+        } catch (error) {
+            this.debug('Error generating token icon:', error);
+            return this.getDefaultTokenIcon();
+        }
+    }
+
+    getDefaultTokenIcon() {
+        return `
+            <div class="token-icon">
+                <div class="token-icon-fallback" style="background: #FF6B6B">?</div>
+            </div>
+        `;
     }
 
     setupErrorHandling() {
         if (!window.webSocket) {
             if (!this._retryAttempt) {
-                this.debug('WebSocket not available, waiting for initialization...');
+                this.warn('WebSocket not available, waiting for initialization...');
                 this._retryAttempt = true;
             }
             setTimeout(() => this.setupErrorHandling(), 1000);
@@ -78,7 +232,7 @@ export class ViewOrders extends BaseComponent {
             }
 
             this.showError(userMessage);
-            this.debug('Order error:', {
+            this.error('Order error:', {
                 code: error.code,
                 message: error.message,
                 details: error.details
@@ -87,76 +241,20 @@ export class ViewOrders extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
-        try {
-            this.debug('Initializing ViewOrders component');
-            
-            // Add WebSocket connection check
-            if (!window.webSocket) {
-                this.debug('ERROR: WebSocket not available');
-                this.showError('WebSocket connection not available');
-                return;
-            }
-
-            if (!window.webSocket.isInitialized) {
-                this.debug('WebSocket not yet initialized, waiting...');
-                let attempts = 0;
-                const maxAttempts = 10;
-                
-                while (!window.webSocket.isInitialized && attempts < maxAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    attempts++;
-                    this.debug(`Waiting for WebSocket initialization... Attempt ${attempts}/${maxAttempts}`);
-                }
-                
-                if (!window.webSocket.isInitialized) {
-                    this.debug('ERROR: WebSocket failed to initialize after waiting');
-                    this.showError('Failed to connect to WebSocket');
-                    return;
-                }
-            }
-
-            // Add cache check
-            const cachedOrders = window.webSocket.getOrders();
-            this.debug('Initial cached orders:', {
-                orderCount: cachedOrders?.length || 0,
-                orders: cachedOrders
-            });
-            
-            // Cleanup previous state
-            this.cleanup();
-            this.container.innerHTML = '';
-            
+        if (!this.initialized) {
+            // First time setup - create table structure
             await this.setupTable();
-            
-            // Setup WebSocket event handlers
-            await this.setupWebSocket();
-
-            // Get initial orders from cache
-            if (cachedOrders && cachedOrders.length > 0) {
-                this.debug('Loading orders from cache:', cachedOrders);
-                // Clear existing orders before adding new ones
-                this.orders.clear();
-                cachedOrders.forEach(order => {
-                    this.orders.set(order.id, order);
-                });
-            }
-
-            // Always call refreshOrdersView to show orders or empty state
-            await this.refreshOrdersView();
-
-        } catch (error) {
-            this.debug('Initialization error:', error);
-            throw error;
+            this.initialized = true;
         }
+        // Just refresh the view with current cache
+        await this.refreshOrdersView();
     }
 
     async setupWebSocket() {
         this.debug('Setting up WebSocket subscriptions');
         
-        // Add connection status check
         if (!window.webSocket?.provider) {
-            this.debug('ERROR: WebSocket provider not available');
-            this.showError('WebSocket provider not available');
+            this.debug('WebSocket provider not available, waiting for reconnection...');
             return;
         }
 
@@ -167,72 +265,38 @@ export class ViewOrders extends BaseComponent {
         });
         
         // Clear existing subscriptions
+        this.eventSubscriptions.forEach(sub => {
+            window.webSocket.unsubscribe(sub.event, sub.callback);
+        });
         this.eventSubscriptions.clear();
-        if (window.webSocket) {
-            window.webSocket.subscribers.forEach((_, event) => {
-                window.webSocket.unsubscribe(event, this);
-            });
-        }
-        
-        // Add new subscriptions
-        this.eventSubscriptions.add({
-            event: 'orderSyncComplete',
-            callback: (orders) => {
-                this.debug('Received order sync:', orders);
-                this.orders.clear();
-                Object.entries(orders).forEach(([orderId, orderData]) => {
-                    this.orders.set(Number(orderId), {
-                        id: Number(orderId),
-                        ...orderData
-                    });
-                });
-                this.refreshOrdersView().catch(console.error);
-            }
-        });
 
-        this.eventSubscriptions.add({
-            event: 'OrderCreated',
-            callback: (orderData) => {
-                this.debug('New order received:', orderData);
-                this.orders.set(Number(orderData.id), orderData);
-                this.refreshOrdersView().catch(error => {
-                    console.error('[ViewOrders] Error refreshing view after new order:', error);
-                });
-            }
-        });
-
-        this.eventSubscriptions.add({
-            event: 'OrderFilled',
-            callback: (orderData) => {
-                this.debug('Order filled:', orderData);
-                if (this.orders.has(Number(orderData.id))) {
-                    this.orders.get(Number(orderData.id)).status = 'Filled';
-                    this.refreshOrdersView().catch(error => {
-                        console.error('[ViewOrders] Error refreshing view after order fill:', error);
-                    });
+        // Add new subscriptions with error handling
+        const addSubscription = (event, callback) => {
+            const wrappedCallback = async (...args) => {
+                try {
+                    await callback(...args);
+                } catch (error) {
+                    this.debug(`Error in ${event} callback:`, error);
+                    this.showError('Error processing order update');
                 }
-            }
+            };
+            this.eventSubscriptions.add({ event, callback: wrappedCallback });
+            window.webSocket.subscribe(event, wrappedCallback);
+        };
+
+        // Add subscriptions with error handling
+        addSubscription('orderSyncComplete', async (orders) => {
+            this.debug('Order sync complete:', orders);
+            await this.refreshOrdersView();
         });
 
-        this.eventSubscriptions.add({
-            event: 'OrderCanceled',
-            callback: (orderData) => {
-                this.debug('Order canceled:', orderData);
-                if (this.orders.has(Number(orderData.id))) {
-                    this.orders.get(Number(orderData.id)).status = 'Canceled';
-                    this.refreshOrdersView().catch(error => {
-                        console.error('[ViewOrders] Error refreshing view after order cancel:', error);
-                    });
-                }
-            }
-        });
-
-        if (window.webSocket) {
-            this.debug('Registering WebSocket subscriptions');
-            this.eventSubscriptions.forEach(sub => {
-                window.webSocket.subscribe(sub.event, sub.callback);
+        // Add other event subscriptions similarly
+        ['OrderCreated', 'OrderFilled', 'OrderCanceled'].forEach(event => {
+            addSubscription(event, async (orderData) => {
+                this.debug(`${event} event received:`, orderData);
+                await this.refreshOrdersView();
             });
-        }
+        });
     }
 
     async refreshOrdersView() {
@@ -240,178 +304,87 @@ export class ViewOrders extends BaseComponent {
         this.isLoading = true;
         
         try {
-            this.debug('Refreshing orders view');
+            // Get all orders first
+            let ordersToDisplay = Array.from(window.webSocket.orderCache.values());
             
-            // Add WebSocket state check
-            if (!window.webSocket?.isInitialized) {
-                this.debug('ERROR: WebSocket not initialized during refresh');
-                this.showError('WebSocket connection not available');
-                return;
-            }
-
-            // Add order cache check
-            const cachedOrders = Array.from(this.orders.values());
-            this.debug('Current order cache:', {
-                size: this.orders.size,
-                orders: cachedOrders
-            });
-
-            this.showLoadingState();
-
-            // Get contract instance first
-            this.contract = await this.getContract();
-            
-            // Get contract expiry times
-            const orderExpiry = (await this.contract.ORDER_EXPIRY()).toNumber();
-            const gracePeriod = (await this.contract.GRACE_PERIOD()).toNumber();
-            const currentTime = Math.floor(Date.now() / 1000);
-
-            // Get filter and pagination state
+            // Apply token filters
+            const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
+            const buyTokenFilter = this.container.querySelector('#buy-token-filter')?.value;
+            const orderSort = this.container.querySelector('#order-sort')?.value;
             const showOnlyActive = this.container.querySelector('#fillable-orders-toggle')?.checked;
-            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-            
-            // Process all orders first
-            let ordersToDisplay = Array.from(this.orders.values());
-            
-            this.debug('Orders before filtering:', ordersToDisplay);
 
-            // Get all token details at once
-            const tokenAddresses = new Set();
-            ordersToDisplay.forEach(order => {
-                if (order?.sellToken) tokenAddresses.add(order.sellToken.toLowerCase());
-                if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
-            });
-
-            const [tokenDetails] = await Promise.all([
-                this.getTokenDetails(Array.from(tokenAddresses))
-            ]);
-
-            // Process token details
-            const tokenDetailsMap = new Map();
-            Array.from(tokenAddresses).forEach((address, index) => {
-                if (tokenDetails[index]) {
-                    tokenDetailsMap.set(address, tokenDetails[index]);
-                }
-            });
-
-            // Do all async operations before touching the DOM
-            if (showOnlyActive && this.contract) {
-                ordersToDisplay = ordersToDisplay.filter(order => {
-                    // Check if order is not filled or canceled
-                    if (order.status === 'Filled' || order.status === 'Canceled') {
-                        return false;
-                    }
-
-                    // Check if order is not expired
-                    const expiryTime = Number(order.timestamp) + orderExpiry;
-                    return currentTime < expiryTime;
-                });
+            // Reset to page 1 when filters change
+            if (this._lastFilters?.sellToken !== sellTokenFilter ||
+                this._lastFilters?.buyToken !== buyTokenFilter ||
+                this._lastFilters?.showOnlyActive !== showOnlyActive) {
+                this.currentPage = 1;
             }
 
-            // Sort orders based on whether this is a column click or initial load
-            if (this.sortConfig.isColumnClick) {
-                switch (this.sortConfig.column) {
-                    case 'id':
-                        ordersToDisplay.sort((a, b) => {
-                            const idCompare = Number(a.id) - Number(b.id);
-                            return this.sortConfig.direction === 'asc' ? idCompare : -idCompare;
-                        });
-                        break;
-                    case 'buy':
-                        ordersToDisplay.sort((a, b) => {
-                            const tokenA = tokenDetailsMap.get(a.buyToken.toLowerCase())?.symbol || '';
-                            const tokenB = tokenDetailsMap.get(b.buyToken.toLowerCase())?.symbol || '';
-                            const compare = tokenA.localeCompare(tokenB);
-                            return this.sortConfig.direction === 'asc' ? compare : -compare;
-                        });
-                        break;
-                    case 'sell':
-                        ordersToDisplay.sort((a, b) => {
-                            const tokenA = tokenDetailsMap.get(a.sellToken.toLowerCase())?.symbol || '';
-                            const tokenB = tokenDetailsMap.get(b.sellToken.toLowerCase())?.symbol || '';
-                            const compare = tokenA.localeCompare(tokenB);
-                            return this.sortConfig.direction === 'asc' ? compare : -compare;
-                        });
-                        break;
+            // Store current filter state
+            this._lastFilters = {
+                sellToken: sellTokenFilter,
+                buyToken: buyTokenFilter,
+                showOnlyActive: showOnlyActive
+            };
+
+            // Filter orders based on status and fillable flag
+            ordersToDisplay = ordersToDisplay.filter(order => {
+                const currentTime = Math.floor(Date.now() / 1000);
+                const isExpired = currentTime > order.timings.expiresAt;
+                const isActive = order.status === 'Active' && !isExpired;
+                const canFill = window.webSocket.canFillOrder(order, walletManager.getAccount());
+                const isUserOrder = order.maker?.toLowerCase() === walletManager.getAccount()?.toLowerCase();
+
+                // Apply token filters
+                if (sellTokenFilter && order.sellToken.toLowerCase() !== sellTokenFilter.toLowerCase()) return false;
+                if (buyTokenFilter && order.buyToken.toLowerCase() !== buyTokenFilter.toLowerCase()) return false;
+
+                // Apply active/fillable filter
+                if (showOnlyActive) {
+                    return isActive && (canFill || isUserOrder);
                 }
-            } else {
-                // Default status-based sorting
-                ordersToDisplay.sort((a, b) => {
-                    // Define status priority (Active = 0, Filled = 1, Canceled = 2, Expired = 3)
-                    const getStatusPriority = (order) => {
-                        // If order is explicitly Filled or Canceled, use that status
-                        if (order.status === 'Filled') return 1;
-                        if (order.status === 'Canceled') return 2;
+                
+                return true; // Show all orders when checkbox is unchecked
+            });
 
-                        // Check if Active order is expired
-                        const orderTime = Number(order.timestamp);
-                        const expiryTime = orderTime + orderExpiry;
-                        
-                        if (currentTime >= expiryTime) {
-                            return 3; // Expired orders have lowest priority
-                        }
+            // Set total orders after filtering
+            this.totalOrders = ordersToDisplay.length;
 
-                        return 0; // Active and not expired
-                    };
-
-                    const priorityA = getStatusPriority(a);
-                    const priorityB = getStatusPriority(b);
-
-                    // First sort by status priority
-                    if (priorityA !== priorityB) {
-                        return priorityA - priorityB;
-                    }
-
-                    // Within same status, sort by ID descending
-                    return Number(b.id) - Number(a.id);
-                });
+            // Apply sorting
+            if (orderSort === 'newest') {
+                ordersToDisplay.sort((a, b) => b.id - a.id);
+            } else if (orderSort === 'best-deal') {
+                ordersToDisplay.sort((a, b) => 
+                    Number(a.dealMetrics?.deal || Infinity) - 
+                    Number(b.dealMetrics?.deal || Infinity)
+                );
             }
 
-            const totalOrders = ordersToDisplay.length;
-            
             // Apply pagination
-            if (pageSize !== -1) {
-                const startIndex = (this.currentPage - 1) * pageSize;
-                ordersToDisplay = ordersToDisplay.slice(startIndex, startIndex + pageSize);
-            }
+            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+            const startIndex = (this.currentPage - 1) * pageSize;
+            const endIndex = pageSize === -1 ? ordersToDisplay.length : startIndex + pageSize;
+            const paginatedOrders = pageSize === -1 ? 
+                ordersToDisplay : 
+                ordersToDisplay.slice(startIndex, endIndex);
 
-            // Create all rows before touching the DOM
-            const rows = await Promise.all(ordersToDisplay.map(async order => {
-                const orderWithLowercase = {
-                    ...order,
-                    sellToken: order.sellToken.toLowerCase(),
-                    buyToken: order.buyToken.toLowerCase()
-                };
-                return this.createOrderRow(orderWithLowercase, tokenDetailsMap);
-            }));
-
-            // Only update the DOM once all processing is complete
+            // Update the table
             const tbody = this.container.querySelector('tbody');
-            if (!tbody) return;
-
-            // Update pagination before showing orders
-            this.updatePaginationControls(totalOrders);
-
-            // Show no orders message or display the rows
-            if (!rows.length) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="10" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyActive ? 'No fillable orders found' : 'No orders found'}
-                            </div>
-                        </td>
-                    </tr>`;
-            } else {
-                tbody.innerHTML = '';
-                rows.forEach(row => {
-                    if (row) tbody.appendChild(row);
-                });
+            tbody.innerHTML = '';
+            
+            for (const order of paginatedOrders) {
+                const newRow = await this.createOrderRow(order);
+                if (newRow) {
+                    tbody.appendChild(newRow);
+                }
             }
+
+            // Update pagination controls
+            this.updatePaginationControls(this.totalOrders);
 
         } catch (error) {
             this.debug('Error refreshing orders:', error);
-            this.showError('Failed to refresh orders');
+            this.showError('Failed to refresh orders view');
         } finally {
             this.isLoading = false;
         }
@@ -425,83 +398,98 @@ export class ViewOrders extends BaseComponent {
             </div>`;
     }
 
-    updateOrderStatus(orderId, status) {
-        const order = this.orders.get(orderId.toString());
-        if (order) {
-            order.status = status;
-            this.orders.set(orderId.toString(), order);
-            this.debouncedRefresh();
-        }
-    }
-
-    async addOrderToTable(order, tokenDetailsMap) {
-        try {
-            this.orders.set(order.id.toString(), order);
-            this.debouncedRefresh();
-        } catch (error) {
-            console.error('[ViewOrders] Error adding order to table:', error);
-            throw error;
-        }
-    }
-
-    removeOrderFromTable(orderId) {
-        this.orders.delete(orderId.toString());
-        this.debouncedRefresh();
-    }
-
     async setupTable() {
         const tableContainer = this.createElement('div', 'table-container');
         
-        // Create top pagination controls with dropdown
-        const createTopControls = () => `
-            <div class="pagination-controls">
-                <select id="page-size-select" class="page-size-select">
-                    <option value="10">10 per page</option>
-                    <option value="25">25 per page</option>
-                    <option value="50" selected>50 per page</option>
-                    <option value="100">100 per page</option>
-                    <option value="-1">View all</option>
-                </select>
-                
-                <div class="pagination-buttons">
-                    <button class="pagination-button prev-page" title="Previous page">
-                        ←
+        // Main filter controls
+        const filterControls = this.createElement('div', 'filter-controls');
+        filterControls.innerHTML = `
+            <div class="filter-row">
+                <div class="filters-group">
+                    <button class="advanced-filters-toggle">
+                        <svg class="filter-icon" viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M14,12V19.88C14.04,20.18 13.94,20.5 13.71,20.71C13.32,21.1 12.69,21.1 12.3,20.71L10.29,18.7C10.06,18.47 9.96,18.16 10,17.87V12H9.97L4.21,4.62C3.87,4.19 3.95,3.56 4.38,3.22C4.57,3.08 4.78,3 5,3V3H19V3C19.22,3 19.43,3.08 19.62,3.22C20.05,3.56 20.13,4.19 19.79,4.62L14.03,12H14Z"/>
+                        </svg>
+                        Filters
+                        <svg class="chevron-icon" viewBox="0 0 24 24" width="16" height="16">
+                            <path fill="currentColor" d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+                        </svg>
                     </button>
-                    <span class="page-info">Page 1 of 1</span>
-                    <button class="pagination-button next-page" title="Next page">
-                        →
-                    </button>
+                    <label class="filter-toggle">
+                        <input type="checkbox" id="fillable-orders-toggle" checked>
+                        <span>Show only fillable orders</span>
+                    </label>
+                </div>
+
+                <div class="pagination-controls">
+                    <select id="page-size-select" class="page-size-select">
+                        <option value="10">10 per page</option>
+                        <option value="25" selected>25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="100">100 per page</option>
+                        <option value="-1">View all</option>
+                    </select>
+                    
+                    <div class="pagination-buttons">
+                        <button class="pagination-button prev-page" title="Previous page">←</button>
+                        <span class="page-info">Page 1 of 1</span>
+                        <button class="pagination-button next-page" title="Next page">→</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        // Get tokens from WebSocket's tokenCache
+        const tokens = Array.from(window.webSocket.tokenCache.values())
+            .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
+        
+        this.debug('Available tokens:', tokens);
+
+        // Advanced filters section
+        const advancedFilters = this.createElement('div', 'advanced-filters');
+        advancedFilters.style.display = 'none';
+        advancedFilters.innerHTML = `
+            <div class="filter-row">
+                <div class="token-filters">
+                    <select id="sell-token-filter" class="token-filter">
+                        <option value="">All Sell Tokens</option>
+                        ${tokens.map(token => 
+                            `<option value="${token.address}">${token.symbol}</option>`
+                        ).join('')}
+                    </select>
+                    <select id="buy-token-filter" class="token-filter">
+                        <option value="">All Buy Tokens</option>
+                        ${tokens.map(token => 
+                            `<option value="${token.address}">${token.symbol}</option>`
+                        ).join('')}
+                    </select>
+                    <select id="order-sort" class="order-sort">
+                        <option value="newest">Newest First</option>
+                        <option value="best-deal">Best Deal First</option>
+                    </select>
                 </div>
             </div>
         `;
 
-        // Create bottom pagination controls without dropdown
-        const createBottomControls = () => `
-            <div class="pagination-controls">
-                <div class="pagination-buttons">
-                    <button class="pagination-button prev-page" title="Previous page">
-                        ←
-                    </button>
-                    <span class="page-info">Page 1 of 1</span>
-                    <button class="pagination-button next-page" title="Next page">
-                        
-                    </button>
-                </div>
-            </div>
-        `;
+        // Add the advanced filters section after the main controls
+        filterControls.appendChild(advancedFilters);
         
-        // Add top filter controls with pagination
-        const filterControls = this.createElement('div', 'filter-controls');
-        filterControls.innerHTML = `
-            <div class="filter-row">
-                <label class="filter-toggle">
-                    <input type="checkbox" id="fillable-orders-toggle" checked>
-                    <span>Show only fillable orders</span>
-                </label>
-                ${createTopControls()}
-            </div>
-        `;
-        
+        // Setup advanced filters toggle
+        const advancedFiltersToggle = filterControls.querySelector('.advanced-filters-toggle');
+        advancedFiltersToggle.addEventListener('click', () => {
+            const isExpanded = advancedFilters.style.display !== 'none';
+            advancedFilters.style.display = isExpanded ? 'none' : 'block';
+            advancedFiltersToggle.classList.toggle('expanded', !isExpanded);
+        });
+
+        // Add event listeners for filters
+        const sellTokenFilter = advancedFilters.querySelector('#sell-token-filter');
+        const buyTokenFilter = advancedFilters.querySelector('#buy-token-filter');
+        const orderSort = advancedFilters.querySelector('#order-sort');
+
+        sellTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        buyTokenFilter.addEventListener('change', () => this.refreshOrdersView());
+        orderSort.addEventListener('change', () => this.refreshOrdersView());
+
         tableContainer.appendChild(filterControls);
         
         // Add table
@@ -510,127 +498,143 @@ export class ViewOrders extends BaseComponent {
         const thead = this.createElement('thead');
         thead.innerHTML = `
             <tr>
-                <th data-sort="id">ID <span class="sort-icon">↕</span></th>
-                <th data-sort="buy">Buy <span class="sort-icon">↕</span></th>
+                <th>ID</th>
+                <th>Buy</th>
                 <th>Amount</th>
-                <th data-sort="sell">Sell <span class="sort-icon">↕</span></th>
+                <th>Sell</th>
                 <th>Amount</th>
+                <th>
+                    Deal
+                    <span class="info-icon" title="Deal = Price × Market Rate
+                    
+For Sellers:
+• Higher deal number is better
+• Deal > 1: Getting more than market value
+• Deal < 1: Getting less than market value
+
+For Buyers:
+• Lower deal number is better
+• Deal > 1: Paying more than market value
+• Deal < 1: Paying less than market value">ⓘ</span>
+                </th>
                 <th>Expires</th>
                 <th>Status</th>
                 <th>Action</th>
-            </tr>
-        `;
-        
-        // Add click handlers for sorting
-        thead.querySelectorAll('th[data-sort]').forEach(th => {
-            th.addEventListener('click', () => this.handleSort(th.dataset.sort));
-        });
+            </tr>`;
         
         table.appendChild(thead);
         table.appendChild(this.createElement('tbody'));
         tableContainer.appendChild(table);
         
-        // Add bottom pagination
+        // Bottom controls with refresh button
         const bottomControls = this.createElement('div', 'filter-controls bottom-controls');
         bottomControls.innerHTML = `
             <div class="filter-row">
-                ${createBottomControls()}
+                <div class="refresh-container">
+                    <button id="refresh-prices-btn" class="refresh-prices-button">↻ Refresh Prices</button>
+                    <span class="refresh-status"></span>
+                </div>
+
+                <div class="pagination-controls">
+                    <div class="pagination-buttons">
+                        <button class="pagination-button prev-page" title="Previous page">←</button>
+                        <span class="page-info">Page 1 of 1</span>
+                        <button class="pagination-button next-page" title="Next page">→</button>
+                    </div>
+                </div>
             </div>
         `;
+        
         tableContainer.appendChild(bottomControls);
-        
-        // Add event listeners
-        const addPaginationListeners = (container, isTop) => {
-            if (isTop) {
-                const pageSizeSelect = container.querySelector('.page-size-select');
-                if (pageSizeSelect) {
-                    pageSizeSelect.addEventListener('change', () => {
-                        this.currentPage = 1;
-                        this.refreshOrdersView();
-                    });
-                }
-            }
-            
-            const prevButton = container.querySelector('.prev-page');
-            const nextButton = container.querySelector('.next-page');
-            
-            if (prevButton) {
-                prevButton.addEventListener('click', () => {
-                    if (this.currentPage > 1) {
-                        this.currentPage--;
-                        this.refreshOrdersView();
-                    }
-                });
-            }
-            
-            if (nextButton) {
-                nextButton.addEventListener('click', () => {
-                    const totalPages = this.getTotalPages();
-                    if (this.currentPage < totalPages) {
-                        this.currentPage++;
-                        this.refreshOrdersView();
-                    }
-                });
-            }
-        };
-        
-        // Add listeners to both top and bottom controls
-        addPaginationListeners(filterControls, true);
-        addPaginationListeners(bottomControls, false);
-        
-        const toggle = filterControls.querySelector('#fillable-orders-toggle');
-        toggle.addEventListener('change', () => this.refreshOrdersView());
-        
-        this.container.appendChild(tableContainer);
 
-        // Initialize sorting state
-        this.sortConfig = {
-            column: 'id',
-            direction: 'asc'
-        };
-    }
-
-    handleSort(column) {
-        this.debug('Sorting by column:', column);
+        // Setup refresh button functionality
+        const refreshButton = bottomControls.querySelector('#refresh-prices-btn');
+        const statusIndicator = bottomControls.querySelector('.refresh-status');
         
-        // If clicking same column and already in a sorted state
-        if (this.sortConfig.column === column && this.sortConfig.isColumnClick) {
-            // Cycle through: asc -> desc -> default (null)
-            if (this.sortConfig.direction === 'asc') {
-                this.sortConfig.direction = 'desc';
-            } else if (this.sortConfig.direction === 'desc') {
-                // Reset to default sorting
-                this.sortConfig.direction = null;
-                this.sortConfig.column = null;
-                this.sortConfig.isColumnClick = false;
-            }
-        } else {
-            // First click - start with ascending
-            this.sortConfig.column = column;
-            this.sortConfig.direction = 'asc';
-            this.sortConfig.isColumnClick = true;
-        }
-
-        // Update sort icons and active states
-        const headers = this.container.querySelectorAll('th[data-sort]');
-        headers.forEach(header => {
-            const icon = header.querySelector('.sort-icon');
-            if (header.dataset.sort === column) {
-                if (this.sortConfig.direction) {
-                    header.classList.add('active-sort');
-                    icon.textContent = this.sortConfig.direction === 'asc' ? '↑' : '↓';
+        let refreshTimeout;
+        refreshButton.addEventListener('click', async () => {
+            if (refreshTimeout) return;
+            
+            refreshButton.disabled = true;
+            refreshButton.innerHTML = '↻ Refreshing...';
+            statusIndicator.className = 'refresh-status loading';
+            statusIndicator.style.opacity = 1;
+            
+            try {
+                const result = await this.pricingService.refreshPrices();
+                if (result.success) {
+                    statusIndicator.className = 'refresh-status success';
+                    statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                    await this.refreshOrdersView();
                 } else {
-                    header.classList.remove('active-sort');
-                    icon.textContent = '↕';
+                    statusIndicator.className = 'refresh-status error';
+                    statusIndicator.textContent = result.message;
                 }
-            } else {
-                header.classList.remove('active-sort');
-                icon.textContent = '↕';
+            } catch (error) {
+                statusIndicator.className = 'refresh-status error';
+                statusIndicator.textContent = 'Failed to refresh prices';
+            } finally {
+                refreshButton.disabled = false;
+                refreshButton.innerHTML = '↻ Refresh Prices';
+                
+                refreshTimeout = setTimeout(() => {
+                    refreshTimeout = null;
+                    statusIndicator.style.opacity = 0;
+                }, 2000);
             }
         });
 
-        this.debug('Sort config after update:', this.sortConfig);
-        this.refreshOrdersView();
+        // Sync both page size selects
+        const topSelect = filterControls.querySelector('#page-size-select');
+        
+        topSelect.addEventListener('change', () => {
+            this.currentPage = 1;
+            this.refreshOrdersView();
+        });
+
+        // Add event listeners for pagination
+        const toggle = filterControls.querySelector('#fillable-orders-toggle');
+        toggle.addEventListener('change', () => this.refreshOrdersView());
+        
+        // Add event listeners for pagination
+        const setupPaginationListeners = (controls) => {
+            const prevButton = controls.querySelector('.prev-page');
+            const nextButton = controls.querySelector('.next-page');
+            const pageInfo = controls.querySelector('.page-info');
+            
+            prevButton.addEventListener('click', () => {
+                console.log('Previous clicked, current page:', this.currentPage);
+                if (this.currentPage > 1) {
+                    this.currentPage--;
+                    this.updatePageInfo(pageInfo);
+                    this.refreshOrdersView();
+                }
+            });
+            
+            nextButton.addEventListener('click', () => {
+                const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+                console.log('Next clicked, current page:', this.currentPage, 'total orders:', this.totalOrders, 'page size:', pageSize);
+                const totalPages = Math.ceil(this.totalOrders / pageSize);
+                if (this.currentPage < totalPages) {
+                    this.currentPage++;
+                    this.updatePageInfo(pageInfo);
+                    this.refreshOrdersView();
+                }
+            });
+        };
+
+        // Add this helper method to your class
+        this.updatePageInfo = (pageInfoElement) => {
+            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+            const totalPages = Math.ceil(this.totalOrders / pageSize);
+            pageInfoElement.textContent = `Page ${this.currentPage} of ${totalPages}`;
+        };
+
+        // Setup pagination for both top and bottom controls
+        const controls = tableContainer.querySelectorAll('.filter-controls');
+        controls.forEach(setupPaginationListeners);
+
+        this.container.appendChild(tableContainer);
     }
 
     formatAddress(address) {
@@ -647,37 +651,6 @@ export class ViewOrders extends BaseComponent {
         });
     }
 
-    async formatExpiry(timestamp) {
-        try {
-            const contract = await this.getContract();
-            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();  // 420 seconds (7 minutes)
-            // Don't add gracePeriod here since we only want to show when it expires
-            
-            const expiryTime = Number(timestamp) + orderExpiry;  // Just use orderExpiry
-            const now = Math.floor(Date.now() / 1000);
-            const timeLeft = expiryTime - now;
-
-            this.debug('Expiry calculation:', {
-                timestamp,
-                orderExpiry,
-                expiryTime,
-                now,
-                timeLeft,
-                timeLeftMinutes: timeLeft / 60
-            });
-
-            if (timeLeft <= 0) {
-                return 'Expired';
-            }
-
-            const minutes = Math.ceil(timeLeft / 60);
-            return `${minutes}m`;
-        } catch (error) {
-            this.debug('Error formatting expiry:', error);
-            return 'Unknown';
-        }
-    }
-
     setupEventListeners() {
         this.tbody.addEventListener('click', async (e) => {
             if (e.target.classList.contains('fill-button')) {
@@ -687,10 +660,6 @@ export class ViewOrders extends BaseComponent {
         });
     }
 
-    setupFilters() {
-        // Will implement filtering in next iteration
-    }
-
     async checkAllowance(tokenAddress, owner, amount) {
         try {
             const tokenContract = new ethers.Contract(
@@ -698,32 +667,43 @@ export class ViewOrders extends BaseComponent {
                 ['function allowance(address owner, address spender) view returns (uint256)'],
                 this.provider
             );
-            const allowance = await tokenContract.allowance(owner, this.contract.address);
+            const allowance = await tokenContract.allowance(owner, this.webSocket.contractAddress);
             return allowance.gte(amount);
         } catch (error) {
-            console.error('[ViewOrders] Error checking allowance:', error);
+            this.error('Error checking allowance:', error);
             return false;
         }
     }
 
-    async fillOrder(orderId, button) {
+    async fillOrder(orderId) {
+        const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
+        
         try {
             if (button) {
                 button.disabled = true;
-                button.textContent = 'Processing...';
+                button.textContent = 'Filling...';
+                button.classList.add('disabled');
             }
 
             this.debug('Starting fill order process for orderId:', orderId);
             
-            const order = this.orders.get(Number(orderId));
+            const order = window.webSocket.orderCache.get(Number(orderId));
             this.debug('Order details:', order);
 
             if (!order) {
                 throw new Error('Order not found');
             }
 
+            // Get contract from WebSocket and connect to signer
+            const contract = await this.getContract();
+            if (!contract) {
+                throw new Error('Contract not available');
+            }
+            const signer = this.provider.getSigner();
+            const contractWithSigner = contract.connect(signer);
+
             // Check order status first
-            const currentOrder = await this.contract.orders(orderId);
+            const currentOrder = await contractWithSigner.orders(orderId);
             this.debug('Current order state:', currentOrder);
             
             if (currentOrder.status !== 0) {
@@ -732,7 +712,7 @@ export class ViewOrders extends BaseComponent {
 
             // Check expiry
             const now = Math.floor(Date.now() / 1000);
-            const orderExpiry = await this.contract.ORDER_EXPIRY();
+            const orderExpiry = await contract.ORDER_EXPIRY();
             const expiryTime = Number(order.timestamp) + orderExpiry.toNumber();
             
             if (now >= expiryTime) {
@@ -754,6 +734,10 @@ export class ViewOrders extends BaseComponent {
 
             const currentAccount = await this.provider.getSigner().getAddress();
 
+            // Get token details for proper formatting
+            const buyTokenDecimals = await buyToken.decimals();
+            const buyTokenSymbol = await buyToken.symbol();
+            
             // Check balances first
             const buyTokenBalance = await buyToken.balanceOf(currentAccount);
             this.debug('Buy token balance:', {
@@ -762,11 +746,18 @@ export class ViewOrders extends BaseComponent {
             });
 
             if (buyTokenBalance.lt(order.buyAmount)) {
-                throw new Error(`Insufficient balance of buy token. Have: ${ethers.utils.formatEther(buyTokenBalance)}, Need: ${ethers.utils.formatEther(order.buyAmount)}`);
+                const formattedBalance = ethers.utils.formatUnits(buyTokenBalance, buyTokenDecimals);
+                const formattedRequired = ethers.utils.formatUnits(order.buyAmount, buyTokenDecimals);
+                
+                throw new Error(
+                    `Insufficient ${buyTokenSymbol} balance.\n` +
+                    `Required: ${Number(formattedRequired).toLocaleString()} ${buyTokenSymbol}\n` +
+                    `Available: ${Number(formattedBalance).toLocaleString()} ${buyTokenSymbol}`
+                );
             }
 
             // Check allowances
-            const buyTokenAllowance = await buyToken.allowance(currentAccount, this.contract.address);
+            const buyTokenAllowance = await buyToken.allowance(currentAccount, contract.address);
             this.debug('Buy token allowance:', {
                 current: buyTokenAllowance.toString(),
                 required: order.buyAmount.toString()
@@ -774,69 +765,68 @@ export class ViewOrders extends BaseComponent {
 
             if (buyTokenAllowance.lt(order.buyAmount)) {
                 this.debug('Requesting buy token approval');
-                const approveTx = await buyToken.approve(this.contract.address, order.buyAmount);
+                const approveTx = await buyToken.approve(
+                    contract.address, 
+                    order.buyAmount  // Use exact order amount instead of MaxUint256
+                );
                 await approveTx.wait();
-                this.showSuccess('Token approval granted');
+                this.showSuccess(`${buyTokenSymbol} approval granted`);
             }
 
             // Verify contract has enough sell tokens
-            const contractSellBalance = await sellToken.balanceOf(this.contract.address);
+            const contractSellBalance = await sellToken.balanceOf(contract.address);
             this.debug('Contract sell token balance:', {
                 balance: contractSellBalance.toString(),
                 required: order.sellAmount.toString()
             });
 
             if (contractSellBalance.lt(order.sellAmount)) {
-                throw new Error('Contract does not have enough tokens to fill order');
+                const sellTokenSymbol = await sellToken.symbol();
+                const sellTokenDecimals = await sellToken.decimals();
+                const formattedBalance = ethers.utils.formatUnits(contractSellBalance, sellTokenDecimals);
+                const formattedRequired = ethers.utils.formatUnits(order.sellAmount, sellTokenDecimals);
+                
+                throw new Error(
+                    `Contract has insufficient ${sellTokenSymbol} balance.\n` +
+                    `Required: ${Number(formattedRequired).toLocaleString()} ${sellTokenSymbol}\n` +
+                    `Available: ${Number(formattedBalance).toLocaleString()} ${sellTokenSymbol}`
+                );
             }
 
-            // Estimate gas first
-            try {
-                const gasEstimate = await this.contract.estimateGas.fillOrder(orderId);
-                this.debug('Gas estimate:', gasEstimate.toString());
-                
-                // Add 20% buffer to gas estimate
-                const gasLimit = gasEstimate.mul(120).div(100);
-                
-                const tx = await this.contract.fillOrder(orderId, {
-                    gasLimit
-                });
-                
-                this.debug('Transaction sent:', tx.hash);
-                const receipt = await tx.wait();
-                this.debug('Transaction receipt:', receipt);
+            // Add gas buffer and execute transaction
+            const gasEstimate = await contractWithSigner.estimateGas.fillOrder(orderId);
+            this.debug('Gas estimate:', gasEstimate.toString());
+            
+            const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
+            const tx = await contractWithSigner.fillOrder(orderId, { gasLimit });
+            this.debug('Transaction sent:', tx.hash);
+            
+            const receipt = await tx.wait();
+            this.debug('Transaction receipt:', receipt);
 
-                if (receipt.status === 0) {
-                    throw new Error('Transaction reverted by contract');
-                }
-
-                order.status = 'Filled';
-                this.orders.set(Number(orderId), order);
-                await this.refreshOrdersView();
-
-                this.showSuccess(`Order ${orderId} filled successfully!`);
-            } catch (error) {
-                this.debug('Gas estimation/transaction error:', error);
-                throw error;
+            if (receipt.status === 0) {
+                throw new Error('Transaction reverted by contract');
             }
+
+            order.status = 'Filled';
+            await this.refreshOrdersView();
+
+            this.showSuccess(`Order ${orderId} filled successfully!`);
 
         } catch (error) {
             this.debug('Fill order error details:', error);
             
-            // Handle replaced transactions that succeeded
-            if (error.code === 'TRANSACTION_REPLACED' && !error.cancelled) {
-                if (error.receipt?.status === 1) {
-                    this.showSuccess('Order filled successfully!');
-                    await this.refreshOrders();
-                    return;
-                }
+            // Handle specific error cases
+            if (error.code === 4001) {
+                this.showError('Transaction rejected by user');
+            } else {
+                this.showError(this.getReadableError(error));
             }
-            
-            this.showError('Failed to fill order');
         } finally {
             if (button) {
                 button.disabled = false;
                 button.textContent = 'Fill Order';
+                button.classList.remove('disabled');
             }
         }
     }
@@ -863,371 +853,119 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
-    async getOrderDetails(orderId) {
-        try {
-            const contract = await this.getContract();
-            if (!contract) {
-                throw new Error('Contract not initialized');
-            }
-
-            const order = await contract.orders(orderId);
-            return {
-                id: orderId,
-                maker: order.maker,
-                taker: order.taker,
-                sellToken: order.sellToken,
-                sellAmount: order.sellAmount,
-                buyToken: order.buyToken,
-                buyAmount: order.buyAmount,
-                timestamp: order.timestamp,
-                status: order.status,
-                orderCreationFee: order.orderCreationFee,
-                tries: order.tries
-            };
-        } catch (error) {
-            console.error('[ViewOrders] Error getting order details:', error);
-            throw error;
-        }
-    }
-
     cleanup() {
-        clearTimeout(this._refreshTimeout);
-        // Clear all expiry timers
+        // Only clear timers, keep table structure
         if (this.expiryTimers) {
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
             this.expiryTimers.clear();
         }
-        
-        // Clear existing subscriptions
-        this.eventSubscriptions.forEach(sub => {
-            if (window.webSocket) {
-                window.webSocket.unsubscribe(sub.event, sub.callback);
-            }
-        });
-        this.eventSubscriptions.clear();
-        
-        // Clear orders map
-        this.orders.clear();
-        
-        // Clear the table
-        if (this.container) {
-            const tbody = this.container.querySelector('tbody');
-            if (tbody) {
-                tbody.innerHTML = '';
-            }
-        }
+        // Don't clear the table
     }
 
-    async createOrderRow(order, tokenDetailsMap) {
-        const tr = this.createElement('tr');
-        tr.dataset.orderId = order.id.toString();
-        tr.dataset.timestamp = order.timestamp;
-        tr.dataset.status = order.status;
-
-        const sellTokenDetails = tokenDetailsMap.get(order.sellToken);
-        const buyTokenDetails = tokenDetailsMap.get(order.buyToken);
-        const canFill = await this.canFillOrder(order);
-        const expiryTime = await this.getExpiryTime(order.timestamp);
-        const status = this.getOrderStatus(order, expiryTime);
-        const formattedExpiry = await this.formatExpiry(order.timestamp);
-        
-        // Get current account first
-        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-        const currentAccount = accounts[0]?.toLowerCase();
-        const isUserOrder = order.maker?.toLowerCase() === currentAccount;
-
-        tr.innerHTML = `
-            <td>${order.id}</td>
-            <td>
-                <div class="token-info">
-                    <div class="token-icon small">
-                        ${this.getTokenIcon(sellTokenDetails)}
-                    </div>
-                    <a href="${this.getExplorerUrl(order.sellToken)}" 
-                       class="token-link" 
-                       target="_blank" 
-                       title="View token contract">
-                        ${sellTokenDetails?.symbol || 'Unknown'}
-                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                        </svg>
-                    </a>
-                </div>
-            </td>
-            <td>${ethers.utils.formatUnits(order.sellAmount, sellTokenDetails?.decimals || 18)}</td>
-            <td>
-                <div class="token-info">
-                    <div class="token-icon small">
-                        ${this.getTokenIcon(buyTokenDetails)}
-                    </div>
-                    <a href="${this.getExplorerUrl(order.buyToken)}" 
-                       class="token-link" 
-                       target="_blank" 
-                       title="View token contract">
-                        ${buyTokenDetails?.symbol || 'Unknown'}
-                        <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                            <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                        </svg>
-                    </a>
-                </div>
-            </td>
-            <td>${ethers.utils.formatUnits(order.buyAmount, buyTokenDetails?.decimals || 18)}</td>
-            <td>${formattedExpiry}</td>
-            <td class="order-status">${status}</td>
-            <td class="action-column">${canFill ? 
-                `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>` : 
-                isUserOrder ?
-                '<span class="your-order">Your Order</span>' : 
-                ''
-            }</td>`;
-
-        // Add click handler for fill button
-        const fillButton = tr.querySelector('.fill-button');
-        if (fillButton) {
-            fillButton.addEventListener('click', () => this.fillOrder(order.id));
-        }
-
-        // Start the expiry timer for this row
-        this.startExpiryTimer(tr);
-        
-        return tr;
-    }
-
-    async getContractExpiryTimes() {
+    async createOrderRow(order) {
         try {
-            const contract = await this.getContract();
-            if (!contract) {
-                throw new Error('Contract not initialized');
-            }
-            const orderExpiry = await contract.ORDER_EXPIRY();
-            const gracePeriod = await contract.GRACE_PERIOD();
-            return {
-                orderExpiry: orderExpiry.toNumber(),
-                gracePeriod: gracePeriod.toNumber()
+            const tr = document.createElement('tr');
+            tr.dataset.orderId = order.id.toString();
+            tr.dataset.timestamp = order.timings.createdAt.toString();
+
+            // Get token info from WebSocket cache
+            const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
+            const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
+
+            // Use pre-formatted values from dealMetrics
+            const { 
+                formattedSellAmount,
+                formattedBuyAmount,
+                deal,
+                sellTokenUsdPrice,
+                buyTokenUsdPrice 
+            } = order.dealMetrics || {};
+
+            // Format USD prices
+            const formatUsdPrice = (price) => {
+                if (!price) return '';
+                if (price >= 100) return `$${price.toFixed(0)}`;
+                if (price >= 1) return `$${price.toFixed(2)}`;
+                return `$${price.toFixed(4)}`;
             };
+
+            // Add price-estimate class if using default price
+            const sellPriceClass = sellTokenUsdPrice ? '' : 'price-estimate';
+            const buyPriceClass = buyTokenUsdPrice ? '' : 'price-estimate';
+
+            const orderStatus = window.webSocket.getOrderStatus(order);
+            const expiryText = this.formatTimeDiff(order.timings.expiresAt - Math.floor(Date.now() / 1000));
+
+            tr.innerHTML = `
+                <td>${order.id}</td>
+                <td>
+                    <div class="token-info">
+                        ${this.getTokenIcon(sellTokenInfo)}
+                        <div class="token-details">
+                            <span>${sellTokenInfo.symbol}</span>
+                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
+                        </div>
+                    </div>
+                </td>
+                <td>${formattedSellAmount}</td>
+                <td>
+                    <div class="token-info">
+                        ${this.getTokenIcon(buyTokenInfo)}
+                        <div class="token-details">
+                            <span>${buyTokenInfo.symbol}</span>
+                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
+                        </div>
+                    </div>
+                </td>
+                <td>${formattedBuyAmount}</td>
+                <td>${(deal || 0).toFixed(6)}</td>
+                <td>${expiryText}</td>
+                <td class="order-status">${orderStatus}</td>
+                <td class="action-column"></td>`;
+
+            // Start expiry timer for this row
+            this.startExpiryTimer(tr);
+
+            return tr;
         } catch (error) {
-            console.error('[ViewOrders] Error fetching expiry times:', error);
-            throw error;
+            this.error('Error creating order row:', error);
+            return null;
         }
     }
 
-    async getExpiryTime(timestamp) {
-        try {
-            const { orderExpiry, gracePeriod } = await this.getContractExpiryTimes();
-            return (Number(timestamp) + orderExpiry + gracePeriod) * 1000; // Convert to milliseconds
-        } catch (error) {
-            console.error('[ViewOrders] Error calculating expiry time:', error);
-            return Number(timestamp) * 1000; // Fallback to original timestamp
-        }
-    }
-
-    getOrderStatus(order, currentTime, orderExpiry, gracePeriod) {
-        this.debug('Order timing:', {
-            currentTime,
-            orderTime: order.timestamp,
-            orderExpiry,  // 420 seconds (7 minutes)
-            gracePeriod   // 420 seconds (7 minutes)
-        });
-
-        // Check explicit status first
-        if (order.status === 'Canceled') return 'Canceled';
-        if (order.status === 'Filled') return 'Filled';
-
-        // Then check timing
-        const totalExpiry = orderExpiry + gracePeriod;
-        const orderTime = Number(order.timestamp);
-
-        if (currentTime > orderTime + totalExpiry) {
-            this.debug('Order not active: Past grace period');
-            return 'Expired';
-        }
-        if (currentTime > orderTime + orderExpiry) {
-            this.debug('Order status: Awaiting Clean');
-            return 'Expired';
-        }
-
-        this.debug('Order status: Active');
-        return 'Active';
-    }
-
-    async canFillOrder(order) {
-        try {
-            // Get current account
-            const accounts = await window.ethereum.request({ 
-                method: 'eth_accounts' 
-            });
-            if (!accounts || accounts.length === 0) {
-                this.debug('No wallet connected');
-                return false;
-            }
-            const currentAccount = accounts[0].toLowerCase();
-
-            // Convert status from number to string if needed
-            const statusMap = ['Active', 'Filled', 'Canceled'];
-            const orderStatus = typeof order.status === 'number' ? 
-                statusMap[order.status] : order.status;
-            
-            if (orderStatus !== 'Active') {
-                this.debug('Order not active:', orderStatus);
-                return false;
-            }
-
-            // Check if order is expired - using the contract's ORDER_EXPIRY
-            const contract = await this.getContract();
-            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
-            const now = Math.floor(Date.now() / 1000);
-            const expiryTime = Number(order.timestamp) + orderExpiry;
-
-            if (now >= expiryTime) {
-                this.debug('Order expired', {
-                    now,
-                    timestamp: order.timestamp,
-                    orderExpiry,
-                    expiryTime
-                });
-                return false;
-            }
-
-            // Check if user is the maker (can't fill own orders)
-            if (order.maker?.toLowerCase() === currentAccount) {
-                this.debug('User is maker of order');
-                return false;
-            }
-
-            // Check if order is open to all or if user is the specified taker
-            const isOpenOrder = order.taker === ethers.constants.AddressZero;
-            const isSpecifiedTaker = order.taker?.toLowerCase() === currentAccount;
-            const canFill = isOpenOrder || isSpecifiedTaker;
-
-            this.debug('Can fill order:', {
-                isOpenOrder,
-                isSpecifiedTaker,
-                canFill
-            });
-            
-            return canFill;
-        } catch (error) {
-            console.error('[ViewOrders] Error in canFillOrder:', error);
-            return false;
-        }
-    }
-
-    getTotalPages() {
-        const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-        if (pageSize === -1) return 1; // View all
-        return Math.ceil(this.orders.size / pageSize);
-    }
-
-    updatePaginationControls(filteredOrdersCount) {
-        const pageSize = parseInt(this.container.querySelector('.page-size-select').value);
+    updatePaginationControls(totalOrders) {
+        const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
+        
         const updateControls = (container) => {
             const prevButton = container.querySelector('.prev-page');
             const nextButton = container.querySelector('.next-page');
             const pageInfo = container.querySelector('.page-info');
-            const pageSizeSelect = container.querySelector('.page-size-select');
             
             if (pageSize === -1) {
+                // Show all orders
                 prevButton.disabled = true;
                 nextButton.disabled = true;
-                pageInfo.textContent = `Showing all ${filteredOrdersCount} orders`;
+                pageInfo.textContent = `Showing all ${totalOrders} orders`;
                 return;
             }
             
-            const totalPages = Math.ceil(filteredOrdersCount / pageSize);
+            const totalPages = Math.max(1, Math.ceil(totalOrders / pageSize));
             
-            prevButton.disabled = this.currentPage === 1;
-            nextButton.disabled = this.currentPage === totalPages;
+            // Ensure current page is within bounds
+            this.currentPage = Math.min(Math.max(1, this.currentPage), totalPages);
             
-            pageInfo.textContent = `Page ${this.currentPage} of ${totalPages}`;
+            prevButton.disabled = this.currentPage <= 1;
+            nextButton.disabled = this.currentPage >= totalPages;
             
-            // Keep page size selects in sync
-            if (pageSizeSelect) {
-                pageSizeSelect.value = pageSize;
-            }
+            const startItem = ((this.currentPage - 1) * pageSize) + 1;
+            const endItem = Math.min(this.currentPage * pageSize, totalOrders);
+            
+            pageInfo.textContent = `${startItem}-${endItem} of ${totalOrders} orders (Page ${this.currentPage} of ${totalPages})`;
         };
         
         // Update both top and bottom controls
         const controls = this.container.querySelectorAll('.filter-controls');
         controls.forEach(updateControls);
-    }
-
-    async refreshOrders() {
-        try {
-            this.debug('Refreshing orders view');
-            const orders = this.webSocket.getOrders() || [];
-            this.debug('Orders from WebSocket:', orders);
-
-            const contract = await this.getContract();
-            if (!contract) {
-                throw new Error('Contract not initialized');
-            }
-
-            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
-            const gracePeriod = (await contract.GRACE_PERIOD()).toNumber();
-            const currentTime = Math.floor(Date.now() / 1000);
-
-            // Show all orders including cleaned ones
-            const filteredOrders = orders.filter(order => {
-                const status = this.getOrderStatus(order, currentTime, orderExpiry, gracePeriod);
-                this.debug('Processing order:', {
-                    orderId: order.id,
-                    status,
-                    timestamp: order.timestamp,
-                    currentTime,
-                    orderExpiry,
-                    gracePeriod
-                });
-                return true; // Show all orders
-            });
-
-            this.debug('Orders after filtering:', filteredOrders);
-
-            // Sort orders by timestamp descending
-            const sortedOrders = [...filteredOrders].sort((a, b) => b.timestamp - a.timestamp);
-            await this.displayOrders(sortedOrders);
-
-        } catch (error) {
-            this.debug('Error refreshing orders:', error);
-            this.showError('Failed to refresh orders');
-        }
-    }
-
-    async displayOrders(orders) {
-        try {
-            const contract = await this.getContract();
-            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
-            this.debug('Order expiry from contract:', {
-                orderExpiry,
-                inMinutes: orderExpiry / 60
-            });
-            
-            // ... rest of the code ...
-        } catch (error) {
-            this.debug('Error displaying orders:', error);
-            throw error;
-        }
-    }
-
-    formatExpiryTime(timestamp, orderExpiry) {
-        const expiryTime = timestamp + orderExpiry;
-        const now = Math.floor(Date.now() / 1000);
-        const timeLeft = expiryTime - now;
-        
-        this.debug('Expiry calculation:', {
-            timestamp,
-            orderExpiry,
-            expiryTime,
-            now,
-            timeLeft,
-            timeLeftMinutes: timeLeft / 60
-        });
-        
-        if (timeLeft <= 0) {
-            return 'Expired';
-        }
-        
-        const minutes = Math.ceil(timeLeft / 60);
-        return `${minutes}m`;
     }
 
     startExpiryTimer(row) {
@@ -1242,57 +980,47 @@ export class ViewOrders extends BaseComponent {
             this.expiryTimers = new Map();
         }
 
-        const formatTimeDiff = (timeDiff) => {
-            const absDiff = Math.abs(timeDiff);
-            const days = Math.floor(absDiff / 86400); // 86400 seconds in a day
-            const hours = Math.floor((absDiff % 86400) / 3600);
-            const minutes = Math.floor((absDiff % 3600) / 60);
-            const sign = timeDiff < 0 ? '-' : '';
+        const updateExpiryAndButton = async () => {
+            const expiresCell = row.querySelector('td:nth-child(7)');
+            const actionCell = row.querySelector('.action-column');
+            if (!expiresCell || !actionCell) return;
 
-            // If less than 24 hours, show only hours and minutes
-            if (days === 0) {
-                return `${sign}${hours}h ${minutes}m`;
-            }
-            
-            // If days exist, show days and hours (minutes omitted for clarity)
-            return `${sign}${days}d ${hours}h`;
-        };
+            const orderId = row.dataset.orderId;
+            const order = window.webSocket.orderCache.get(Number(orderId));
+            if (!order) return;
 
-        const updateExpiry = async () => {
-            const expiresCell = row.querySelector('td:nth-child(6)'); // Expires column
-            if (!expiresCell) return;
-
-            const timestamp = row.dataset.timestamp;
             const currentTime = Math.floor(Date.now() / 1000);
-            const contract = await this.getContract();
-            const orderExpiry = (await contract.ORDER_EXPIRY()).toNumber();
-            const expiryTime = Number(timestamp) + orderExpiry;
-            const timeDiff = expiryTime - currentTime;
+            const isExpired = currentTime > order.timings.expiresAt;
+            const timeDiff = order.timings.expiresAt - currentTime;
+            const currentAccount = walletManager.getAccount()?.toLowerCase();
+            const isUserOrder = order.maker?.toLowerCase() === currentAccount;
 
-            const newExpiryText = formatTimeDiff(timeDiff);
-
+            // Update expiry text
+            const newExpiryText = this.formatTimeDiff(timeDiff);
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
+            }
+
+            // Update action column content
+            if (isUserOrder) {
+                actionCell.innerHTML = '<span class="your-order">Your Order</span>';
+            } else if (isExpired) {
+                actionCell.innerHTML = '<span class="expired-order">Expired</span>';
+            } else if (!isUserOrder && window.webSocket.canFillOrder(order, currentAccount)) {
+                actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>`;
+                const fillButton = actionCell.querySelector('.fill-button');
+                if (fillButton) {
+                    fillButton.addEventListener('click', () => this.fillOrder(order.id));
+                }
+            } else {
+                actionCell.innerHTML = '';
             }
         };
 
         // Update immediately and then every minute
-        updateExpiry();
-        const timerId = setInterval(updateExpiry, 60000); // Update every minute
+        updateExpiryAndButton();
+        const timerId = setInterval(updateExpiryAndButton, 60000); // Update every minute
         this.expiryTimers.set(row.dataset.orderId, timerId);
-    }
-
-    showLoadingState() {
-        const tbody = this.container.querySelector('tbody');
-        if (tbody) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="10" class="loading-message">
-                        <div class="loading-spinner"></div>
-                        <div class="loading-text">Loading orders...</div>
-                    </td>
-                </tr>`;
-        }
     }
 
     getExplorerUrl(address) {
@@ -1304,45 +1032,36 @@ export class ViewOrders extends BaseComponent {
         return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
     }
 
-    getTokenIcon(token) {
-        if (!token) return '';
-        
-        if (token.iconUrl) {
-            return `
-                <div class="token-icon">
-                    <img src="${token.iconUrl}" alt="${token.symbol}" class="token-icon-image">
-                </div>
-            `;
-        }
-
-        // Fallback to letter-based icon
-        const symbol = token.symbol || '?';
-        const firstLetter = symbol.charAt(0).toUpperCase();
-        const colors = [
-            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
-            '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
-        ];
-        
-        // Generate consistent color based on address
-        const colorIndex = parseInt(token.address.slice(-6), 16) % colors.length;
-        const backgroundColor = colors[colorIndex];
-        
-        return `
-            <div class="token-icon">
-                <div class="token-icon-fallback" style="background: ${backgroundColor}">
-                    ${firstLetter}
-                </div>
-            </div>
-        `;
-    }
-
     getOrderStatusText(status) {
         const statusMap = {
             0: 'Active',
             1: 'Filled',
-            2: 'Cancelled',
-            3: 'Expired'
+            2: 'Cancelled'
+            // Removed status 3 (Expired) as we want to keep showing 'Active'
         };
         return statusMap[status] || `Unknown (${status})`;
+    }
+
+    async getContract() {
+        if (!window.webSocket?.contract) {
+            throw new Error('WebSocket contract not initialized');
+        }
+        return window.webSocket.contract;
+    }
+
+    formatTimeDiff(seconds) {
+        const days = Math.floor(Math.abs(seconds) / 86400);
+        const hours = Math.floor((Math.abs(seconds) % 86400) / 3600);
+        const minutes = Math.floor((Math.abs(seconds) % 3600) / 60);
+        
+        const prefix = seconds < 0 ? '-' : '';
+        
+        if (days > 0) {
+            return `${prefix}${days}D ${hours}H ${minutes}M`;
+        } else if (hours > 0) {
+            return `${prefix}${hours}H ${minutes}M`;
+        } else {
+            return `${prefix}${minutes}M`;
+        }
     }
 }

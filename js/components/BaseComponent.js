@@ -1,22 +1,20 @@
 import { walletManager } from '../config.js';
 import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
-import { isDebugEnabled } from '../config.js';
-
-console.log('BaseComponent.js loaded');
+import { createLogger } from '../services/LogService.js';
 
 export class BaseComponent {
     constructor(containerId) {
-        // Define debug method first
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('BASE_COMPONENT')) {
-                console.log(`[${this.constructor.name}]`, message, ...args);
-            }
-        };
+        // Initialize logger
+        const logger = createLogger('BASE_COMPONENT');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
 
         this.debug('Constructor called with:', containerId);
         this.container = document.querySelector(`#${containerId}, .${containerId}`);
         if (!this.container) {
+            this.error(`Container not found: ${containerId}`);
             throw new Error(`Container with id or class ${containerId} not found`);
         }
         
@@ -68,12 +66,12 @@ export class BaseComponent {
             await window.walletInitialized;
             const contract = await walletManager.getContract();
             if (!contract) {
-                this.debug('Contract not initialized');
+                this.warn('Contract not initialized');
                 return null;
             }
             return contract;
         } catch (error) {
-            this.debug('Error getting contract:', error);
+            this.error('Error getting contract:', error);
             return null;
         }
     }
@@ -82,12 +80,13 @@ export class BaseComponent {
     async getSigner() {
         try {
             if (!window.walletManager?.provider) {
+                this.error('No wallet provider available');
                 throw new Error('Please connect your wallet first');
             }
             this.signer = await window.walletManager.provider.getSigner();
             return this.signer;
         } catch (error) {
-            console.error('[BaseComponent] Error getting signer:', error);
+            this.error('Error getting signer:', error);
             throw error;
         }
     }
@@ -109,13 +108,12 @@ export class BaseComponent {
                 this.debug('No signer available - skipping balance check');
             }
 
-            // Normalize addresses to lowercase for consistent cache lookup
             const validAddresses = addressArray
                 .filter(addr => typeof addr === 'string' && ethers.utils.isAddress(addr))
                 .map(addr => addr.toLowerCase());
 
             if (validAddresses.length === 0) {
-                console.warn('[BaseComponent] No valid token addresses provided');
+                this.warn('No valid token addresses provided');
                 return addressArray.map(() => null);
             }
 
@@ -183,7 +181,7 @@ export class BaseComponent {
             this.debug('Token cache after update:', Array.from(this.tokenCache.entries()));
             return results;
         } catch (error) {
-            this.debug('Error in getTokenDetails:', error);
+            this.error('Error in getTokenDetails:', error);
             return Array.isArray(tokenAddresses) ? tokenAddresses.map(() => null) : null;
         }
     }
@@ -260,7 +258,7 @@ export class BaseComponent {
             stack: error.stack,
         };
 
-        this.debug('Detailed error:', prefix, errorDetails);
+        this.error('Detailed error:', prefix, errorDetails);
         return errorDetails;
     }
 
@@ -284,12 +282,12 @@ export class BaseComponent {
                 });
 
                 if (i === maxRetries - 1 || !isRetryable) {
-                    this.debug('Max retries reached or non-retryable error');
+                    this.error('Max retries reached or non-retryable error');
                     throw error;
                 }
                 
-                const waitTime = delay * Math.pow(2, i); // Exponential backoff
-                this.debug(`Retrying in ${waitTime}ms...`);
+                const waitTime = delay * Math.pow(2, i);
+                this.warn(`Retrying in ${waitTime}ms...`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
             }
         }

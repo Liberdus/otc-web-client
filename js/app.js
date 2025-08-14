@@ -8,29 +8,34 @@ import { MyOrders } from './components/MyOrders.js';
 import { TakerOrders } from './components/TakerOrders.js';
 import { Cleanup } from './components/Cleanup.js';
 import { ContractParams } from './components/ContractParams.js';
-
-console.log('App.js loaded');
+import { PricingService } from './services/PricingService.js';
+import { createLogger } from './services/LogService.js';
+import { DebugPanel } from './components/DebugPanel.js';
 
 class App {
     constructor() {
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('APP')) {
-                console.log('[App]', message, ...args);
-            }
-        };
+        this.isInitializing = false;
+        
+        // Replace debug initialization with LogService
+        const logger = createLogger('APP');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
 
         this.debug('App constructor called');
         
-        this.walletUI = new WalletUI();
-        
-        this.handleConnectWallet = async (e) => {
-            e && e.preventDefault();
-            await this.connectWallet();
-        };
-
-        // Initialize components
+        // Initialize CreateOrder first
         this.components = {
-            'wallet-info': this.walletUI,
+            'create-order': new CreateOrder()
+        };
+        
+        // Render CreateOrder immediately
+        this.components['create-order'].initialize();
+        
+        // Then initialize other components that might depend on CreateOrder's DOM elements
+        this.components = {
+            ...this.components,  // Keep CreateOrder
+            'wallet-info': new WalletUI(),
             'view-orders': new ViewOrders(),
             'my-orders': new MyOrders(),
             'taker-orders': new TakerOrders(),
@@ -39,7 +44,12 @@ class App {
         };
 
         // Render wallet UI immediately
-        this.walletUI.render();
+        this.walletUI = new WalletUI();
+        
+        this.handleConnectWallet = async (e) => {
+            e && e.preventDefault();
+            await this.connectWallet();
+        };
 
         // Handle other components
         Object.entries(this.components).forEach(([id, component]) => {
@@ -89,7 +99,6 @@ class App {
         this.initializeEventListeners();
 
         // Initialize cleanup component
-        const cleanup = new Cleanup();
 
         // Add WebSocket event handlers for order updates
         window.webSocket?.subscribe('OrderCreated', () => {
@@ -108,7 +117,7 @@ class App {
         });
 
         // Initialize debug panel
-        this.initializeDebugPanel();
+        const debugPanel = new DebugPanel();
 
         // Add new method to update tab visibility
         this.updateTabVisibility = (isConnected) => {
@@ -132,6 +141,69 @@ class App {
             this.classList.toggle('active');
             document.querySelector('.taker-input-content').classList.toggle('hidden');
         });
+
+        // Add new property to track WebSocket readiness
+        this.wsInitialized = false;
+
+        // Add loading overlay to main content
+        const mainContent = document.querySelector('.main-content');
+        this.loadingOverlay = document.createElement('div');
+        this.loadingOverlay.className = 'loading-overlay';
+        this.loadingOverlay.innerHTML = `
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading orders...</div>
+        `;
+        document.body.appendChild(this.loadingOverlay);
+
+        // Keep main content hidden initially
+        mainContent.style.display = 'none';
+
+        // Initialize theme handling
+        this.initializeTheme();
+
+        // Add a debounce mechanism for reinitialization
+        let reinitializationTimeout = null;
+        let isReinitializing = false;
+
+        async function reinitializeComponents(walletAddress) {
+            // Prevent multiple concurrent reinitializations
+            if (isReinitializing) {
+                console.log('[App] Already reinitializing, skipping...');
+                return;
+            }
+
+            // Clear any pending reinitialization
+            if (reinitializationTimeout) {
+                clearTimeout(reinitializationTimeout);
+            }
+
+            // Set flag and schedule reinitialization
+            isReinitializing = true;
+            reinitializationTimeout = setTimeout(async () => {
+                try {
+                    console.log('[App] Reinitializing components with wallet...');
+                    // ... existing reinitialization code ...
+                } finally {
+                    isReinitializing = false;
+                    reinitializationTimeout = null;
+                }
+            }, 100); // Small delay to coalesce multiple events
+        }
+
+        // Update the wallet event handlers to use the debounced reinitialization
+        window.addEventListener('walletConnected', (event) => {
+            const { address } = event.detail;
+            console.log('[App] Wallet connected:', address);
+            reinitializeComponents(address);
+        });
+
+        window.addEventListener('chainChanged', (event) => {
+            const { chainId } = event.detail;
+            console.log('[App] Chain changed:', chainId);
+            reinitializeComponents(window.ethereum.selectedAddress);
+        });
+
+        this.lastDisconnectNotification = 0;
     }
 
     initializeEventListeners() {
@@ -176,25 +248,61 @@ class App {
     }
 
     async initialize() {
+        if (this.isInitializing) {
+            console.log('[App] Already initializing, skipping...');
+            return;
+        }
+
+        this.isInitializing = true;
         try {
             this.debug('Starting initialization...');
-            // Initialize wallet manager with autoConnect parameter
+            
+            // Add this line at the start
+            const mainContent = document.querySelector('.main-content');
+            
             window.walletManager = walletManager;
             await walletManager.init(true);
             
-            // Initialize WebSocket service
-            window.webSocket = new WebSocketService();
+            // Initialize PricingService first and make it globally available
+            window.pricingService = new PricingService();
+            await window.pricingService.initialize();
+            
+            // Initialize WebSocket with the global pricingService
+            window.webSocket = new WebSocketService({ 
+                pricingService: window.pricingService 
+            });
+            
+            // Subscribe to orderSyncComplete event before initialization
+            window.webSocket.subscribe('orderSyncComplete', () => {
+                this.wsInitialized = true;
+                this.loadingOverlay.remove();
+                this.debug('WebSocket order sync complete, showing content');
+            });
+            
             const wsInitialized = await window.webSocket.initialize();
             if (!wsInitialized) {
                 this.debug('WebSocket initialization failed, falling back to HTTP');
+                // Still remove overlay in case of failure
+                this.loadingOverlay.remove();
             }
             
-            // Initialize components in read-only mode initially
             await this.initializeComponents(true);
             
-            this.debug('Initialization complete');
+            // Add this line near the end, before removing loading overlay
+            setTimeout(() => {
+                this.loadingOverlay.remove();
+                mainContent.style.display = 'block'; // Show content after initialization
+                mainContent.classList.add('initialized');
+                this.debug('Initialization complete');
+            }, 500); // Small delay to ensure loading animation is visible
         } catch (error) {
             this.debug('Initialization error:', error);
+            // Still show content in case of error
+            mainContent?.classList.add('initialized');
+            // Remove overlay in case of error
+            this.loadingOverlay.remove();
+        } finally {
+            this.isInitializing = false;
         }
     }
 
@@ -203,36 +311,29 @@ class App {
             this.debug('Initializing components in ' + 
                 (readOnlyMode ? 'read-only' : 'connected') + ' mode');
             
-            // Initialize each component
-            for (const [id, component] of Object.entries(this.components)) {
-                if (component && typeof component.initialize === 'function') {
-                    this.debug(`Initializing component: ${id}`);
-                    try {
-                        await component.initialize(readOnlyMode);
-                    } catch (error) {
-                        // Log error but continue with other components
-                        console.error(`[App] Error initializing ${id}:`, error);
-                    }
+            // Only initialize the current tab's component
+            const currentComponent = this.components[this.currentTab];
+            if (currentComponent && typeof currentComponent.initialize === 'function') {
+                this.debug(`Initializing current component: ${this.currentTab}`);
+                try {
+                    await currentComponent.initialize(readOnlyMode);
+                } catch (error) {
+                    console.error(`[App] Error initializing ${this.currentTab}:`, error);
                 }
             }
             
             // Show the current tab
             this.showTab(this.currentTab);
             
-            this.debug('Components initialized');
+            this.debug('Component initialized');
         } catch (error) {
-            console.error('[App] Error initializing components:', error);
-            // Continue execution instead of throwing
-            this.showError("Some components failed to initialize. Limited functionality available.");
+            console.error('[App] Error initializing component:', error);
+            this.showError("Component failed to initialize. Limited functionality available.");
         }
     }
 
     async connectWallet() {
-        const loader = document.createElement('div');
-        loader.className = 'loader-overlay';
-        loader.innerHTML = '<div class="loader"></div>';
-        document.body.appendChild(loader);
-        
+        const loader = this.showLoader();
         try {
             await walletManager.connect();
         } catch (error) {
@@ -256,6 +357,13 @@ class App {
     }
 
     handleWalletDisconnect() {
+        // Debounce notifications by checking last notification time
+        const now = Date.now();
+        if (now - this.lastDisconnectNotification < 1000) { // 1 second debounce
+            return;
+        }
+        this.lastDisconnectNotification = now;
+        
         const walletConnectBtn = document.getElementById('walletConnect');
         const walletInfo = document.getElementById('walletInfo');
         const accountAddress = document.getElementById('accountAddress');
@@ -272,7 +380,12 @@ class App {
             accountAddress.textContent = '';
         }
         
-        this.showSuccess("Wallet disconnected successfully");
+        this.showSuccess(
+            "Wallet disconnected from site. For complete disconnection:\n" +
+            "1. Click MetaMask extension\n" +
+            "2. Click globe icon with a green dot\n" +
+            "3. Select 'Disconnect'"
+        );
     }
 
     handleAccountChange(account) {
@@ -283,11 +396,18 @@ class App {
         
     }
 
-    showLoader() {
+    showLoader(container = document.body) {
         const loader = document.createElement('div');
-        loader.className = 'loader-overlay';
-        loader.innerHTML = '<div class="loader"></div>';
-        document.body.appendChild(loader);
+        loader.className = 'loading-overlay';
+        loader.innerHTML = `
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading...</div>
+        `;
+        
+        if (container !== document.body) {
+            container.style.position = 'relative';
+        }
+        container.appendChild(loader);
         return loader;
     }
 
@@ -317,6 +437,25 @@ class App {
         try {
             this.debug('Switching to tab:', tabId);
             
+            // Add loading overlay before initialization
+            const tabContent = document.getElementById(tabId);
+            const loadingOverlay = document.createElement('div');
+            loadingOverlay.className = 'loading-overlay';
+            loadingOverlay.innerHTML = `
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Loading...</div>
+            `;
+            if (tabContent) {
+                tabContent.style.position = 'relative';
+                tabContent.appendChild(loadingOverlay);
+            }
+            
+            // Cleanup previous tab's component if it exists
+            const previousComponent = this.components[this.currentTab];
+            if (previousComponent?.cleanup) {
+                previousComponent.cleanup();
+            }
+            
             // Hide all tab content
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
@@ -330,23 +469,28 @@ class App {
                 }
             });
             
-            // Show selected tab
-            const tabContent = document.getElementById(tabId);
+            // Show and initialize selected tab
             if (tabContent) {
                 tabContent.classList.add('active');
                 
-                // Initialize component if it exists
+                // Initialize component if it exists and hasn't been initialized
                 const component = this.components[tabId];
                 if (component?.initialize) {
                     const readOnlyMode = !window.walletManager?.provider;
                     await component.initialize(readOnlyMode);
                 }
+                
+                // Remove loading overlay after initialization
+                loadingOverlay.remove();
             }
             
             this.currentTab = tabId;
             this.debug('Tab switch complete:', tabId);
         } catch (error) {
             console.error('[App] Error showing tab:', error);
+            // Ensure loading overlay is removed even if there's an error
+            const loadingOverlay = document.querySelector('.loading-overlay');
+            if (loadingOverlay) loadingOverlay.remove();
         }
     }
 
@@ -361,10 +505,16 @@ class App {
         try {
             this.debug('Reinitializing components with wallet...');
             
-            // Clean up existing CreateOrder component if it exists
-            if (this.components['create-order']?.cleanup) {
-                this.components['create-order'].cleanup();
-            }
+            // Clean up all components first
+            Object.values(this.components).forEach(component => {
+                if (component?.cleanup && component.initialized) {
+                    try {
+                        component.cleanup();
+                    } catch (error) {
+                        console.warn(`Error cleaning up component:`, error);
+                    }
+                }
+            });
             
             // Create and initialize CreateOrder component when wallet is connected
             const createOrderComponent = new CreateOrder();
@@ -386,6 +536,8 @@ class App {
             await this.showTab(this.currentTab);
             
             this.debug('Components reinitialized');
+        } catch (error) {
+            console.error('[App] Error reinitializing components:', error);
         } finally {
             this.isReinitializing = false;
         }
@@ -399,6 +551,30 @@ class App {
             await activeComponent.initialize(false);
         }
     }
+
+    // Add this new method
+    initializeTheme() {
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+
+        const themeToggle = document.getElementById('theme-toggle');
+        if (themeToggle) {
+            themeToggle.addEventListener('click', () => {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+                
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+            });
+        }
+
+        // Optional: Check system preference on first visit
+        if (!localStorage.getItem('theme')) {
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+            localStorage.setItem('theme', prefersDark ? 'dark' : 'light');
+        }
+    }
 }
 
 // Initialize app when DOM is loaded
@@ -407,6 +583,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.app = new App();
         window.app.initializeEventListeners();
         window.app.showTab(window.app.currentTab);
+        
+        // Add network config button event listener here
+        const networkConfigButton = document.querySelector('.network-config-button');
+        if (networkConfigButton) {
+            networkConfigButton.addEventListener('click', showAppParametersPopup);
+        }
         
         // Wait for wallet initialization to complete
         await window.app.initialize().catch(error => {
@@ -469,9 +651,9 @@ populateNetworkOptions();
 
 // Function to show application parameters in a popup
 function showAppParametersPopup() {
-    const networkConfigs = getNetworkConfig(); // Fetch network configurations
-    const contractAddress = networkConfigs.contractAddress || 'N/A'; // Get contract address
-    const currentChainId = networkConfigs.chainId || 'N/A'; // Get current chain ID
+    const networkConfigs = getNetworkConfig();
+    const contractAddress = networkConfigs.contractAddress || 'N/A';
+    const currentChainId = networkConfigs.chainId || 'N/A';
 
     const popup = document.createElement('div');
     popup.className = 'network-config-popup';
@@ -489,13 +671,11 @@ function showAppParametersPopup() {
             <button class="close-popup">Close</button>
         </div>
     `;
+    
+    // Add event listener before adding to DOM
+    const closeButton = popup.querySelector('.close-popup');
+    closeButton.addEventListener('click', () => popup.remove());
+    
     document.body.appendChild(popup);
-
-    // Add event listener to close the popup
-    popup.querySelector('.close-popup').addEventListener('click', () => {
-        document.body.removeChild(popup);
-    });
 }
 
-// Add event listener for the network config button
-document.querySelector('.network-config-button').addEventListener('click', showAppParametersPopup);
