@@ -1,620 +1,292 @@
+<!--
+  LiberOTCSwap - Decentralized OTC Trading Interface
+  A single-page application for creating and managing peer-to-peer token swaps.
+  Features: wallet connection, token swapping, order management, and dark/light themes.
+-->
 <!DOCTYPE html>
-<html>
-<head>
-    <title>OTC Swap - Create Order</title>
-    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-    <script src="config.js"></script>
-    <style>
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
+<html lang="en" data-theme="dark">
+  <!-- Head section contains meta info, styles, and script imports -->
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OTC Swap</title>
+    <!-- Normalize.css for consistent styling across browsers -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css"
+    />
+    <!-- Core styles -->
+    <link rel="stylesheet" href="css/styles.css" />
+    <!-- Component-specific styles -->
+    <link rel="stylesheet" href="css/components/forms.css" />
+    <link rel="stylesheet" href="css/components/orders.css" />
+    <link rel="stylesheet" href="css/components/tabs.css" />
+    <link rel="stylesheet" href="css/components/wallet.css" />
+    <link rel="stylesheet" href="css/components/cleanup.css" />
+    <link rel="stylesheet" href="css/components/contract-params.css" />
+    <link rel="stylesheet" href="css/components/debug.css" />
+    <!-- Import map for ethers.js library -->
+    <script type="importmap">
+      {
+        "imports": {
+          "ethers": "https://unpkg.com/ethers@5.7.2/dist/ethers.esm.min.js"
         }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-        }
-        input {
-            width: 100%;
-            padding: 8px;
-            margin-bottom: 10px;
-        }
-        button {
-            padding: 10px 20px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        .nav {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 30px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid #ddd;
-        }
-        .nav a {
-            color: #4CAF50;
-            text-decoration: none;
-            font-weight: bold;
-        }
-        .nav a:hover {
-            color: #45a049;
-            text-decoration: underline;
-        }
-        .nav a.active {
-            color: #2E7D32;
-            text-decoration: underline;
-        }
-        #sellTokenBalance, #buyTokenBalance {
-            margin-left: 10px;
-            font-size: 0.9em;
-            color: #666;
-        }
-        .wallet-info {
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        .network-badge {
-            padding: 5px 10px;
-            border-radius: 15px;
-            background-color: #f0f0f0;
-            font-size: 0.9em;
-        }
-        #connectButton {
-            padding: 5px 15px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        #connectButton:hover {
-            background-color: #45a049;
-        }
-        #connectButton.connected {
-            background-color: #2E7D32;
-        }
-        .wallet-info button {
-            padding: 5px 15px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        #disconnectButton {
-            background-color: #f44336; /* Red color for disconnect */
-        }
-        #disconnectButton:hover {
-            background-color: #d32f2f;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="wallet-info">
-            <span id="networkInfo" class="network-badge">Not Connected</span>
-            <button id="connectButton">Connect Wallet</button>
-            <button id="disconnectButton" style="display: none;">Disconnect</button>
-        </div>
-        <div class="nav">
-            <a href="index.html" class="active">Create Order</a>
-            <a href="view-orders.html">View Orders</a>
-            <a href="my-orders.html">My Orders</a>
-            <a href="taker-orders.html">Taker Orders</a>
-        </div>
-        <h1>Create OTC Swap Order</h1>
-        <div class="form-group">
-            <label for="partner">Partner Address (optional):</label>
-            <input type="text" id="partner" placeholder="0x...">
-        </div>
-        <div class="form-group">
-            <label for="sellToken">Sell Token Address:</label>
-            <input type="text" id="sellToken" placeholder="0x..." onchange="updateTokenBalance('sell')">
-            <span id="sellTokenBalance"></span>
-        </div>
-        <div class="form-group">
-            <label for="sellAmount">Sell Amount:</label>
-            <input type="text" id="sellAmount" placeholder="Enter amount (e.g., 10)">
-        </div>
-        <div class="form-group">
-            <label for="buyToken">Buy Token Address:</label>
-            <input type="text" id="buyToken" placeholder="0x..." onchange="updateTokenBalance('buy')">
-            <span id="buyTokenBalance"></span>
-        </div>
-        <div class="form-group">
-            <label for="buyAmount">Buy Amount:</label>
-            <input type="text" id="buyAmount" placeholder="Enter amount (e.g., 10)">
-        </div>
-        <button onclick="window.createOrder()">Create Order</button>
-        <div id="status"></div>
-    </div>
-
-    <script>
-        const contractABI = [
-            "function createOrder(address partner, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount) external returns (uint256)",
-            "function approve(address spender, uint256 amount) external returns (bool)"
-        ];
-
-        async function checkAllowance(tokenContract, owner, spender) {
-            try {
-                const allowance = await tokenContract.allowance(owner, spender);
-                console.log('Current allowance:', ethers.utils.formatUnits(allowance));
-                return allowance;
-            } catch (error) {
-                console.error('Error checking allowance:', error);
-                return ethers.constants.Zero;
-            }
-        }
-
-        async function updateTokenBalance(type) {
-            try {
-                const tokenAddress = document.getElementById(`${type}Token`).value;
-                const balanceSpan = document.getElementById(`${type}TokenBalance`);
-                
-                if (!ethers.utils.isAddress(tokenAddress)) {
-                    balanceSpan.innerHTML = '';
-                    return;
-                }
-
-                // Connect to MetaMask
-                if (typeof window.ethereum === 'undefined') {
-                    balanceSpan.innerHTML = ' (Please install MetaMask)';
-                    return;
-                }
-
-                const provider = new ethers.providers.Web3Provider(window.ethereum);
-                const signer = provider.getSigner();
-                
-                const tokenContract = new ethers.Contract(tokenAddress, [
-                    'function decimals() view returns (uint8)',
-                    'function symbol() view returns (string)',
-                    'function balanceOf(address account) view returns (uint256)'
-                ], provider);
-
-                const [decimals, symbol, balance] = await Promise.all([
-                    tokenContract.decimals(),
-                    tokenContract.symbol().catch(() => 'UNKNOWN'),
-                    tokenContract.balanceOf(await signer.getAddress())
-                ]);
-
-                const formattedBalance = ethers.utils.formatUnits(balance, decimals);
-                balanceSpan.innerHTML = ` (Balance: ${formattedBalance} ${symbol})`;
-            } catch (error) {
-                console.error('Error fetching token balance:', error);
-                document.getElementById(`${type}TokenBalance`).innerHTML = ' (Error fetching balance)';
-            }
-        }
-
-        async function updateNetworkInfo() {
-            const networkSpan = document.getElementById('networkInfo');
-            try {
-                if (typeof window.ethereum === 'undefined') {
-                    networkSpan.textContent = 'MetaMask Not Installed';
-                    return;
-                }
-
-                const provider = new ethers.providers.Web3Provider(window.ethereum);
-                const network = await provider.getNetwork();
-                const networkNames = {
-                    1: 'Ethereum Mainnet',
-                    5: 'Goerli Testnet',
-                    11155111: 'Sepolia',
-                    137: 'Polygon Mainnet',
-                    80001: 'Mumbai Testnet',
-                    56: 'BSC Mainnet',
-                    97: 'BSC Testnet',
-                    42161: 'Arbitrum One',
-                    421613: 'Arbitrum Goerli',
-                    10: 'Optimism',
-                    420: 'Optimism Goerli',
-                    43114: 'Avalanche C-Chain',
-                    43113: 'Avalanche Fuji',
-                    250: 'Fantom Opera',
-                    4002: 'Fantom Testnet',
-                    42220: 'Celo Mainnet',
-                    44787: 'Celo Alfajores',
-                    1284: 'Moonbeam',
-                    1285: 'Moonriver',
-                    1287: 'Moonbase Alpha',
-                    80002: 'Amoy Testnet'
-                };
-                
-                const networkName = networkNames[network.chainId];
-                if (networkName) {
-                    networkSpan.textContent = networkName;
-                } else {
-                    // For unknown networks, show both name (if available) and chain ID
-                    networkSpan.textContent = network.name 
-                        ? `${network.name} (${network.chainId})`
-                        : `Chain ID: ${network.chainId}`;
-                }
-            } catch (error) {
-                networkSpan.textContent = 'Network Error';
-                console.error('Error getting network:', error);
-            }
-        }
-
-        async function updateConnectionButton() {
-            const connectButton = document.getElementById('connectButton');
-            const disconnectButton = document.getElementById('disconnectButton');
-            try {
-                if (typeof window.ethereum === 'undefined') {
-                    connectButton.textContent = 'Install MetaMask';
-                    connectButton.onclick = () => window.open('https://metamask.io', '_blank');
-                    disconnectButton.style.display = 'none';
-                    return;
-                }
-
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                if (accounts.length > 0) {
-                    connectButton.textContent = `${accounts[0].substring(0, 6)}...${accounts[0].substring(38)}`;
-                    connectButton.classList.add('connected');
-                    disconnectButton.style.display = 'inline-block';
-                } else {
-                    connectButton.textContent = 'Connect Wallet';
-                    connectButton.classList.remove('connected');
-                    disconnectButton.style.display = 'none';
-                }
-            } catch (error) {
-                console.error('Error updating connection button:', error);
-                connectButton.textContent = 'Error Connecting';
-                disconnectButton.style.display = 'none';
-            }
-        }
-
-        async function connectWallet() {
-            try {
-                if (typeof window.ethereum === 'undefined') {
-                    alert('Please install MetaMask!');
-                    return;
-                }
-
-                await window.ethereum.request({ method: 'eth_requestAccounts' });
-                await updateConnectionButton();
-                await updateNetworkInfo();
-            } catch (error) {
-                console.error('Error connecting wallet:', error);
-                alert('Error connecting wallet: ' + error.message);
-            }
-        }
-
-        async function disconnectWallet() {
-            try {
-                // Clear the dApp state
-                document.getElementById('connectButton').textContent = 'Connect Wallet';
-                document.getElementById('connectButton').classList.remove('connected');
-                document.getElementById('disconnectButton').style.display = 'none';
-                document.getElementById('networkInfo').textContent = 'Not Connected';
-                
-                // Clear any token balances
-                document.getElementById('sellTokenBalance').innerHTML = '';
-                document.getElementById('buyTokenBalance').innerHTML = '';
-                
-                // Optional: Reload the page to clear all states
-                // window.location.reload();
-                
-                // Notify user
-                console.log('Disconnected from dApp');
-            } catch (error) {
-                console.error('Error disconnecting wallet:', error);
-                alert('Error disconnecting wallet: ' + error.message);
-            }
-        }
-
-        // Add event listeners
-        document.getElementById('connectButton').onclick = connectWallet;
-        document.getElementById('disconnectButton').onclick = disconnectWallet;
-
-        // Update the existing MetaMask event listeners
-        if (window.ethereum) {
-            window.ethereum.on('accountsChanged', async (accounts) => {
-                if (accounts.length === 0) {
-                    // Handle disconnection from MetaMask
-                    await disconnectWallet();
-                } else {
-                    await updateConnectionButton();
-                    await updateNetworkInfo();
-                }
-            });
-
-            window.ethereum.on('chainChanged', async () => {
-                await updateNetworkInfo();
-                await updateConnectionButton();
-            });
-        }
-
-        // Initial update
-        updateConnectionButton();
-        updateNetworkInfo();
-
-        window.createOrder = async function() {
-            try {
-                console.log('Starting order creation...');
-                
-                // Get network configuration first
-                const config = await getNetworkConfig();
-                if (!config) {
-                    throw new Error("Unsupported network. Please switch to a supported network.");
-                }
-
-                // Get form values
-                let partner = document.getElementById('partner').value;
-                
-                // Handle partner address - only check if it's a valid address if provided
-                if (!partner || partner.trim() === '') {
-                    partner = ethers.constants.AddressZero;
-                    console.log('Creating public order (no partner specified)');
-                } else {
-                    if (!ethers.utils.isAddress(partner)) {
-                        throw new Error('Invalid partner address format');
-                    }
-                    console.log('Creating private order for partner:', partner);
-                }
-
-                // Get token addresses
-                const sellToken = document.getElementById('sellToken').value;
-                const buyToken = document.getElementById('buyToken').value;
-                const sellAmountInput = document.getElementById('sellAmount').value;
-                const buyAmountInput = document.getElementById('buyAmount').value;
-
-                // Then do validation
-                if (!ethers.utils.isAddress(sellToken)) {
-                    throw new Error('Invalid sell token address');
-                }
-                if (!ethers.utils.isAddress(buyToken)) {
-                    throw new Error('Invalid buy token address');
-                }
-                if (isNaN(sellAmountInput) || sellAmountInput <= 0) {
-                    throw new Error('Invalid sell amount');
-                }
-                if (isNaN(buyAmountInput) || buyAmountInput <= 0) {
-                    throw new Error('Invalid buy amount');
-                }
-                
-                // Connect to MetaMask
-                if (typeof window.ethereum === 'undefined') {
-                    alert('Please install MetaMask!');
-                    return;
-                }
-
-                await window.ethereum.request({ method: 'eth_requestAccounts' });
-                const provider = new ethers.providers.Web3Provider(window.ethereum);
-                const signer = provider.getSigner();
-
-                console.log('Connected to wallet, getting form values...');
-
-                
-                // Get token decimals first
-                const tokenContract = new ethers.Contract(sellToken, [
-                    'function decimals() view returns (uint8)',
-                    'function approve(address spender, uint256 amount) external returns (bool)',
-                    'function balanceOf(address account) view returns (uint256)',
-                    'function allowance(address owner, address spender) view returns (uint256)'
-                ], signer);
-                const decimals = await tokenContract.decimals();
-                
-                // Use correct decimals
-                const sellAmount = ethers.utils.parseUnits(document.getElementById('sellAmount').value, decimals);
-                const buyAmount = ethers.utils.parseUnits(document.getElementById('buyAmount').value, decimals);
-
-                // Add network check
-                const network = await provider.getNetwork();
-                console.log('Connected to network:', network);
-
-                // Add balance check
-                const balance = await provider.getBalance(await signer.getAddress());
-                console.log('Account balance:', ethers.utils.formatEther(balance), 'POL');
-
-                // Add token balance check
-                const tokenBalance = await tokenContract.balanceOf(await signer.getAddress());
-                console.log('Token balance:', ethers.utils.formatUnits(tokenBalance, decimals));
-
-                // Modified approval section
-                const userAddress = await signer.getAddress();
-                const currentAllowance = await checkAllowance(tokenContract, userAddress, config.contractAddress);
-                
-                if (currentAllowance.lt(sellAmount)) {
-                    console.log('Approving token spend...', {
-                        sellToken,
-                        sellAmount: sellAmount.toString(),
-                        contractAddress: config.contractAddress
-                    });
-                    
-                    try {
-                        // Use exact sellAmount
-                        const approvalAmount = sellAmount;
-                        const approveTx = await tokenContract.approve(
-                            config.contractAddress, 
-                            approvalAmount,
-                            {
-                                gasLimit: 100000,
-                                gasPrice: await provider.getGasPrice(),
-                                nonce: await provider.getTransactionCount(userAddress)
-                            }
-                        );
-                        console.log('Approval transaction submitted:', approveTx.hash);
-                        
-                        // Wait for confirmation with timeout
-                        const receipt = await Promise.race([
-                            approveTx.wait(),
-                            new Promise((_, reject) => 
-                                setTimeout(() => reject(new Error('Approval timeout')), 30000)
-                            )
-                        ]);
-                        
-                        console.log('Approval confirmed in block:', receipt.blockNumber);
-                        
-                        // Verify the new allowance
-                        const newAllowance = await checkAllowance(tokenContract, userAddress, config.contractAddress);
-                        console.log('New allowance:', ethers.utils.formatUnits(newAllowance));
-                        
-                        if (newAllowance.lt(sellAmount)) {
-                            throw new Error('Approval failed - allowance not increased');
-                        }
-                    } catch (approvalError) {
-                        console.error('Approval error details:', {
-                            error: approvalError,
-                            token: sellToken,
-                            owner: userAddress,
-                            spender: config.contractAddress
-                        });
-                        
-                        // Check if the token contract exists
-                        const code = await provider.getCode(sellToken);
-                        if (code === '0x') {
-                            throw new Error('Invalid token contract - no code at address');
-                        }
-                        
-                        throw new Error(`Approval failed: ${approvalError.message}`);
-                    }
-                } else {
-                    console.log('Sufficient allowance already exists');
-                }
-
-                console.log('Creating order with params:', {
-                    partner,
-                    sellToken,
-                    sellAmount: sellAmount.toString(),
-                    buyToken,
-                    buyAmount: buyAmount.toString(),
-                    contractAddress: config.contractAddress
-                });
-
-                try {
-                    const contract = new ethers.Contract(config.contractAddress, contractABI, signer);
-                    
-                    // Add validation before transaction
-                    const userAddress = await signer.getAddress();
-                    
-                    // Validate partner address
-                    // if (partner !== ethers.constants.AddressZero) {
-                    //     if (partner.toLowerCase() === userAddress.toLowerCase()) {
-                    //         throw new Error('Partner address cannot be your own address');
-                    //     }
-                    // }
-                    
-                    // Validate token addresses
-                    if (sellToken.toLowerCase() === buyToken.toLowerCase()) {
-                        throw new Error('Sell and buy tokens must be different');
-                    }
-                    
-                    // Validate allowance again
-                    const tokenContract = new ethers.Contract(sellToken, [
-                        'function allowance(address,address) view returns (uint256)'
-                    ], signer);
-                    const allowance = await tokenContract.allowance(userAddress, config.contractAddress);
-                    if (allowance.lt(sellAmount)) {
-                        throw new Error('Insufficient allowance for sell amount');
-                    }
-                    
-                    // Add transaction parameters
-                    const tx = await contract.createOrder(
-                        partner,
-                        sellToken,
-                        sellAmount,
-                        buyToken,
-                        buyAmount,
-                        {
-                            gasLimit: 300000,
-                            gasPrice: await provider.getGasPrice()
-                        }
-                    );
-                    
-                    console.log('Order creation transaction submitted:', tx.hash);
-                    document.getElementById('status').innerHTML = `Transaction submitted: ${tx.hash}`;
-                    
-                    const receipt = await tx.wait();
-                    
-                    // Check transaction status
-                    if (receipt.status === 0) {
-                        // Try to get more specific error information
-                        try {
-                            // Simulate the transaction to get the revert reason
-                            await provider.call(
-                                {
-                                    from: userAddress,
-                                    to: config.contractAddress,
-                                    data: contract.interface.encodeFunctionData('createOrder', [
-                                        partner,
-                                        sellToken,
-                                        sellAmount,
-                                        buyToken,
-                                        buyAmount
-                                    ])
-                                },
-                                receipt.blockNumber
-                            );
-                        } catch (callError) {
-                            console.error('Transaction simulation error:', callError);
-                            // Extract revert reason if available
-                            const revertReason = callError.data || callError.message;
-                            throw new Error(`Transaction reverted: ${revertReason}`);
-                        }
-                        throw new Error('Transaction failed - contract reverted');
-                    }
-                    
-                    console.log('Order creation confirmed in block:', receipt.blockNumber);
-                    document.getElementById('status').innerHTML = 
-                        `Order created successfully! Transaction: ${receipt.transactionHash}`;
-                    
-                } catch (orderError) {
-                    console.error('Order creation error details:', {
-                        error: orderError,
-                        params: {
-                            partner,
-                            sellToken,
-                            sellAmount: sellAmount.toString(),
-                            buyToken,
-                            buyAmount: buyAmount.toString()
-                        }
-                    });
-                    
-                    let errorMessage = 'Order creation failed. Please check:\n';
-                    if (orderError.code === 'CALL_EXCEPTION') {
-                        errorMessage += '1. You have sufficient token balance\n';
-                        errorMessage += '2. The token approvals are correct\n';
-                        errorMessage += '3. The partner address is valid\n';
-                        errorMessage += '4. The amounts are valid\n';
-                        errorMessage += '5. You are not trying to trade with yourself\n';
-                        errorMessage += '6. The tokens are different\n';
-                        if (orderError.reason) {
-                            errorMessage += `\nContract error: ${orderError.reason}`;
-                        }
-                    } else {
-                        errorMessage += orderError.message;
-                    }
-                    
-                    document.getElementById('status').innerHTML = `Error: ${errorMessage}`;
-                    throw new Error(errorMessage);
-                }
-            } catch (error) {
-                console.error('Detailed error:', error);
-                let errorMessage = error.message;
-                
-                if (error.code === 'INSUFFICIENT_FUNDS') {
-                    errorMessage = 'Insufficient funds for transaction';
-                } else if (error.code === -32603) {
-                    errorMessage = 'Transaction failed. Please check: \n' +
-                        '1. Token contract address: ' + sellToken + '\n' +
-                        '2. Network: ' + config.name + '\n' +
-                        '3. Token supports ERC20 approve function\n' +
-                        '4. You have enough POL for gas';
-                }
-                
-                document.getElementById('status').innerHTML = `Error: ${errorMessage}`;
-            }
-        }
+      }
     </script>
-</body>
+    <!-- Main application entry point -->
+    <script type="module" src="js/app.js" defer></script>
+  </head>
+  <!-- Body contains the main application structure -->
+  <body>
+    <div class="container">
+      <!-- Header contains branding, theme toggle, and wallet connection -->
+      <header class="header card">
+        <!-- Logo and app name -->
+        <div class="header-left">
+          <div class="logo-container">
+            <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image" />
+            <h1>LiberOTCSwap</h1>
+            <span class="version">v1.0.25</span>
+          </div>
+        </div>
+        <!-- Theme toggle and wallet connection controls -->
+        <div class="header-right">
+          <!-- Light/Dark mode toggle -->
+          <button
+            id="theme-toggle"
+            class="theme-toggle"
+            aria-label="Toggle theme"
+          >
+            <!-- Sun icon for light mode -->
+            <svg
+              class="sun-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+            >
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+            <!-- Moon icon for dark mode -->
+            <svg
+              class="moon-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+            >
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </button>
+
+          <!-- Wallet connection and network selection -->
+          <div id="wallet-container" class="wallet-container">
+            <!-- Network dropdown selector -->
+            <div class="network-selector">
+              <button class="network-button">
+                <span class="network-badge">Polygon</span>
+                <svg
+                  class="chevron-down"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    d="M6 9l6 6 6-6"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+              <!-- Network options populated dynamically -->
+              <div class="network-dropdown hidden"></div>
+            </div>
+            <!-- Connect wallet button -->
+            <button id="walletConnect" class="wallet-button">
+              <span class="wallet-button-text">Connect Wallet</span>
+            </button>
+            <!-- Wallet info shown when connected -->
+            <div id="walletInfo" class="wallet-info hidden">
+              <span id="accountAddress" class="account-address"></span>
+              <!-- Disconnect wallet button -->
+              <button id="walletDisconnect" class="wallet-disconnect">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M16 17l5-5-5-5"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                  <path d="M21 12H9" stroke-width="2" stroke-linecap="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+      <!-- Debug panel for development (hidden by default) -->
+      <div class="debug-panel" style="display: none">
+        <!-- Debug controls and options -->
+        <div class="debug-controls">
+          <div class="debug-header">
+            <h3>Debug Settings</h3>
+            <div class="debug-header-actions">
+              <button id="selectAllDebug" class="select-all-button">
+                Select All
+              </button>
+              <button
+                id="closeDebug"
+                class="close-button"
+                aria-label="Close debug panel"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    d="M18 6L6 18M6 6l12 12"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="debug-options">
+            <div class="debug-column">
+              <h4>Core</h4>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="APP" />
+                <span>App</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="WEBSOCKET" />
+                <span>WebSocket</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="WALLET" />
+                <span>Wallet</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="WALLET_UI" />
+                <span>Wallet UI</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="BASE_COMPONENT" />
+                <span>Base Component</span>
+              </label>
+            </div>
+
+            <div class="debug-column">
+              <h4>Orders</h4>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="VIEW_ORDERS" />
+                <span>View Orders</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="CREATE_ORDER" />
+                <span>Create Order</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="MY_ORDERS" />
+                <span>My Orders</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="TAKER_ORDERS" />
+                <span>Taker Orders</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="CLEANUP_ORDERS" />
+                <span>Cleanup Orders</span>
+              </label>
+            </div>
+
+            <div class="debug-column">
+              <h4>Other</h4>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="PRICING" />
+                <span>Pricing</span>
+              </label>
+              <label class="debug-option">
+                <input type="checkbox" data-debug="TOKENS" />
+                <span>Tokens</span>
+              </label>
+            </div>
+          </div>
+          <div class="debug-footer">
+            <button id="applyDebug" class="apply-button">Apply Changes</button>
+          </div>
+        </div>
+      </div>
+      <!-- Main application content area -->
+      <main class="main-content">
+        <div class="content-wrapper card">
+          <!-- Navigation tabs for different sections -->
+          <nav class="nav-tabs">
+            <button class="tab-button active" data-tab="create-order" style="display: none;">
+              Create Order
+            </button>
+            <button class="tab-button" data-tab="view-orders" style="display: none;">
+              View Orders
+            </button>
+            <button class="tab-button" data-tab="my-orders" style="display: none;">My Orders</button>
+            <button class="tab-button" data-tab="taker-orders" style="display: none;">
+              Invited Orders
+            </button>
+            <button class="tab-button" data-tab="cleanup-orders" style="display: none;">
+              Cleanup
+            </button>
+            <button class="tab-button" data-tab="contract-params" style="display: none;">
+              Parameters
+            </button>
+          </nav>
+
+          <!-- Create Order tab content -->
+          <div id="create-order" class="tab-content active card">
+            <!-- Content will be rendered by CreateOrder component -->
+          </div>
+          <!-- Other tab contents (populated dynamically) -->
+          <div id="view-orders" class="tab-content card"></div>
+          <div id="my-orders" class="tab-content card"></div>
+          <div id="taker-orders" class="tab-content card"></div>
+          <div id="cleanup-orders" class="tab-content card">
+            <div id="cleanup-container" class="cleanup-container"></div>
+          </div>
+          <div id="contract-params" class="tab-content card">
+            <div
+              id="contract-params-container"
+              class="contract-params-container"
+            ></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
 </html>
