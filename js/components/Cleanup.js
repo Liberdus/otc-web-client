@@ -71,6 +71,16 @@ export class Cleanup extends BaseComponent {
                         <h2>Cleanup Expired Orders</h2>
                         <p class="connect-prompt">Connect wallet to view cleanup opportunities</p>
                     </div>`;
+                
+                // Add wallet connection listener to reinitialize when wallet connects
+                if (window.walletManager) {
+                    window.walletManager.addListener((event, data) => {
+                        if (event === 'connect') {
+                            this.debug('Wallet connected in read-only mode, reinitializing...');
+                            this.initialize(false); // Reinitialize in connected mode
+                        }
+                    });
+                }
                 return;
             }
 
@@ -218,8 +228,19 @@ export class Cleanup extends BaseComponent {
             }
 
             if (elements.cleanupButton) {
-                elements.cleanupButton.disabled = eligibleOrders.length === 0;
-                elements.cleanupButton.textContent = 'Clean Orders';
+                // Check if wallet is connected
+                const isWalletConnected = window.walletManager?.isWalletConnected();
+                
+                if (!isWalletConnected) {
+                    elements.cleanupButton.disabled = true;
+                    elements.cleanupButton.textContent = 'Connect Wallet';
+                } else if (eligibleOrders.length === 0) {
+                    elements.cleanupButton.disabled = true;
+                    elements.cleanupButton.textContent = 'Clean Orders';
+                } else {
+                    elements.cleanupButton.disabled = false;
+                    elements.cleanupButton.textContent = 'Clean Orders';
+                }
             }
 
             this.debug('Cleanup opportunities:', {
@@ -274,19 +295,42 @@ export class Cleanup extends BaseComponent {
             this.debug('Order sync complete event received');
             this.checkCleanupOpportunities();
         });
+
+        // Add wallet connection event listeners
+        if (window.walletManager) {
+            window.walletManager.addListener((event, data) => {
+                if (event === 'connect') {
+                    this.debug('Wallet connected, updating cleanup button state');
+                    this.checkCleanupOpportunities();
+                } else if (event === 'disconnect') {
+                    this.debug('Wallet disconnected, updating cleanup button state');
+                    this.checkCleanupOpportunities();
+                }
+            });
+        }
     }
 
     async performCleanup() {
         try {
+            // Check if wallet is connected first
+            if (!window.walletManager?.isWalletConnected()) {
+                this.debug('Wallet not connected, attempting to connect...');
+                try {
+                    await window.walletManager.connect();
+                    // After successful connection, refresh the button state
+                    await this.checkCleanupOpportunities();
+                    return;
+                } catch (error) {
+                    this.error('Failed to connect wallet:', error);
+                    this.showError('Failed to connect wallet: ' + error.message);
+                    return;
+                }
+            }
+
             const contract = this.webSocket?.contract;
             if (!contract) {
                 this.error('Contract not initialized');
                 throw new Error('Contract not initialized');
-            }
-
-            if (!window.walletManager?.provider) {
-                this.warn('Wallet not connected');
-                throw new Error('Wallet not connected');
             }
 
             const signer = await window.walletManager.getSigner();
@@ -541,6 +585,14 @@ export class Cleanup extends BaseComponent {
             this.debug('Cleaning up cleanup check interval');
             clearInterval(this.intervalId);
         }
+        
+        // Remove wallet listeners
+        if (window.walletManager) {
+            // Note: We can't easily remove specific listeners, but the component will be recreated
+            // when needed, so this is acceptable for now
+            this.debug('Wallet listeners will be cleaned up on component recreation');
+        }
+        
         this.debug('Resetting component state');
         this.isInitialized = false;
         this.isInitializing = false;
