@@ -412,10 +412,7 @@ class App {
         }
         
         this.showSuccess(
-            "Wallet disconnected from site. For complete disconnection:\n" +
-            "1. Click MetaMask extension\n" +
-            "2. Click globe icon with a green dot\n" +
-            "3. Select 'Disconnect'"
+            "Wallet disconnected from site."
         );
     }
 

@@ -117,7 +117,14 @@ export class WalletUI extends BaseComponent {
             // Setup event listeners
             this.setupEventListeners();
             
-            // Check if already connected, but only if not already connecting
+            // Check if user has manually disconnected
+            if (walletManager.hasUserDisconnected()) {
+                this.debug('User has manually disconnected, showing connect button');
+                this.showConnectButton();
+                return true;
+            }
+            
+            // Check if already connected, but only if not already connecting and user hasn't manually disconnected
             if (!walletManager.isConnecting) {
                 const accounts = await window.ethereum.request({ method: 'eth_accounts' });
                 if (accounts && accounts.length > 0) {
@@ -151,18 +158,12 @@ export class WalletUI extends BaseComponent {
                     createOrderBtn.textContent = 'Connect Wallet to Create Order';
                 }
                 
-                // Single disconnect call
-                await walletManager.disconnect();
+                // Use the new disconnect method that saves user preference
+                walletManager.disconnect();
                 
                 // Reset UI
                 this.showConnectButton();
                 this.accountAddress.textContent = '';
-                
-                // Clear any cached provider state
-                if (window.ethereum) {
-                    window.ethereum.removeAllListeners();
-                    this.setupEventListeners();
-                }
                 
                 // Update tab visibility
                 if (window.app?.updateTabVisibility) {
