@@ -273,6 +273,12 @@ export class CreateOrder extends BaseComponent {
         const createOrderBtn = document.getElementById('createOrderBtn');
         const orderCreationFee = document.getElementById('orderCreationFee');
         
+        // Ensure UI is hidden per styles by removing wallet-connected
+        const swapSection = document.querySelector('.swap-section');
+        if (swapSection) {
+            swapSection.classList.remove('wallet-connected');
+        }
+
         if (createOrderBtn) {
             createOrderBtn.disabled = true;
             createOrderBtn.textContent = 'Connect Wallet to Create Order';
@@ -289,6 +295,12 @@ export class CreateOrder extends BaseComponent {
         const createOrderBtn = document.getElementById('createOrderBtn');
         const orderCreationFee = document.getElementById('orderCreationFee');
         
+        // Make sure the swap section is marked as wallet-connected so CSS reveals inputs
+        const swapSection = document.querySelector('.swap-section');
+        if (swapSection) {
+            swapSection.classList.add('wallet-connected');
+        }
+
         if (createOrderBtn) {
             createOrderBtn.disabled = false;
             createOrderBtn.textContent = 'Create Order';
