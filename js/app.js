@@ -23,6 +23,13 @@ class App {
         this.warn = logger.warn.bind(logger);
 
         this.debug('App constructor called');
+    }
+
+    async load () {
+        this.debug('Loading app components...');
+
+        await this.initializeWalletManager();
+        await this.initializeWebSocket();
         
         // Initialize CreateOrder first
         this.components = {
@@ -51,7 +58,7 @@ class App {
             await this.connectWallet();
         };
 
-        // Handle other components
+        // Fallback for rendering components that are not CreateOrder, ViewOrders, TakerOrders, WalletUI, or Cleanup
         Object.entries(this.components).forEach(([id, component]) => {
             if (component instanceof BaseComponent && 
                 !(component instanceof CreateOrder) && 
@@ -123,20 +130,24 @@ class App {
         this.updateTabVisibility = (isConnected) => {
             const tabButtons = document.querySelectorAll('.tab-button');
             tabButtons.forEach(button => {
-                if (button.dataset.tab === 'create-order') return; // Always show create-order
-                button.style.display = isConnected ? 'block' : 'none';
+                // always show view-orders, cleanup-orders, contract-params
+                if (button.dataset.tab === 'view-orders' || button.dataset.tab === 'cleanup-orders' || button.dataset.tab === 'contract-params') {
+                    button.style.display = 'block';
+                } else {
+                    button.style.display = isConnected ? 'block' : 'none';
+                }
             });
             
             // If disconnected and not on create-order tab, switch to it
-            if (!isConnected && this.currentTab !== 'create-order') {
-                this.showTab('create-order');
+            if (!isConnected && this.currentTab !== 'view-orders') {
+                this.showTab('view-orders');
             }
         };
 
         // Update initial tab visibility
         this.updateTabVisibility(false);
 
-        // Add this to your existing JavaScript
+        // Initialize taker orders toggle
         document.querySelector('.taker-toggle').addEventListener('click', function() {
             this.classList.toggle('active');
             document.querySelector('.taker-input-content').classList.toggle('hidden');
@@ -203,6 +214,8 @@ class App {
             reinitializeComponents(window.ethereum.selectedAddress);
         });
 
+        await window.webSocket.syncAllOrders();
+
         this.lastDisconnectNotification = 0;
     }
 
@@ -247,62 +260,53 @@ class App {
         });
     }
 
-    async initialize() {
-        if (this.isInitializing) {
-            console.log('[App] Already initializing, skipping...');
-            return;
-        }
-
-        this.isInitializing = true;
+    async initializeWalletManager() {
         try {
-            this.debug('Starting initialization...');
-            
-            // Add this line at the start
-            const mainContent = document.querySelector('.main-content');
-            
+            this.debug('Initializing wallet manager...');
             window.walletManager = walletManager;
             await walletManager.init(true);
-            
+            this.debug('Wallet manager initialized');
+        } catch (error) {
+            this.debug('Wallet manager initialization error:', error);
+        }
+    }
+
+    async initializePricingService() {
+        try {
+            this.debug('Initializing pricing service...');
             // Initialize PricingService first and make it globally available
             window.pricingService = new PricingService();
             await window.pricingService.initialize();
-            
+            this.debug('Pricing service initialized');
+        } catch (error) {
+            this.debug('Pricing service initialization error:', error);
+        }
+    }
+
+    async initializeWebSocket() {
+        try {
+            this.debug('Initializing WebSocket...');
             // Initialize WebSocket with the global pricingService
-            window.webSocket = new WebSocketService({ 
-                pricingService: window.pricingService 
+            window.webSocket = new WebSocketService({
+                pricingService: window.pricingService
             });
-            
+
             // Subscribe to orderSyncComplete event before initialization
             window.webSocket.subscribe('orderSyncComplete', () => {
                 this.wsInitialized = true;
                 this.loadingOverlay.remove();
                 this.debug('WebSocket order sync complete, showing content');
             });
-            
+
             const wsInitialized = await window.webSocket.initialize();
             if (!wsInitialized) {
                 this.debug('WebSocket initialization failed, falling back to HTTP');
                 // Still remove overlay in case of failure
                 this.loadingOverlay.remove();
             }
-            
-            await this.initializeComponents(true);
-            
-            // Add this line near the end, before removing loading overlay
-            setTimeout(() => {
-                this.loadingOverlay.remove();
-                mainContent.style.display = 'block'; // Show content after initialization
-                mainContent.classList.add('initialized');
-                this.debug('Initialization complete');
-            }, 500); // Small delay to ensure loading animation is visible
+            this.debug('WebSocket initialized');
         } catch (error) {
-            this.debug('Initialization error:', error);
-            // Still show content in case of error
-            mainContent?.classList.add('initialized');
-            // Remove overlay in case of error
-            this.loadingOverlay.remove();
-        } finally {
-            this.isInitializing = false;
+            this.debug('WebSocket initialization error:', error);
         }
     }
 
@@ -577,24 +581,18 @@ class App {
     }
 }
 
+window.app = new App();
+
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        window.app = new App();
-        window.app.initializeEventListeners();
-        window.app.showTab(window.app.currentTab);
+        window.app.load();
         
         // Add network config button event listener here
         const networkConfigButton = document.querySelector('.network-config-button');
         if (networkConfigButton) {
             networkConfigButton.addEventListener('click', showAppParametersPopup);
         }
-        
-        // Wait for wallet initialization to complete
-        await window.app.initialize().catch(error => {
-            console.error('[App] Failed to initialize wallet:', error);
-            throw error;
-        });
         
         window.app.debug('Initialization complete');
     } catch (error) {

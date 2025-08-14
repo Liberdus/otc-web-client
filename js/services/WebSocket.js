@@ -79,18 +79,9 @@ export class WebSocketService {
 
         try {
             this.debug('Starting initialization...');
-            
             this.initializationPromise = (async () => {
                 // Wait for provider connection
                 const config = getNetworkConfig();
-                this.debug('Network config loaded, attempting WebSocket connection...');
-                
-                this.contractAddress = config.contractAddress;
-                this.contractABI = config.contractABI;
-                
-                if (!this.contractABI) {
-                    throw new Error('Contract ABI not found in network config');
-                }
                 
                 const wsUrls = [config.wsUrl, ...config.fallbackWsUrls];
                 let connected = false;
@@ -114,17 +105,6 @@ export class WebSocketService {
                     throw new Error('Failed to connect to any WebSocket URL');
                 }
 
-                this.contract = new ethers.Contract(
-                    this.contractAddress,
-                    this.contractABI,
-                    this.provider
-                );
-
-                this.debug('Contract initialized:', {
-                    address: this.contract.address,
-                    abi: this.contract.interface.format()
-                });
-
                 this.debug('Fetching contract constants...');
                 this.orderExpiry = await this.contract.ORDER_EXPIRY();
                 this.gracePeriod = await this.contract.GRACE_PERIOD();
@@ -132,14 +112,6 @@ export class WebSocketService {
                     orderExpiry: this.orderExpiry.toString(),
                     gracePeriod: this.gracePeriod.toString()
                 });
-
-                // Wait for contract initialization
-                this.debug('Contract initialized, starting order sync...');
-                await this.syncAllOrders(this.contract);
-                
-                // Setup event listeners after sync
-                this.debug('Setting up event listeners...');
-                await this.setupEventListeners(this.contract);
                 
                 // Subscribe to pricing service after everything else is ready
                 if (window.pricingService) {
@@ -305,151 +277,112 @@ export class WebSocketService {
         }
     }
 
-    async syncAllOrders(contract) {
-        let retryCount = 0;
-        const maxRetries = 3;
+        async syncAllOrders() {
+        const config = getNetworkConfig();
+        this.debug('Network config loaded, attempting WebSocket connection...');
         
-        while (retryCount < maxRetries) {
+        this.contractAddress = config.contractAddress;
+        this.contractABI = config.contractABI;
+
+        if (!this.contractABI) {
+            throw new Error('Contract ABI not found in network config');
+        }
+
+        this.contract = new ethers.Contract(
+            this.contractAddress,
+            this.contractABI,
+            this.provider
+        );
+
+        this.debug('Contract initialized:', {
+            address: this.contract.address,
+            abi: this.contract.interface.format()
+        }); 
+
+        this.debug('Contract initialized, starting order sync...');
+        try {
+            this.debug('Starting order sync with contract:', this.contract.address);
+            
+            let nextOrderId = 0;
             try {
-                this.debug('Starting order sync with contract:', contract.address);
-                
-                // Get current block and calculate 20 days ago
-                const currentBlock = await this.provider.getBlockNumber();
-                const blocksPerDay = (24 * 60 * 60) / 2;
-                const startBlock = currentBlock - (blocksPerDay * 20);
-                
-                this.debug('Fetching events from block', startBlock, 'to', currentBlock);
-                
-                // Clear existing cache before sync
-                this.orderCache.clear();
-
-                // Fetch all relevant events
-                const [createdEvents, filledEvents, canceledEvents, cleanedEvents, retryEvents] = await Promise.all([
-                    contract.queryFilter(contract.filters.OrderCreated(), startBlock, currentBlock),
-                    contract.queryFilter(contract.filters.OrderFilled(), startBlock, currentBlock),
-                    contract.queryFilter(contract.filters.OrderCanceled(), startBlock, currentBlock),
-                    contract.queryFilter(contract.filters.OrderCleanedUp(), startBlock, currentBlock),
-                    contract.queryFilter(contract.filters.RetryOrder(), startBlock, currentBlock)
-                ]);
-
-                this.debug('Events fetched:', {
-                    created: createdEvents.length,
-                    filled: filledEvents.length,
-                    canceled: canceledEvents.length,
-                    cleaned: cleanedEvents.length,
-                    retry: retryEvents.length
-                });
-
-                // Process OrderCreated events first to build the base state
-                for (const event of createdEvents) {
-                    const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee] = event.args;
-                    let orderData = {
-                        id: orderId.toNumber(),
-                        maker,
-                        taker,
-                        sellToken,
-                        sellAmount,
-                        buyToken,
-                        buyAmount,
-                        timings: {
-                            createdAt: timestamp.toNumber(),
-                            expiresAt: timestamp.toNumber() + this.orderExpiry.toNumber(),
-                            graceEndsAt: timestamp.toNumber() + this.orderExpiry.toNumber() + this.gracePeriod.toNumber()
-                        },
-                        status: 'Active',
-                        orderCreationFee: fee,
-                        tries: 0
-                    };
-
-                    // Calculate and add deal metrics
-                    orderData = await this.calculateDealMetrics(orderData);
-                    this.orderCache.set(orderData.id, orderData);
-                    this.debug('Added order to cache:', orderData);
-                }
-
-                this.debug('After processing created events, cache size:', this.orderCache.size);
-
-                // Then process status changes
-                for (const event of filledEvents) {
-                    const [orderId] = event.args;
-                    const orderIdNum = orderId.toNumber();
-                    const order = this.orderCache.get(orderIdNum);
-                    if (order) {
-                        order.status = 'Filled';
-                        this.orderCache.set(orderIdNum, order);
-                        this.debug('Updated order to Filled:', orderIdNum);
-                    } else {
-                        this.debug('Filled event for unknown order:', orderIdNum);
-                    }
-                }
-
-                for (const event of canceledEvents) {
-                    const [orderId] = event.args;
-                    const orderIdNum = orderId.toNumber();
-                    const order = this.orderCache.get(orderIdNum);
-                    if (order) {
-                        order.status = 'Canceled';
-                        this.orderCache.set(orderIdNum, order);
-                        this.debug('Updated order to Canceled:', orderIdNum);
-                    } else {
-                        this.debug('Canceled event for unknown order:', orderIdNum);
-                    }
-                }
-
-                // Process cleanup events (remove orders)
-                for (const event of cleanedEvents) {
-                    const [orderId] = event.args;
-                    const orderIdNum = orderId.toNumber();
-                    if (this.orderCache.has(orderIdNum)) {
-                        this.orderCache.delete(orderIdNum);
-                        this.debug('Removed cleaned up order:', orderIdNum);
-                    }
-                }
-
-                // Process retry events (update order ID and tries)
-                for (const event of retryEvents) {
-                    const [oldOrderId, newOrderId, maker, tries, timestamp] = event.args;
-                    const oldOrderIdNum = oldOrderId.toNumber();
-                    const newOrderIdNum = newOrderId.toNumber();
-                    
-                    const order = this.orderCache.get(oldOrderIdNum);
-                    if (order) {
-                        // Update order with new ID and tries count
-                        order.id = newOrderIdNum;
-                        order.tries = tries.toNumber();
-                        order.timestamp = timestamp.toNumber();
-                        
-                        // Remove old order ID and add with new ID
-                        this.orderCache.delete(oldOrderIdNum);
-                        this.orderCache.set(newOrderIdNum, order);
-                        this.debug('Updated retried order:', {oldId: oldOrderIdNum, newId: newOrderIdNum, tries: tries.toString()});
-                    }
-                }
-
-                // Log final cache state
-                this.debug('Final order cache:', {
-                    size: this.orderCache.size,
-                    orders: Array.from(this.orderCache.entries()).map(([id, order]) => ({
-                        id,
-                        status: order.status,
-                        timestamp: order.timestamp
-                    }))
-                });
-
-                this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
-                
-                return true;
+                nextOrderId = await this.contract.nextOrderId();
+                this.debug('nextOrderId result:', nextOrderId.toString());
             } catch (error) {
-                retryCount++;
-                this.warn(`Order sync attempt ${retryCount} failed:`, error);
+                this.debug('nextOrderId call failed, using default value:', error);
+            }
+
+            // Clear existing cache before sync
+            this.orderCache.clear();
+            
+            // Process orders in smaller batches to avoid rate limiting
+            const batchSize = 3; // Process only 3 orders at a time
+            const totalBatches = Math.ceil(nextOrderId / batchSize);
+            
+            this.debug(`Processing ${nextOrderId} orders in ${totalBatches} batches of ${batchSize}`);
+            
+            for (let batch = 0; batch < totalBatches; batch++) {
+                const startIndex = batch * batchSize;
+                const endIndex = Math.min(startIndex + batchSize, nextOrderId);
                 
-                if (retryCount >= maxRetries) {
-                    this.error('Max retry attempts reached, sync failed');
-                    throw error;
+                this.debug(`Processing batch ${batch + 1}/${totalBatches} (orders ${startIndex}-${endIndex - 1})`);
+                
+                                // Process current batch
+                for (let i = startIndex; i < endIndex; i++) {
+                    try {
+                        // Add longer delay to avoid rate limiting
+                        if (i > startIndex) {
+                            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+                        }
+                        
+                        const order = await this.contract.orders(i);
+                        // Only filter out zero-address makers (non-existent orders)
+                        if (order.maker !== ethers.constants.AddressZero) {
+                            const orderData = {
+                                id: i,
+                                maker: order.maker,
+                                taker: order.taker,
+                                sellToken: order.sellToken,
+                                sellAmount: order.sellAmount,
+                                buyToken: order.buyToken,
+                                buyAmount: order.buyAmount,
+                                timestamp: order.timestamp.toNumber(),
+                                status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
+                                orderCreationFee: order.orderCreationFee,
+                                tries: order.tries
+                            };
+                            this.orderCache.set(i, orderData);
+                            this.debug('Added order to cache:', orderData);
+                        }
+                    } catch (error) {
+                        this.debug(`Failed to read order ${i}:`, error);
+                        
+                        // If it's a rate limit error, add extra delay
+                        if (error.code === 'CALL_EXCEPTION' && error.error?.code === -32005) {
+                            this.debug(`Rate limit hit for order ${i}, waiting 2 seconds...`);
+                            await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+                        }
+                        
+                        continue;
+                    }
                 }
                 
-                await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
+                // Add delay between batches
+                if (batch < totalBatches - 1) {
+                    this.debug(`Batch ${batch + 1} complete, waiting 1 second before next batch...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second between batches
+                }
             }
+            
+            this.debug('Order sync complete. Cache size:', this.orderCache.size);
+            this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
+            this.debug('Setting up event listeners...');
+            // TODO move this where needed (after sync)
+            await this.setupEventListeners(this.contract);
+            
+        } catch (error) {
+            this.debug('Order sync failed:', error);
+            this.orderCache.clear();
+            this.notifySubscribers('orderSyncComplete', {});
         }
     }
 
