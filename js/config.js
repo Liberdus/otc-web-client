@@ -120,7 +120,10 @@ export class WalletManager {
             this.debug('Starting initialization...');
             
             if (typeof window.ethereum === 'undefined') {
-                throw new Error("MetaMask is not installed!");
+                this.debug('MetaMask is not installed, initializing in read-only mode');
+                this.provider = null;
+                this.isInitialized = true;
+                return;
             }
 
             this.provider = new ethers.providers.Web3Provider(window.ethereum);
@@ -160,6 +163,9 @@ export class WalletManager {
 
     async checkConnection() {
         try {
+            if (!this.provider) {
+                return false;
+            }
             const accounts = await this.provider.listAccounts();
             return accounts.length > 0;
         } catch (error) {
@@ -170,6 +176,9 @@ export class WalletManager {
 
     async initializeSigner(account) {
         try {
+            if (!this.provider) {
+                throw new Error('No provider available');
+            }
             this.signer = this.provider.getSigner();
             await this.initializeContract();
             return this.signer;
@@ -207,6 +216,10 @@ export class WalletManager {
         if (this.isConnecting) {
             console.log('[WalletManager] Connection already in progress');
             return null;
+        }
+
+        if (!this.provider) {
+            throw new Error('MetaMask is not installed');
         }
 
         this.isConnecting = true;
@@ -327,6 +340,9 @@ export class WalletManager {
     }
 
     isWalletConnected() {
+        if (!this.provider) {
+            return false;
+        }
         return this.isConnected;
     }
 
@@ -352,10 +368,16 @@ export class WalletManager {
 
     // Add getter methods
     getSigner() {
+        if (!this.provider) {
+            return null;
+        }
         return this.signer;
     }
 
     getContract() {
+        if (!this.provider) {
+            return null;
+        }
         return this.contract;
     }
 

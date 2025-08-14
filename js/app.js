@@ -40,7 +40,6 @@ class App {
         // Then initialize other components that might depend on CreateOrder's DOM elements
         this.components = {
             ...this.components,  // Keep CreateOrder
-            'wallet-info': new WalletUI(),
             'view-orders': new ViewOrders(),
             'my-orders': new MyOrders(),
             'taker-orders': new TakerOrders(),
@@ -48,8 +47,9 @@ class App {
             'contract-params': new ContractParams()
         };
 
-        // Render wallet UI immediately
+        // Initialize wallet UI and store reference
         this.walletUI = new WalletUI();
+        this.components['wallet-info'] = this.walletUI;
         
         this.handleConnectWallet = async (e) => {
             e && e.preventDefault();
@@ -144,18 +144,6 @@ class App {
 
         // Update initial tab visibility
         this.updateTabVisibility(false);
-
-        // Initialize taker orders toggle
-        const takerToggle = document.querySelector('.taker-toggle');
-        if (takerToggle) {
-            takerToggle.addEventListener('click', function() {
-                this.classList.toggle('active');
-                const takerInputContent = document.querySelector('.taker-input-content');
-                if (takerInputContent) {
-                    takerInputContent.classList.toggle('hidden');
-                }
-            });
-        }
 
         // Add new property to track WebSocket readiness
         this.wsInitialized = false;

@@ -600,6 +600,10 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 
                 cancelButton.addEventListener('click', async () => {
                     try {
+                        if (!this.provider) {
+                            throw new Error('MetaMask is not installed. Please install MetaMask to cancel orders.');
+                        }
+
                         cancelButton.disabled = true;
                         cancelButton.textContent = 'Cancelling...';
                         cancelButton.classList.add('disabled');
@@ -752,6 +756,10 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                     
                     cancelButton.addEventListener('click', async () => {
                         try {
+                            if (!this.provider) {
+                                throw new Error('MetaMask is not installed. Please install MetaMask to cancel orders.');
+                            }
+
                             cancelButton.disabled = true;
                             cancelButton.textContent = 'Cancelling...';
                             

@@ -65,13 +65,43 @@ export class Cleanup extends BaseComponent {
             this.container.innerHTML = '';
             
             if (readOnlyMode) {
-                this.debug('Read-only mode, showing connect prompt');
-                this.container.innerHTML = `
-                    <div class="tab-content-wrapper">
+                this.debug('Read-only mode, showing cleanup opportunities with connect prompt');
+                const wrapper = this.createElement('div', 'tab-content-wrapper');
+                wrapper.innerHTML = `
+                    <div class="cleanup-section">
                         <h2>Cleanup Expired Orders</h2>
-                        <p class="connect-prompt">Connect wallet to view cleanup opportunities</p>
+                        <div class="cleanup-info">
+                            <p>Help maintain the orderbook by cleaning up expired orders</p>
+                            <div class="cleanup-stats">
+                                <div class="cleanup-rewards">
+                                    <h3>Cleanup Information</h3>
+                                    <div>Next cleanup reward: <span id="current-reward">Loading...</span></div>
+                                    <div>Orders ready: <span id="cleanup-ready">Loading...</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="connect-prompt">
+                            <p>Connect wallet to perform cleanup actions</p>
+                        </div>
+                        <button id="cleanup-button" class="action-button" disabled>
+                            Connect Wallet to Clean Orders
+                        </button>
                     </div>`;
                 
+                this.container.appendChild(wrapper);
+
+                // Set up the cleanup button event listener for read-only mode
+                this.cleanupButton = document.getElementById('cleanup-button');
+                if (this.cleanupButton) {
+                    this.cleanupButton.addEventListener('click', () => {
+                        if (window.walletManager) {
+                            window.walletManager.connect().catch(error => {
+                                this.showError('Failed to connect wallet: ' + error.message);
+                            });
+                        }
+                    });
+                }
+
                 // Add wallet connection listener to reinitialize when wallet connects
                 if (window.walletManager) {
                     window.walletManager.addListener((event, data) => {
@@ -81,6 +111,15 @@ export class Cleanup extends BaseComponent {
                         }
                     });
                 }
+
+                // Check cleanup opportunities even in read-only mode
+                this.debug('Starting cleanup opportunities check in read-only mode');
+                await this.checkCleanupOpportunities();
+                
+                this.intervalId = setInterval(() => this.checkCleanupOpportunities(), 5 * 60 * 1000);
+                
+                this.isInitialized = true;
+                this.debug('Read-only mode initialization complete');
                 return;
             }
 
@@ -232,11 +271,11 @@ export class Cleanup extends BaseComponent {
                 const isWalletConnected = window.walletManager?.isWalletConnected();
                 
                 if (!isWalletConnected) {
-                    elements.cleanupButton.disabled = true;
-                    elements.cleanupButton.textContent = 'Connect Wallet';
+                    elements.cleanupButton.disabled = false; // Enable button to connect wallet
+                    elements.cleanupButton.textContent = 'Connect Wallet to Clean Orders';
                 } else if (eligibleOrders.length === 0) {
                     elements.cleanupButton.disabled = true;
-                    elements.cleanupButton.textContent = 'Clean Orders';
+                    elements.cleanupButton.textContent = 'No Orders to Clean';
                 } else {
                     elements.cleanupButton.disabled = false;
                     elements.cleanupButton.textContent = 'Clean Orders';

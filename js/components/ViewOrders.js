@@ -11,7 +11,8 @@ import { createLogger } from '../services/LogService.js';
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
         super(containerId);
-        this.provider = new ethers.providers.Web3Provider(window.ethereum);
+        this.provider = typeof window.ethereum !== 'undefined' ? 
+            new ethers.providers.Web3Provider(window.ethereum) : null;
         this.currentPage = 1;
         this.totalOrders = 0;
         this.setupErrorHandling();
@@ -676,6 +677,9 @@ For Buyers:
 
     async checkAllowance(tokenAddress, owner, amount) {
         try {
+            if (!this.provider) {
+                return false;
+            }
             const tokenContract = new ethers.Contract(
                 tokenAddress,
                 ['function allowance(address owner, address spender) view returns (uint256)'],
@@ -693,6 +697,10 @@ For Buyers:
         const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
         
         try {
+            if (!this.provider) {
+                throw new Error('MetaMask is not installed. Please install MetaMask to take orders.');
+            }
+
             if (button) {
                 button.disabled = true;
                 button.textContent = 'Filling...';
