@@ -1142,14 +1142,45 @@ export class CreateOrder extends BaseComponent {
         this.debug(`Status update (${type}): ${message}`);
     }
 
-    // Also add a helper method for showing errors
-    showError(message) {
-        this.showStatus(message, 'error');
+    // Use toast system for error and success messages
+    showError(message, duration = 5000) {
+        this.debug('Showing error toast:', message);
+        if (window.showError) {
+            return window.showError(message, duration);
+        } else {
+            // Fallback to status display if toast is not available
+            this.showStatus(message, 'error');
+        }
     }
 
-    // And a helper for showing success messages
-    showSuccess(message) {
-        this.showStatus(message, 'success');
+    showSuccess(message, duration = 5000) {
+        this.debug('Showing success toast:', message);
+        if (window.showSuccess) {
+            return window.showSuccess(message, duration);
+        } else {
+            // Fallback to status display if toast is not available
+            this.showStatus(message, 'success');
+        }
+    }
+
+    showWarning(message, duration = 5000) {
+        this.debug('Showing warning toast:', message);
+        if (window.showWarning) {
+            return window.showWarning(message, duration);
+        } else {
+            // Fallback to status display if toast is not available
+            this.showStatus(message, 'warning');
+        }
+    }
+
+    showInfo(message, duration = 5000) {
+        this.debug('Showing info toast:', message);
+        if (window.showInfo) {
+            return window.showInfo(message, duration);
+        } else {
+            // Fallback to status display if toast is not available
+            this.showStatus(message, 'info');
+        }
     }
 
     async getTokenDecimals(tokenAddress) {

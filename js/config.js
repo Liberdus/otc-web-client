@@ -7,7 +7,8 @@ const networkConfig = {
         name: "Polygon",
         displayName: "Polygon Mainnet",
         isDefault: true,
-        contractAddress: "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837",
+        contractAddress: /* "0x34396a792510d6fb8ec0f70b68b8739456af06c6",  */// new
+        "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837", // old
         contractABI: CONTRACT_ABI,
         explorer: "https://polygonscan.com",
         rpcUrl: "https://polygon-rpc.com",
@@ -45,6 +46,7 @@ export const DEBUG_CONFIG = {
     BASE_COMPONENT: false,
     PRICING: false,
     TOKENS: false,
+    TOAST: true, // Enable toast debugging for testing
     // Add more specific flags as needed
 };
 

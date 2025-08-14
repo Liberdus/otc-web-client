@@ -519,15 +519,15 @@ export class Cleanup extends BaseComponent {
         }
     }
 
-    showSuccess(message) {
+    showSuccess(message, duration = 5000) {
         this.debug('Success:', message);
         
-        // Create success message element
-        const successMessage = document.createElement('div');
-        successMessage.className = 'success-message';
-        successMessage.textContent = message;
-
-        // Find the fee config form and add message
+        // Show toast notification
+        if (window.showSuccess) {
+            window.showSuccess(message, duration);
+        }
+        
+        // Also show form-specific success message for fee config
         const feeConfigForm = document.querySelector('.fee-config-form');
         if (feeConfigForm) {
             // Remove any existing messages
@@ -535,6 +535,11 @@ export class Cleanup extends BaseComponent {
             if (existingMessage) {
                 existingMessage.remove();
             }
+
+            // Create success message element
+            const successMessage = document.createElement('div');
+            successMessage.className = 'success-message';
+            successMessage.textContent = message;
 
             // Add new message
             feeConfigForm.appendChild(successMessage);
@@ -554,15 +559,15 @@ export class Cleanup extends BaseComponent {
         }
     }
 
-    showError(message) {
+    showError(message, duration = 5000) {
         this.error('Error:', message);
         
-        // Create error message element
-        const errorMessage = document.createElement('div');
-        errorMessage.className = 'error-message';
-        errorMessage.textContent = message;
-
-        // Find the fee config form and add message
+        // Show toast notification
+        if (window.showError) {
+            window.showError(message, duration);
+        }
+        
+        // Also show form-specific error message for fee config
         const feeConfigForm = document.querySelector('.fee-config-form');
         if (feeConfigForm) {
             // Remove any existing messages
@@ -571,6 +576,11 @@ export class Cleanup extends BaseComponent {
                 existingMessage.remove();
             }
 
+            // Create error message element
+            const errorMessage = document.createElement('div');
+            errorMessage.className = 'error-message';
+            errorMessage.textContent = message;
+
             // Add new message
             feeConfigForm.appendChild(errorMessage);
 
@@ -578,6 +588,20 @@ export class Cleanup extends BaseComponent {
             setTimeout(() => {
                 errorMessage.remove();
             }, 3000);
+        }
+    }
+
+    showWarning(message, duration = 5000) {
+        this.debug('Warning:', message);
+        if (window.showWarning) {
+            window.showWarning(message, duration);
+        }
+    }
+
+    showInfo(message, duration = 5000) {
+        this.debug('Info:', message);
+        if (window.showInfo) {
+            window.showInfo(message, duration);
         }
     }
 

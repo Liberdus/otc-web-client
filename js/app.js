@@ -11,6 +11,7 @@ import { ContractParams } from './components/ContractParams.js';
 import { PricingService } from './services/PricingService.js';
 import { createLogger } from './services/LogService.js';
 import { DebugPanel } from './components/DebugPanel.js';
+import { getToast, showError, showSuccess, showWarning, showInfo } from './components/Toast.js';
 
 class App {
     constructor() {
@@ -27,6 +28,10 @@ class App {
 
     async load () {
         this.debug('Loading app components...');
+
+        // Initialize toast component
+        this.toast = getToast();
+        this.debug('Toast component initialized');
 
         await this.initializeWalletManager();
         await this.initializePricingService();
@@ -362,7 +367,8 @@ class App {
         try {
             await walletManager.connect();
         } catch (error) {
-            this.showError("Failed to connect wallet: " + error.message);
+            // Don't show toast here - WalletUI component handles the error display
+            this.error('Wallet connection failed:', error);
         } finally {
             if (loader && loader.parentElement) {
                 loader.parentElement.removeChild(loader);
@@ -442,20 +448,29 @@ class App {
         }
     }
 
-    showError(message) {
-        const error = document.createElement('div');
-        error.className = 'status error';
-        error.textContent = message;
-        document.body.appendChild(error);
-        setTimeout(() => error.remove(), 5000);
+    showError(message, duration = 5000) {
+        this.debug('Showing error toast:', message);
+        return showError(message, duration);
     }
 
-    showSuccess(message) {
-        const success = document.createElement('div');
-        success.className = 'status success';
-        success.textContent = message;
-        document.body.appendChild(success);
-        setTimeout(() => success.remove(), 5000);
+    showSuccess(message, duration = 5000) {
+        this.debug('Showing success toast:', message);
+        return showSuccess(message, duration);
+    }
+
+    showWarning(message, duration = 5000) {
+        this.debug('Showing warning toast:', message);
+        return showWarning(message, duration);
+    }
+
+    showInfo(message, duration = 5000) {
+        this.debug('Showing info toast:', message);
+        return showInfo(message, duration);
+    }
+
+    showToast(message, type = 'info', duration = 5000) {
+        this.debug(`Showing ${type} toast:`, message);
+        return this.toast.showToast(message, type, duration);
     }
 
     async showTab(tabId) {
@@ -605,6 +620,13 @@ class App {
 
 window.app = new App();
 
+// Make toast functions globally available for all components
+window.showError = showError;
+window.showSuccess = showSuccess;
+window.showWarning = showWarning;
+window.showInfo = showInfo;
+window.getToast = getToast;
+
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
     try {
@@ -677,6 +699,8 @@ const populateNetworkOptions = () => {
                 }
                 if (window.app) {
                     window.app.showError('Failed to switch network: ' + error.message);
+                } else {
+                    showError('Failed to switch network: ' + error.message);
                 }
             }
         });
