@@ -36,9 +36,6 @@ class App {
             'create-order': new CreateOrder()
         };
         
-        // Render CreateOrder immediately
-        this.components['create-order'].initialize();
-        
         // Then initialize other components that might depend on CreateOrder's DOM elements
         this.components = {
             ...this.components,  // Keep CreateOrder
@@ -148,10 +145,16 @@ class App {
         this.updateTabVisibility(false);
 
         // Initialize taker orders toggle
-        document.querySelector('.taker-toggle').addEventListener('click', function() {
-            this.classList.toggle('active');
-            document.querySelector('.taker-input-content').classList.toggle('hidden');
-        });
+        const takerToggle = document.querySelector('.taker-toggle');
+        if (takerToggle) {
+            takerToggle.addEventListener('click', function() {
+                this.classList.toggle('active');
+                const takerInputContent = document.querySelector('.taker-input-content');
+                if (takerInputContent) {
+                    takerInputContent.classList.toggle('hidden');
+                }
+            });
+        }
 
         // Add new property to track WebSocket readiness
         this.wsInitialized = false;
@@ -166,8 +169,10 @@ class App {
         `;
         document.body.appendChild(this.loadingOverlay);
 
-        // Keep main content hidden initially
-        mainContent.style.display = 'none';
+        // Show main content after initialization
+        if (mainContent) {
+            mainContent.style.display = 'block';
+        }
 
         // Initialize theme handling
         this.initializeTheme();
@@ -216,6 +221,18 @@ class App {
 
         await window.webSocket.syncAllOrders();
 
+        // Initialize components in read-only mode initially
+        const readOnlyMode = !window.walletManager?.provider;
+        await this.initializeComponents(readOnlyMode);
+        
+        // Show the initial tab (view-orders) in read-only mode
+        await this.showTab('view-orders');
+        
+        // Remove loading overlay after initialization
+        if (this.loadingOverlay && this.loadingOverlay.parentElement) {
+            this.loadingOverlay.remove();
+        }
+
         this.lastDisconnectNotification = 0;
     }
 
@@ -236,7 +253,9 @@ class App {
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.shiftKey && e.key === 'D') {
                 const panel = document.querySelector('.debug-panel');
-                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+                if (panel) {
+                    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+                }
             }
         });
 
@@ -315,23 +334,36 @@ class App {
             this.debug('Initializing components in ' + 
                 (readOnlyMode ? 'read-only' : 'connected') + ' mode');
             
-            // Only initialize the current tab's component
-            const currentComponent = this.components[this.currentTab];
-            if (currentComponent && typeof currentComponent.initialize === 'function') {
-                this.debug(`Initializing current component: ${this.currentTab}`);
-                try {
-                    await currentComponent.initialize(readOnlyMode);
-                } catch (error) {
-                    console.error(`[App] Error initializing ${this.currentTab}:`, error);
+            // In read-only mode, initialize the three tabs that should always be visible
+            if (readOnlyMode) {
+                const readOnlyTabs = ['view-orders', 'cleanup-orders', 'contract-params'];
+                for (const tabId of readOnlyTabs) {
+                    const component = this.components[tabId];
+                    if (component && typeof component.initialize === 'function') {
+                        this.debug(`Initializing read-only component: ${tabId}`);
+                        try {
+                            await component.initialize(readOnlyMode);
+                        } catch (error) {
+                            console.error(`[App] Error initializing ${tabId}:`, error);
+                        }
+                    }
+                }
+            } else {
+                // In connected mode, initialize the current tab's component
+                const currentComponent = this.components[this.currentTab];
+                if (currentComponent && typeof currentComponent.initialize === 'function') {
+                    this.debug(`Initializing current component: ${this.currentTab}`);
+                    try {
+                        await currentComponent.initialize(readOnlyMode);
+                    } catch (error) {
+                        console.error(`[App] Error initializing ${this.currentTab}:`, error);
+                    }
                 }
             }
             
-            // Show the current tab
-            this.showTab(this.currentTab);
-            
-            this.debug('Component initialized');
+            this.debug('Components initialized');
         } catch (error) {
-            console.error('[App] Error initializing component:', error);
+            console.error('[App] Error initializing components:', error);
             this.showError("Component failed to initialize. Limited functionality available.");
         }
     }
@@ -520,22 +552,23 @@ class App {
                 }
             });
             
+            // Clean up WebSocket service
+            if (window.webSocket?.cleanup) {
+                try {
+                    window.webSocket.cleanup();
+                } catch (error) {
+                    console.warn(`Error cleaning up WebSocket service:`, error);
+                }
+            }
+            
             // Create and initialize CreateOrder component when wallet is connected
             const createOrderComponent = new CreateOrder();
             this.components['create-order'] = createOrderComponent;
             await createOrderComponent.initialize(false);
             
-            // Reinitialize only the current tab's component
-            const currentComponent = this.components[this.currentTab];
-            if (currentComponent && typeof currentComponent.initialize === 'function') {
-                this.debug(`Reinitializing current component: ${this.currentTab}`);
-                try {
-                    await currentComponent.initialize(false);
-                } catch (error) {
-                    console.error(`[App] Error reinitializing ${this.currentTab}:`, error);
-                }
-            }
-
+            // Reinitialize all components in connected mode
+            await this.initializeComponents(false);
+            
             // Re-show the current tab
             await this.showTab(this.currentTab);
             
@@ -609,6 +642,12 @@ const networkBadge = document.querySelector('.network-badge');
 const populateNetworkOptions = () => {
     const networks = getAllNetworks();
     
+    // Check if network elements exist
+    if (!networkButton || !networkDropdown || !networkBadge) {
+        console.warn('Network selector elements not found');
+        return;
+    }
+    
     // If only one network, hide dropdown functionality
     if (networks.length <= 1) {
         networkButton.classList.add('single-network');
@@ -625,8 +664,12 @@ const populateNetworkOptions = () => {
     document.querySelectorAll('.network-option').forEach(option => {
         option.addEventListener('click', async () => {
             try {
-                networkBadge.textContent = option.textContent;
-                networkDropdown.classList.add('hidden');
+                if (networkBadge) {
+                    networkBadge.textContent = option.textContent;
+                }
+                if (networkDropdown) {
+                    networkDropdown.classList.add('hidden');
+                }
                 
                 if (window.walletManager && window.walletManager.isConnected()) {
                     const chainId = option.dataset.chainId;
@@ -637,8 +680,15 @@ const populateNetworkOptions = () => {
                 }
             } catch (error) {
                 console.error('Failed to switch network:', error);
-                networkBadge.textContent = networkButton.querySelector('.network-badge').textContent;
-                app.showError('Failed to switch network: ' + error.message);
+                if (networkBadge && networkButton) {
+                    const buttonBadge = networkButton.querySelector('.network-badge');
+                    if (buttonBadge) {
+                        networkBadge.textContent = buttonBadge.textContent;
+                    }
+                }
+                if (window.app) {
+                    window.app.showError('Failed to switch network: ' + error.message);
+                }
             }
         });
     });

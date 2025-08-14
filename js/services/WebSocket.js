@@ -105,6 +105,26 @@ export class WebSocketService {
                     throw new Error('Failed to connect to any WebSocket URL');
                 }
 
+                // Initialize contract before fetching constants
+                this.debug('Initializing contract...');
+                this.contractAddress = config.contractAddress;
+                this.contractABI = config.contractABI;
+
+                if (!this.contractABI) {
+                    throw new Error('Contract ABI not found in network config');
+                }
+
+                this.contract = new ethers.Contract(
+                    this.contractAddress,
+                    this.contractABI,
+                    this.provider
+                );
+
+                this.debug('Contract initialized:', {
+                    address: this.contract.address,
+                    abi: this.contract.interface.format()
+                });
+
                 this.debug('Fetching contract constants...');
                 this.orderExpiry = await this.contract.ORDER_EXPIRY();
                 this.gracePeriod = await this.contract.GRACE_PERIOD();
@@ -153,6 +173,13 @@ export class WebSocketService {
     async setupEventListeners(contract) {
         try {
             this.debug('Setting up event listeners for contract:', contract.address);
+            
+            // Clean up any existing event listeners first
+            if (this.provider) {
+                this.provider.removeAllListeners("connect");
+                this.provider.removeAllListeners("disconnect");
+                this.provider.removeAllListeners("block");
+            }
             
             // Add connection state tracking
             this.provider.on("connect", () => {
@@ -277,29 +304,41 @@ export class WebSocketService {
         }
     }
 
-        async syncAllOrders() {
-        const config = getNetworkConfig();
-        this.debug('Network config loaded, attempting WebSocket connection...');
-        
-        this.contractAddress = config.contractAddress;
-        this.contractABI = config.contractABI;
-
-        if (!this.contractABI) {
-            throw new Error('Contract ABI not found in network config');
+    cleanup() {
+        try {
+            this.debug('Cleaning up WebSocket service...');
+            
+            // Remove provider event listeners
+            if (this.provider) {
+                this.provider.removeAllListeners("connect");
+                this.provider.removeAllListeners("disconnect");
+                this.provider.removeAllListeners("block");
+            }
+            
+            // Remove contract event listeners
+            if (this.contract) {
+                this.contract.removeAllListeners("OrderCreated");
+                this.contract.removeAllListeners("OrderFilled");
+                this.contract.removeAllListeners("OrderCanceled");
+                this.contract.removeAllListeners("OrderCleanedUp");
+                this.contract.removeAllListeners("RetryOrder");
+            }
+            
+            // Clear cache
+            this.orderCache.clear();
+            
+            this.debug('WebSocket service cleanup complete');
+        } catch (error) {
+            this.debug('Error during cleanup:', error);
         }
+    }
 
-        this.contract = new ethers.Contract(
-            this.contractAddress,
-            this.contractABI,
-            this.provider
-        );
-
-        this.debug('Contract initialized:', {
-            address: this.contract.address,
-            abi: this.contract.interface.format()
-        }); 
-
-        this.debug('Contract initialized, starting order sync...');
+        async syncAllOrders() {
+        this.debug('Starting order sync with existing contract...');
+        
+        if (!this.contract) {
+            throw new Error('Contract not initialized. Call initialize() first.');
+        }
         try {
             this.debug('Starting order sync with contract:', this.contract.address);
             
@@ -335,6 +374,15 @@ export class WebSocketService {
                         }
                         
                         const order = await this.contract.orders(i);
+                        this.debug(`Order ${i} data:`, {
+                            maker: order.maker,
+                            taker: order.taker,
+                            sellToken: order.sellToken,
+                            buyToken: order.buyToken,
+                            status: order.status.toString(),
+                            isZeroMaker: order.maker === ethers.constants.AddressZero
+                        });
+                        
                         // Only filter out zero-address makers (non-existent orders)
                         if (order.maker !== ethers.constants.AddressZero) {
                             const orderData = {

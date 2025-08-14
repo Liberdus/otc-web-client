@@ -699,7 +699,6 @@
   justify-content: space-between;
   align-items: center;
   gap: 20px;
- 
 }
 
 /* Advanced Filters Toggle Button */
@@ -827,13 +826,20 @@ th[data-sort].active-sort .sort-icon {
 }
 
 .filters-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .filter-toggle {
-    display: flex;
-    align-items: center;
-    gap: 5px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* No orders message styles */
+.no-orders-message {
+  text-align: center;
+  padding: 2rem 1rem;
+  background: var(--bg-secondary);
 }

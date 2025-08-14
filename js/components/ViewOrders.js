@@ -379,6 +379,20 @@ export class ViewOrders extends BaseComponent {
                 }
             }
 
+            // Show empty state if no orders
+            if (paginatedOrders.length === 0) {
+                tbody.innerHTML = `
+                    <tr class="empty-message">
+                        <td colspan="8" class="no-orders-message">
+                            <div class="placeholder-text">
+                                ${showOnlyActive ? 
+                                    'No fillable orders found' : 
+                                    'No orders found'}
+                            </div>
+                        </td>
+                    </tr>`;
+            }
+
             // Update pagination controls
             this.updatePaginationControls(this.totalOrders);
 
