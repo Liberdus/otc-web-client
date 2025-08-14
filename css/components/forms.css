@@ -1078,6 +1078,16 @@
   color: #666;
   font-size: 14px;
   gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.taker-toggle:hover {
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.taker-toggle .chevron-down {
+  transition: transform 0.2s ease;
 }
 
 .taker-input-content {

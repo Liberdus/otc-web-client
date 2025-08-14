@@ -386,6 +386,40 @@ export class CreateOrder extends BaseComponent {
         createOrderBtn.parentNode.replaceChild(newButton, createOrderBtn);
         // Add single new listener
         newButton.addEventListener('click', this.boundCreateOrderHandler);
+
+        // Setup taker toggle functionality
+        const takerToggle = document.querySelector('.taker-toggle');
+        if (takerToggle) {
+            console.log('[CreateOrder] Setting up taker toggle functionality');
+            // Remove existing listeners using clone technique
+            const newTakerToggle = takerToggle.cloneNode(true);
+            takerToggle.parentNode.replaceChild(newTakerToggle, takerToggle);
+            
+            // Add click listener
+            newTakerToggle.addEventListener('click', function(e) {
+                console.log('[CreateOrder] Taker toggle clicked');
+                e.preventDefault();
+                e.stopPropagation();
+                
+                this.classList.toggle('active');
+                const takerInputContent = document.querySelector('.taker-input-content');
+                if (takerInputContent) {
+                    takerInputContent.classList.toggle('hidden');
+                }
+                
+                // Update chevron direction
+                const chevron = this.querySelector('.chevron-down');
+                if (chevron) {
+                    if (this.classList.contains('active')) {
+                        chevron.style.transform = 'rotate(180deg)';
+                    } else {
+                        chevron.style.transform = 'rotate(0deg)';
+                    }
+                }
+            });
+        } else {
+            console.log('[CreateOrder] Taker toggle button not found');
+        }
     }
 
     async handleCreateOrder(event) {
