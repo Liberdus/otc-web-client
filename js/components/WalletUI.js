@@ -110,8 +110,8 @@ export class WalletUI extends BaseComponent {
             this.debug('Starting init...');
             
             if (typeof window.ethereum === 'undefined') {
-                this.error('MetaMask is not installed!');
-                return false;
+                this.debug('MetaMask is not installed, initializing in read-only mode');
+                return true;
             }
 
             // Setup event listeners
