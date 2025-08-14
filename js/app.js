@@ -29,6 +29,7 @@ class App {
         this.debug('Loading app components...');
 
         await this.initializeWalletManager();
+        await this.initializePricingService();
         await this.initializeWebSocket();
         
         // Initialize CreateOrder first

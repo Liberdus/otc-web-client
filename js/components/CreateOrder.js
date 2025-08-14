@@ -1267,7 +1267,12 @@ export class CreateOrder extends BaseComponent {
             }
             
             // Get USD price from pricing service
-            const usdPrice = window.pricingService.getPrice(token.address);
+            this.debug('Pricing service state:', {
+                exists: !!window.pricingService,
+                hasGetPrice: !!window.pricingService?.getPrice,
+                tokenAddress: token.address
+            });
+            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
             // Handle zero balance case
             const balance = parseFloat(token.balance) || 0;
             const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
@@ -1500,7 +1505,7 @@ export class CreateOrder extends BaseComponent {
         if (!modalContent) return;
 
         modalContent.innerHTML = tokens.map(token => {
-            const usdPrice = window.pricingService.getPrice(token.address);
+            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
             const balance = parseFloat(token.balance) || 0;
             const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
             
