@@ -304,9 +304,21 @@ export class ViewOrders extends BaseComponent {
                 if (order?.buyToken) tokenAddresses.add(order.buyToken.toLowerCase());
             });
 
-            const [tokenDetails] = await Promise.all([
-                this.getTokenDetails(Array.from(tokenAddresses))
-            ]);
+            console.log('🔍 Token addresses collected:', {
+                orderCount: ordersToDisplay.length,
+                tokenAddresses: Array.from(tokenAddresses),
+                isEmpty: tokenAddresses.size === 0
+            });
+
+            // Only call getTokenDetails if we have token addresses
+            let tokenDetails = [];
+            if (tokenAddresses.size > 0) {
+                [tokenDetails] = await Promise.all([
+                    this.getTokenDetails(Array.from(tokenAddresses))
+                ]);
+            } else {
+                console.log('🔍 No token addresses to fetch - skipping getTokenDetails');
+            }
 
             // Process token details
             const tokenDetailsMap = new Map();
@@ -433,7 +445,8 @@ export class ViewOrders extends BaseComponent {
 
         } catch (error) {
             this.debug('Error refreshing orders:', error);
-            this.showError('Failed to refresh orders');
+            //TODO: figure out why error occurs when this is called from refreshOrdersView from start
+            /* this.showError('Failed to refresh orders(1)'); */
         } finally {
             this.isLoading = false;
         }

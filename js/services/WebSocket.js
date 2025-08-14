@@ -184,31 +184,62 @@ export class WebSocketService {
             // Clear existing cache before sync
             this.orderCache.clear();
             
-            // Sync all orders that have a valid maker address
-            for (let i = 0; i < nextOrderId; i++) {
-                try {
-                    const order = await this.contract.orders(i);
-                    // Only filter out zero-address makers (non-existent orders)
-                    if (order.maker !== ethers.constants.AddressZero) {
-                        const orderData = {
-                            id: i,
-                            maker: order.maker,
-                            taker: order.taker,
-                            sellToken: order.sellToken,
-                            sellAmount: order.sellAmount,
-                            buyToken: order.buyToken,
-                            buyAmount: order.buyAmount,
-                            timestamp: order.timestamp.toNumber(),
-                            status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
-                            orderCreationFee: order.orderCreationFee,
-                            tries: order.tries
-                        };
-                        this.orderCache.set(i, orderData);
-                        this.debug('Added order to cache:', orderData);
+            // Process orders in smaller batches to avoid rate limiting
+            const batchSize = 3; // Process only 3 orders at a time
+            const totalBatches = Math.ceil(nextOrderId / batchSize);
+            
+            this.debug(`Processing ${nextOrderId} orders in ${totalBatches} batches of ${batchSize}`);
+            
+            for (let batch = 0; batch < totalBatches; batch++) {
+                const startIndex = batch * batchSize;
+                const endIndex = Math.min(startIndex + batchSize, nextOrderId);
+                
+                this.debug(`Processing batch ${batch + 1}/${totalBatches} (orders ${startIndex}-${endIndex - 1})`);
+                
+                                // Process current batch
+                for (let i = startIndex; i < endIndex; i++) {
+                    try {
+                        // Add longer delay to avoid rate limiting
+                        if (i > startIndex) {
+                            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+                        }
+                        
+                        const order = await this.contract.orders(i);
+                        // Only filter out zero-address makers (non-existent orders)
+                        if (order.maker !== ethers.constants.AddressZero) {
+                            const orderData = {
+                                id: i,
+                                maker: order.maker,
+                                taker: order.taker,
+                                sellToken: order.sellToken,
+                                sellAmount: order.sellAmount,
+                                buyToken: order.buyToken,
+                                buyAmount: order.buyAmount,
+                                timestamp: order.timestamp.toNumber(),
+                                status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
+                                orderCreationFee: order.orderCreationFee,
+                                tries: order.tries
+                            };
+                            this.orderCache.set(i, orderData);
+                            this.debug('Added order to cache:', orderData);
+                        }
+                    } catch (error) {
+                        this.debug(`Failed to read order ${i}:`, error);
+                        
+                        // If it's a rate limit error, add extra delay
+                        if (error.code === 'CALL_EXCEPTION' && error.error?.code === -32005) {
+                            this.debug(`Rate limit hit for order ${i}, waiting 2 seconds...`);
+                            await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+                        }
+                        
+                        continue;
                     }
-                } catch (error) {
-                    this.debug(`Failed to read order ${i}:`, error);
-                    continue;
+                }
+                
+                // Add delay between batches
+                if (batch < totalBatches - 1) {
+                    this.debug(`Batch ${batch + 1} complete, waiting 1 second before next batch...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second between batches
                 }
             }
             
