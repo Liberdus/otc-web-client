@@ -80,7 +80,7 @@ class App {
             }
         });
 
-        this.currentTab = 'create-order';
+        this.currentTab = 'view-orders';
 
         // Add wallet connect button handler
         const walletConnectBtn = document.getElementById('walletConnect');
@@ -136,7 +136,7 @@ class App {
                 }
             });
             
-            // If disconnected and not on create-order tab, switch to it
+            // If disconnected and not on view-orders tab, switch to it
             if (!isConnected && this.currentTab !== 'view-orders') {
                 this.showTab('view-orders');
             }
@@ -196,7 +196,7 @@ class App {
         }
 
         // Update the wallet event handlers to use the debounced reinitialization
-        window.addEventListener('walletConnected', (event) => {
+        /* window.addEventListener('walletConnected', (event) => {
             const { address } = event.detail;
             console.log('[App] Wallet connected:', address);
             reinitializeComponents(address);
@@ -206,12 +206,12 @@ class App {
             const { chainId } = event.detail;
             console.log('[App] Chain changed:', chainId);
             reinitializeComponents(window.ethereum.selectedAddress);
-        });
+        }); */
 
         await window.webSocket.syncAllOrders();
 
-        // Initialize components in read-only mode initially
-        const readOnlyMode = !window.walletManager?.provider;
+        // Initialize components in read-only mode initially (based on connection, not provider presence)
+        const readOnlyMode = !window.walletManager?.isWalletConnected();
         await this.initializeComponents(readOnlyMode);
         
         // Show the initial tab (view-orders) in read-only mode
@@ -374,8 +374,8 @@ class App {
         console.log('[App] Wallet connected:', account);
         try {
             await this.reinitializeComponents();
-            // Refresh the current tab view
-            this.showTab(this.currentTab);
+            // Force render create-order after connect
+            await this.showTab('create-order');
         } catch (error) {
             console.error('[App] Error handling wallet connection:', error);
         }
@@ -498,10 +498,10 @@ class App {
             if (tabContent) {
                 tabContent.classList.add('active');
                 
-                // Initialize component if it exists and hasn't been initialized
+                // Initialize component for this tab
                 const component = this.components[tabId];
                 if (component?.initialize) {
-                    const readOnlyMode = !window.walletManager?.provider;
+                    const readOnlyMode = !window.walletManager?.isWalletConnected();
                     await component.initialize(readOnlyMode);
                 }
                 
