@@ -31,20 +31,44 @@ export class BaseComponent {
         return element;
     }
 
-    showError(message) {
-        const errorDiv = document.createElement('div');
-        errorDiv.className = 'status error';
-        errorDiv.textContent = message;
-        this.container.appendChild(errorDiv);
-        setTimeout(() => errorDiv.remove(), 5000);
+    showError(message, duration = 5000) {
+        this.debug('Showing error toast:', message);
+        if (window.showError) {
+            return window.showError(message, duration);
+        } else {
+            // Fallback to console if toast is not available
+            this.error(message);
+        }
     }
 
-    showSuccess(message) {
-        const successDiv = document.createElement('div');
-        successDiv.className = 'status success';
-        successDiv.textContent = message;
-        this.container.appendChild(successDiv);
-        setTimeout(() => successDiv.remove(), 5000);
+    showSuccess(message, duration = 5000) {
+        this.debug('Showing success toast:', message);
+        if (window.showSuccess) {
+            return window.showSuccess(message, duration);
+        } else {
+            // Fallback to console if toast is not available
+            this.debug(message);
+        }
+    }
+
+    showWarning(message, duration = 5000) {
+        this.debug('Showing warning toast:', message);
+        if (window.showWarning) {
+            return window.showWarning(message, duration);
+        } else {
+            // Fallback to console if toast is not available
+            this.warn(message);
+        }
+    }
+
+    showInfo(message, duration = 5000) {
+        this.debug('Showing info toast:', message);
+        if (window.showInfo) {
+            return window.showInfo(message, duration);
+        } else {
+            // Fallback to console if toast is not available
+            this.debug(message);
+        }
     }
 
     // Add default render method

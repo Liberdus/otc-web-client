@@ -473,26 +473,26 @@ export class CreateOrder extends BaseComponent {
             // Validate sell token
             if (!this.sellToken || !this.sellToken.address) {
                 this.debug('Invalid sell token:', this.sellToken);
-                this.showStatus('Please select a valid token to sell', 'error');
+                this.showError('Please select a valid token to sell');
                 return;
             }
 
             // Validate buy token
             if (!this.buyToken || !this.buyToken.address) {
                 this.debug('Invalid buy token:', this.buyToken);
-                this.showStatus('Please select a valid token to buy', 'error');
+                this.showError('Please select a valid token to buy');
                 return;
             }
 
             // Validate addresses
             if (!ethers.utils.isAddress(this.sellToken.address)) {
                 this.debug('Invalid sell token address:', this.sellToken.address);
-                this.showStatus('Invalid sell token address', 'error');
+                this.showError('Invalid sell token address');
                 return;
             }
             if (!ethers.utils.isAddress(this.buyToken.address)) {
                 this.debug('Invalid buy token address:', this.buyToken.address);
-                this.showStatus('Invalid buy token address', 'error');
+                this.showError('Invalid buy token address');
                 return;
             }
 
@@ -501,11 +501,11 @@ export class CreateOrder extends BaseComponent {
 
             // Validate inputs
             if (!sellAmount || isNaN(sellAmount) || parseFloat(sellAmount) <= 0) {
-                this.showStatus('Please enter a valid sell amount', 'error');
+                this.showError('Please enter a valid sell amount');
                 return;
             }
             if (!buyAmount || isNaN(buyAmount) || parseFloat(buyAmount) <= 0) {
-                this.showStatus('Please enter a valid buy amount', 'error');
+                this.showError('Please enter a valid buy amount');
                 return;
             }
 
@@ -548,7 +548,7 @@ export class CreateOrder extends BaseComponent {
                     await new Promise(resolve => setTimeout(resolve, 1000));
 
                     // Create order
-                    this.showStatus('Creating order...', 'pending');
+                    this.showInfo('Creating order...');
                     const tx = await this.contract.createOrder(
                         taker,
                         this.sellToken.address,
@@ -557,7 +557,7 @@ export class CreateOrder extends BaseComponent {
                         buyAmountWei
                     ).catch(error => {
                         if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
-                            this.showStatus('Order creation declined', 'warning');
+                            this.showWarning('Order creation declined');
                             return null;
                         }
                         throw error;
@@ -565,7 +565,7 @@ export class CreateOrder extends BaseComponent {
 
                     if (!tx) return; // User rejected the transaction
 
-                    this.showStatus('Waiting for confirmation...', 'pending');
+                    this.showInfo('Waiting for confirmation...');
                     await tx.wait();
                     
                     // Force a sync of all orders after successful creation
@@ -583,7 +583,7 @@ export class CreateOrder extends BaseComponent {
                     if (retryCount <= maxRetries && 
                         (error.message?.includes('nonce') || 
                          error.message?.includes('replacement fee too low'))) {
-                        this.showStatus('Retrying transaction...', 'pending');
+                        this.showInfo('Retrying transaction...');
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         continue;
                     }
@@ -591,7 +591,7 @@ export class CreateOrder extends BaseComponent {
                 }
             }
 
-            this.showStatus('Order created successfully!', 'success');
+            this.showSuccess('Order created successfully!');
             this.resetForm();
             
             // Reload orders if needed
@@ -623,12 +623,12 @@ export class CreateOrder extends BaseComponent {
             this.updateCreateButtonState();
             
             // Show success message
-            this.showStatus('Order created successfully!', 'success');
+            this.showSuccess('Order created successfully!');
 
         } catch (error) {
             this.debug('Create order error:', error);
             const userMessage = this.getUserFriendlyError(error);
-            this.showStatus(userMessage, 'error');
+            this.showError(userMessage);
         } finally {
             this.isSubmitting = false;
             createOrderBtn.disabled = false;
@@ -762,7 +762,7 @@ export class CreateOrder extends BaseComponent {
             });
         } catch (error) {
             this.debug('Error loading tokens:', error);
-            this.showStatus('Failed to load tokens. Please try again.', 'error');
+            this.showError('Failed to load tokens. Please try again.');
         }
     }
 
@@ -1142,14 +1142,45 @@ export class CreateOrder extends BaseComponent {
         this.debug(`Status update (${type}): ${message}`);
     }
 
-    // Also add a helper method for showing errors
-    showError(message) {
-        this.showStatus(message, 'error');
+    // Use toast system for error and success messages
+    showError(message, duration = 5000) {
+        this.debug('Showing error toast:', message);
+        if (window.showError) {
+            return window.showError(message, duration);
+        } else {
+            // Fallback to status display if toast is not available
+            this.showStatus(message, 'error');
+        }
     }
 
-    // And a helper for showing success messages
-    showSuccess(message) {
-        this.showStatus(message, 'success');
+    showSuccess(message, duration = 5000) {
+        this.debug('Showing success toast:', message);
+        if (window.showSuccess) {
+            return window.showSuccess(message, duration);
+        } else {
+            // Fallback to status display if toast is not available
+            this.showStatus(message, 'success');
+        }
+    }
+
+    showWarning(message, duration = 5000) {
+        this.debug('Showing warning toast:', message);
+        if (window.showWarning) {
+            return window.showWarning(message, duration);
+        } else {
+            // Fallback to status display if toast is not available
+            this.showStatus(message, 'warning');
+        }
+    }
+
+    showInfo(message, duration = 5000) {
+        this.debug('Showing info toast:', message);
+        if (window.showInfo) {
+            return window.showInfo(message, duration);
+        } else {
+            // Fallback to status display if toast is not available
+            this.showStatus(message, 'info');
+        }
     }
 
     async getTokenDecimals(tokenAddress) {
@@ -1241,12 +1272,12 @@ export class CreateOrder extends BaseComponent {
                     this.debug('Allowance reset successful');
                 }
 
-                this.showStatus('Requesting token approval...', 'pending');
+                this.showInfo('Requesting token approval...');
                 const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
-                this.showStatus('Please confirm the approval in your wallet...', 'pending');
+                this.showInfo('Please confirm the approval in your wallet...');
                 
                 await approveTx.wait();
-                this.showStatus('Token approved successfully', 'success');
+                this.showSuccess('Token approved successfully');
 
                 const newAllowance = await tokenContract.allowance(currentAddress, this.contract.address);
                 this.debug(`New allowance after approval: ${newAllowance.toString()}`);
@@ -1256,7 +1287,7 @@ export class CreateOrder extends BaseComponent {
         } catch (error) {
             this.debug('Token approval error:', error);
             const userMessage = this.getUserFriendlyError(error);
-            this.showStatus(userMessage, 'error');
+            this.showError(userMessage);
             return false;
         }
     }
@@ -1399,7 +1430,7 @@ export class CreateOrder extends BaseComponent {
             }
         } catch (error) {
             this.debug('Error in handleTokenSelect:', error);
-            this.showStatus(`Failed to select ${type} token: ${error.message}`, 'error');
+            this.showError(`Failed to select ${type} token: ${error.message}`);
         }
     }
 

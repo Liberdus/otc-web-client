@@ -249,18 +249,6 @@ label {
   border: 1px solid #bbdefb;
 }
 
-.status.error {
-  background-color: #ffebee;
-  color: #d32f2f;
-  border: 1px solid #ffcdd2;
-}
-
-.status.success {
-  background-color: #e8f5e9;
-  color: #2e7d32;
-  border: 1px solid #c8e6c9;
-}
-
 .status.pending {
   background-color: #fff3e0;
   color: #f57c00;
@@ -565,3 +553,6 @@ body {
 .text-tertiary {
   color: var(--text-tertiary);
 }
+
+/* Import component styles */
+@import url("./components/toast.css");

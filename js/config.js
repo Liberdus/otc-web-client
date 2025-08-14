@@ -7,7 +7,8 @@ const networkConfig = {
         name: "Polygon",
         displayName: "Polygon Mainnet",
         isDefault: true,
-        contractAddress: "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837",
+        contractAddress: /* "0x34396a792510d6fb8ec0f70b68b8739456af06c6",  */// new
+        "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837", // old
         contractABI: CONTRACT_ABI,
         explorer: "https://polygonscan.com",
         rpcUrl: "https://polygon-rpc.com",
@@ -45,6 +46,7 @@ export const DEBUG_CONFIG = {
     BASE_COMPONENT: false,
     PRICING: false,
     TOKENS: false,
+    TOAST: true, // Enable toast debugging for testing
     // Add more specific flags as needed
 };
 
@@ -113,6 +115,10 @@ export class WalletManager {
         this.contractABI = getDefaultNetwork().contractABI;
         this.isInitialized = false;
         this.contractInitialized = false;
+        
+        // Add user preference tracking for disconnect state
+        this.userDisconnected = false;
+        this.STORAGE_KEY = 'wallet_user_disconnected';
     }
 
     async init() {
@@ -145,12 +151,20 @@ export class WalletManager {
             window.ethereum.on('connect', this.handleConnect.bind(this));
             window.ethereum.on('disconnect', this.handleDisconnect.bind(this));
 
-            // Check if already connected
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            if (accounts.length > 0) {
-                await this.initializeSigner(accounts[0]);
-                const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-                this.handleChainChanged(chainId);
+            // Check user disconnect preference before auto-connecting
+            this.loadUserDisconnectPreference();
+            
+            // Only auto-connect if user hasn't manually disconnected
+            if (!this.userDisconnected) {
+                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                if (accounts.length > 0) {
+                    this.debug('Auto-connecting to existing MetaMask session');
+                    await this.initializeSigner(accounts[0]);
+                    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                    this.handleChainChanged(chainId);
+                }
+            } else {
+                this.debug('User has manually disconnected, skipping auto-connect');
             }
 
             this.isInitialized = true;
@@ -246,6 +260,9 @@ export class WalletManager {
             this.account = accounts[0];
             this.chainId = chainId;
             this.isConnected = true;
+
+            // Clear user disconnect preference when they manually connect
+            this.saveUserDisconnectPreference(false);
 
             // Initialize signer before notifying listeners
             await this.initializeSigner(this.account);
@@ -347,11 +364,27 @@ export class WalletManager {
     }
 
     disconnect() {
+        this.debug('User manually disconnecting wallet');
+        
+        // Save user's disconnect preference
+        this.saveUserDisconnectPreference(true);
+        
+        // Clear connection state
         this.account = null;
+        this.chainId = null;
         this.isConnected = false;
+        this.signer = null;
+        this.contract = null;
+        this.contractInitialized = false;
+        
+        // Notify listeners of disconnect
+        this.notifyListeners('disconnect', {});
+        
         if (this.onDisconnect) {
             this.onDisconnect();
         }
+        
+        this.debug('Wallet disconnected and preference saved');
     }
 
     addListener(callback) {
@@ -448,6 +481,40 @@ export class WalletManager {
 
     isConnected() {
         return this.account !== null && this.chainId !== null;
+    }
+
+    loadUserDisconnectPreference() {
+        const disconnected = localStorage.getItem(this.STORAGE_KEY);
+        if (disconnected === 'true') {
+            this.userDisconnected = true;
+            this.debug('User has manually disconnected from MetaMask.');
+        } else {
+            this.userDisconnected = false;
+            this.debug('User has not manually disconnected from MetaMask.');
+        }
+    }
+
+    saveUserDisconnectPreference(disconnected) {
+        localStorage.setItem(this.STORAGE_KEY, disconnected);
+        this.userDisconnected = disconnected;
+        this.debug(`User disconnect preference saved: ${disconnected}`);
+    }
+
+    /**
+     * Check if the user has manually disconnected
+     * @returns {boolean} True if user has manually disconnected
+     */
+    hasUserDisconnected() {
+        return this.userDisconnected;
+    }
+
+    /**
+     * Clear the user's disconnect preference (useful for testing or admin actions)
+     */
+    clearDisconnectPreference() {
+        localStorage.removeItem(this.STORAGE_KEY);
+        this.userDisconnected = false;
+        this.debug('User disconnect preference cleared');
     }
 }
 

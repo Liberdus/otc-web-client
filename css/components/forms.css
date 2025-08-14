@@ -72,16 +72,6 @@
   text-align: center;
 }
 
-.status.error {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.status.success {
-  background: #dcfce7;
-  color: #16a34a;
-}
-
 /* Token symbol display */
 #sellTokenSymbol,
 #buyTokenSymbol {

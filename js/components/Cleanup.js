@@ -519,65 +519,44 @@ export class Cleanup extends BaseComponent {
         }
     }
 
-    showSuccess(message) {
+    showSuccess(message, duration = 5000) {
         this.debug('Success:', message);
         
-        // Create success message element
-        const successMessage = document.createElement('div');
-        successMessage.className = 'success-message';
-        successMessage.textContent = message;
-
-        // Find the fee config form and add message
+        // Show toast notification
+        if (window.showSuccess) {
+            window.showSuccess(message, duration);
+        }
+        
+        // Clear form inputs for fee config form
         const feeConfigForm = document.querySelector('.fee-config-form');
         if (feeConfigForm) {
-            // Remove any existing messages
-            const existingMessage = feeConfigForm.querySelector('.success-message, .error-message');
-            if (existingMessage) {
-                existingMessage.remove();
-            }
-
-            // Add new message
-            feeConfigForm.appendChild(successMessage);
-            feeConfigForm.classList.add('update-success');
-
-            // Clear form inputs
             const feeTokenInput = document.getElementById('fee-token');
             const feeAmountInput = document.getElementById('fee-amount');
             if (feeTokenInput) feeTokenInput.value = '';
             if (feeAmountInput) feeAmountInput.value = '';
-
-            // Remove message and animation after delay
-            setTimeout(() => {
-                successMessage.remove();
-                feeConfigForm.classList.remove('update-success');
-            }, 3000);
         }
     }
 
-    showError(message) {
+    showError(message, duration = 5000) {
         this.error('Error:', message);
         
-        // Create error message element
-        const errorMessage = document.createElement('div');
-        errorMessage.className = 'error-message';
-        errorMessage.textContent = message;
+        // Show toast notification
+        if (window.showError) {
+            window.showError(message, duration);
+        }
+    }
 
-        // Find the fee config form and add message
-        const feeConfigForm = document.querySelector('.fee-config-form');
-        if (feeConfigForm) {
-            // Remove any existing messages
-            const existingMessage = feeConfigForm.querySelector('.success-message, .error-message');
-            if (existingMessage) {
-                existingMessage.remove();
-            }
+    showWarning(message, duration = 5000) {
+        this.debug('Warning:', message);
+        if (window.showWarning) {
+            window.showWarning(message, duration);
+        }
+    }
 
-            // Add new message
-            feeConfigForm.appendChild(errorMessage);
-
-            // Remove message after delay
-            setTimeout(() => {
-                errorMessage.remove();
-            }, 3000);
+    showInfo(message, duration = 5000) {
+        this.debug('Info:', message);
+        if (window.showInfo) {
+            window.showInfo(message, duration);
         }
     }
 
@@ -672,22 +651,6 @@ export class Cleanup extends BaseComponent {
             // Clear the form
             document.getElementById('fee-token').value = '';
             document.getElementById('fee-amount').value = '';
-
-            // Add success message
-            const feeConfigForm = document.querySelector('.fee-config-form');
-            const successMessage = document.createElement('div');
-            successMessage.className = 'success-message';
-            successMessage.textContent = 'Fee configuration updated successfully!';
-            feeConfigForm.appendChild(successMessage);
-
-            // Add success animation class
-            feeConfigForm.classList.add('update-success');
-
-            // Remove success message and animation after 3 seconds
-            setTimeout(() => {
-                successMessage.remove();
-                feeConfigForm.classList.remove('update-success');
-            }, 3000);
 
             this.showSuccess('Fee configuration updated successfully');
         } catch (error) {
