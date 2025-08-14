@@ -527,35 +527,13 @@ export class Cleanup extends BaseComponent {
             window.showSuccess(message, duration);
         }
         
-        // Also show form-specific success message for fee config
+        // Clear form inputs for fee config form
         const feeConfigForm = document.querySelector('.fee-config-form');
         if (feeConfigForm) {
-            // Remove any existing messages
-            const existingMessage = feeConfigForm.querySelector('.success-message, .error-message');
-            if (existingMessage) {
-                existingMessage.remove();
-            }
-
-            // Create success message element
-            const successMessage = document.createElement('div');
-            successMessage.className = 'success-message';
-            successMessage.textContent = message;
-
-            // Add new message
-            feeConfigForm.appendChild(successMessage);
-            feeConfigForm.classList.add('update-success');
-
-            // Clear form inputs
             const feeTokenInput = document.getElementById('fee-token');
             const feeAmountInput = document.getElementById('fee-amount');
             if (feeTokenInput) feeTokenInput.value = '';
             if (feeAmountInput) feeAmountInput.value = '';
-
-            // Remove message and animation after delay
-            setTimeout(() => {
-                successMessage.remove();
-                feeConfigForm.classList.remove('update-success');
-            }, 3000);
         }
     }
 
@@ -565,29 +543,6 @@ export class Cleanup extends BaseComponent {
         // Show toast notification
         if (window.showError) {
             window.showError(message, duration);
-        }
-        
-        // Also show form-specific error message for fee config
-        const feeConfigForm = document.querySelector('.fee-config-form');
-        if (feeConfigForm) {
-            // Remove any existing messages
-            const existingMessage = feeConfigForm.querySelector('.success-message, .error-message');
-            if (existingMessage) {
-                existingMessage.remove();
-            }
-
-            // Create error message element
-            const errorMessage = document.createElement('div');
-            errorMessage.className = 'error-message';
-            errorMessage.textContent = message;
-
-            // Add new message
-            feeConfigForm.appendChild(errorMessage);
-
-            // Remove message after delay
-            setTimeout(() => {
-                errorMessage.remove();
-            }, 3000);
         }
     }
 
@@ -696,22 +651,6 @@ export class Cleanup extends BaseComponent {
             // Clear the form
             document.getElementById('fee-token').value = '';
             document.getElementById('fee-amount').value = '';
-
-            // Add success message
-            const feeConfigForm = document.querySelector('.fee-config-form');
-            const successMessage = document.createElement('div');
-            successMessage.className = 'success-message';
-            successMessage.textContent = 'Fee configuration updated successfully!';
-            feeConfigForm.appendChild(successMessage);
-
-            // Add success animation class
-            feeConfigForm.classList.add('update-success');
-
-            // Remove success message and animation after 3 seconds
-            setTimeout(() => {
-                successMessage.remove();
-                feeConfigForm.classList.remove('update-success');
-            }, 3000);
 
             this.showSuccess('Fee configuration updated successfully');
         } catch (error) {

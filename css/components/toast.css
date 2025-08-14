@@ -1,7 +1,7 @@
 /* Toast Container */
 .toast-container {
   position: fixed;
-  top: 20px;
+  top: 30vh;
   left: 50%;
   transform: translateX(-50%);
   z-index: 9999;
@@ -161,7 +161,7 @@
 /* Responsive Design */
 @media (max-width: 480px) {
   .toast-container {
-    top: 10px;
+    top: 25px;
     width: calc(100vw - 20px);
     max-width: none;
   }
