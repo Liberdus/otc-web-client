@@ -489,6 +489,12 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
 
+            // Check if the same token is selected for both buy and sell
+            if (this.sellToken.address.toLowerCase() === this.buyToken.address.toLowerCase()) {
+                this.showError(`Cannot create an order with the same token (${this.sellToken.symbol}) for both buy and sell. Please select different tokens.`);
+                return;
+            }
+
             // Validate that both tokens are allowed in the contract
             try {
                 const [sellTokenAllowed, buyTokenAllowed] = await Promise.all([
@@ -741,6 +747,10 @@ export class CreateOrder extends BaseComponent {
         if (sellTokenBalance) sellTokenBalance.textContent = '';
         if (buyTokenBalance) buyTokenBalance.textContent = '';
         
+        // Clear component state
+        this.sellToken = null;
+        this.buyToken = null;
+        
         // Reset token selectors to default state
         ['sell', 'buy'].forEach(type => {
             const selector = document.getElementById(`${type}TokenSelector`);
@@ -768,6 +778,9 @@ export class CreateOrder extends BaseComponent {
                 usdDisplay.remove();
             }
         });
+        
+        // Update create button state
+        this.updateCreateButtonState();
     }
 
     async loadContractTokens() {
