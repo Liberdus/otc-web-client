@@ -2,7 +2,8 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, walletManager } from '../config.js';
 import { erc20Abi } from '../abi/erc20.js';
-import { getTokenList, NETWORK_TOKENS } from '../utils/tokens.js';
+import { getContractAllowedTokens } from '../utils/contractTokens.js';
+import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
 
 export class CreateOrder extends BaseComponent {
@@ -148,6 +149,9 @@ export class CreateOrder extends BaseComponent {
                 throw new Error('Contract not initialized');
             }
             
+            // Initialize contract service
+            contractService.initialize();
+            
             // Enable form when wallet is connected
             this.setConnectedMode();
             
@@ -162,7 +166,7 @@ export class CreateOrder extends BaseComponent {
             // Load data with retries
             await Promise.all([
                 this.loadOrderCreationFee(),
-                this.loadTokens()
+                this.loadContractTokens()
             ]);
 
             this.updateFeeDisplay();
@@ -715,12 +719,13 @@ export class CreateOrder extends BaseComponent {
         });
     }
 
-    async loadTokens() {
+    async loadContractTokens() {
         try {
-            this.debug('Loading tokens...');
-            // This gets tokens with balances from tokens.js
-            this.tokens = await getTokenList();
-            this.debug('Loaded tokens:', this.tokens);
+            this.debug('Loading contract allowed tokens...');
+            
+            // Get allowed tokens from contract
+            this.tokens = await getContractAllowedTokens();
+            this.debug('Loaded contract tokens:', this.tokens);
 
             ['sell', 'buy'].forEach(type => {
                 const modal = document.getElementById(`${type}TokenModal`);
@@ -729,40 +734,18 @@ export class CreateOrder extends BaseComponent {
                     return;
                 }
 
-                const commonList = modal.querySelector(`#${type}CommonTokenList`);
-                const userList = modal.querySelector(`#${type}UserTokenList`);
+                const allowedTokensList = modal.querySelector(`#${type}AllowedTokenList`);
 
-                if (commonList && userList) {
-                    // Get network config for predefined tokens
-                    const networkConfig = getNetworkConfig();
-                    const predefinedTokens = NETWORK_TOKENS[networkConfig.name] || [];
-
-                    // We should merge predefined tokens with their balances from this.tokens
-                    const predefinedTokensWithBalances = predefinedTokens.map(token => {
-                        const tokenWithBalance = this.tokens.find(t => 
-                            t.address.toLowerCase() === token.address.toLowerCase()
-                        );
-                        return {
-                            ...token,
-                            balance: tokenWithBalance?.balance || '0'
-                        };
-                    });
-
-                    // Display predefined tokens with balances
-                    this.displayTokens(predefinedTokensWithBalances, commonList, type);
-
-                    // Display wallet tokens (tokens with balance)
-                    const walletTokens = this.tokens.filter(t => 
-                        t.balance && 
-                        Number(t.balance) > 0 &&
-                        !predefinedTokens.some(p => p.address.toLowerCase() === t.address.toLowerCase())
-                    );
-                    this.displayTokens(walletTokens, userList, type);
+                if (allowedTokensList) {
+                    // Display all allowed tokens with balances
+                    this.displayTokens(this.tokens, allowedTokensList, type);
+                } else {
+                    this.debug(`Allowed tokens list not found for ${type}`);
                 }
             });
         } catch (error) {
-            this.debug('Error loading tokens:', error);
-            this.showError('Failed to load tokens. Please try again.');
+            this.debug('Error loading contract tokens:', error);
+            this.showError('Failed to load allowed tokens. Please try again.');
         }
     }
 
@@ -860,12 +843,8 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-sections">
                     <div id="${type}ContractResult"></div>
                     <div class="token-section">
-                        <h4>Common tokens</h4>
-                        <div class="token-list" id="${type}CommonTokenList"></div>
-                    </div>
-                    <div class="token-section">
-                        <h4>Tokens in wallet</h4>
-                        <div class="token-list" id="${type}UserTokenList"></div>
+                        <h4>Allowed tokens</h4>
+                        <div class="token-list" id="${type}AllowedTokenList"></div>
                     </div>
                 </div>
             </div>
