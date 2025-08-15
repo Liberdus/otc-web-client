@@ -488,6 +488,30 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
 
+            // Validate that both tokens are allowed in the contract
+            try {
+                const [sellTokenAllowed, buyTokenAllowed] = await Promise.all([
+                    contractService.isTokenAllowed(this.sellToken.address),
+                    contractService.isTokenAllowed(this.buyToken.address)
+                ]);
+
+                if (!sellTokenAllowed) {
+                    this.showError(`Sell token ${this.sellToken.symbol} is not allowed for trading. Please select an allowed token.`);
+                    return;
+                }
+
+                if (!buyTokenAllowed) {
+                    this.showError(`Buy token ${this.buyToken.symbol} is not allowed for trading. Please select an allowed token.`);
+                    return;
+                }
+
+                this.debug('Token validation passed - both tokens are allowed');
+            } catch (validationError) {
+                this.debug('Token validation error:', validationError);
+                this.showError('Unable to validate tokens. Please try again.');
+                return;
+            }
+
             // Validate addresses
             if (!ethers.utils.isAddress(this.sellToken.address)) {
                 this.debug('Invalid sell token address:', this.sellToken.address);
@@ -901,6 +925,9 @@ export class CreateOrder extends BaseComponent {
                     ]);
 
                     if (name && symbol && decimals !== null) {
+                        // Check if token is allowed in the contract
+                        const isAllowed = await contractService.isTokenAllowed(searchTerm);
+                        
                         const token = {
                             address: searchTerm,
                             name,
@@ -909,22 +936,46 @@ export class CreateOrder extends BaseComponent {
                             balance: balance ? ethers.utils.formatUnits(balance, decimals) : '0'
                         };
 
+                        // Get USD price and calculate USD value
+                        const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+                        const usdValue = Number(token.balance) * usdPrice;
+                        const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                        });
+
+                        // Format balance
+                        const formattedBalance = Number(token.balance).toLocaleString(undefined, { 
+                            minimumFractionDigits: 2, 
+                            maximumFractionDigits: 4,
+                            useGrouping: true
+                        });
+
                         contractResult.innerHTML = `
                             <div class="token-section">
                                 <h4>Token Contract</h4>
                                 <div class="token-list">
-                                    <div class="token-item" data-address="${token.address}">
+                                    <div class="token-item ${isAllowed ? 'token-allowed' : 'token-not-allowed'}" data-address="${token.address}">
                                         <div class="token-item-left">
                                             <div class="token-icon">
                                                 ${this.getTokenIcon(token)}
                                             </div>
                                             <div class="token-item-info">
-                                                <div class="token-item-symbol">${token.symbol}</div>
+                                                <div class="token-item-symbol">
+                                                    ${token.symbol}
+                                                    ${isAllowed ? 
+                                                        '<span class="token-status-allowed">✓ Allowed</span>' : 
+                                                        '<span class="token-status-not-allowed">✗ Not Allowed</span>'
+                                                    }
+                                                </div>
                                                 <div class="token-item-name">
                                                     ${token.name}
                                                     <a href="${this.getExplorerUrl(token.address)}" 
                                                        target="_blank"
-                                                       class="token-explorer-link">
+                                                       class="token-explorer-link"
+                                                       onclick="event.stopPropagation();">
                                                         <svg class="token-explorer-icon" viewBox="0 0 24 24">
                                                             <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
                                                         </svg>
@@ -932,19 +983,30 @@ export class CreateOrder extends BaseComponent {
                                                 </div>
                                             </div>
                                         </div>
-                                        ${balance ? `
-                                            <div class="token-item-balance">
-                                                ${Number(ethers.utils.formatUnits(balance, decimals)).toFixed(4)}
+                                        <div class="token-item-right">
+                                            <div class="token-balance-with-usd">
+                                                <div class="token-balance-amount">${formattedBalance}</div>
+                                                <div class="token-balance-usd">${formattedUsdValue}</div>
                                             </div>
-                                        ` : ''}
+                                        </div>
                                     </div>
                                 </div>
+                                ${!isAllowed ? `
+                                    <div class="token-not-allowed-message">
+                                        This token is not allowed for trading. Only tokens from the allowed list can be used.
+                                    </div>
+                                ` : ''}
                             </div>
                         `;
 
-                        // Add click handler
+                        // Add click handler only if token is allowed
                         const tokenItem = contractResult.querySelector('.token-item');
-                        tokenItem.addEventListener('click', () => this.handleTokenItemClick(type, tokenItem));
+                        if (isAllowed) {
+                            tokenItem.addEventListener('click', () => this.handleTokenItemClick(type, tokenItem));
+                        } else {
+                            tokenItem.style.cursor = 'not-allowed';
+                            tokenItem.title = 'This token is not allowed for trading';
+                        }
                     }
                 } catch (error) {
                     contractResult.innerHTML = `
@@ -952,6 +1014,86 @@ export class CreateOrder extends BaseComponent {
                             <h4>Token Contract</h4>
                             <div class="contract-error">
                                 Invalid or unsupported token contract
+                            </div>
+                        </div>
+                    `;
+                }
+            } else {
+                // Search in allowed tokens by name/symbol
+                const searchResults = this.tokens.filter(token => 
+                    token.name.toLowerCase().includes(searchTerm) ||
+                    token.symbol.toLowerCase().includes(searchTerm)
+                );
+
+                if (searchResults.length > 0) {
+                    contractResult.innerHTML = `
+                        <div class="token-section">
+                            <h4>Search Results</h4>
+                            <div class="token-list">
+                                ${searchResults.map(token => {
+                                    const balance = Number(token.balance) || 0;
+                                    const formattedBalance = balance.toLocaleString(undefined, { 
+                                        minimumFractionDigits: 2, 
+                                        maximumFractionDigits: 4,
+                                        useGrouping: true
+                                    });
+                                    const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+                                    const usdValue = balance * usdPrice;
+                                    const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                                        style: 'currency',
+                                        currency: 'USD',
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                    });
+
+                                    return `
+                                        <div class="token-item token-allowed" data-address="${token.address}">
+                                            <div class="token-item-left">
+                                                <div class="token-icon">
+                                                    ${this.getTokenIcon(token)}
+                                                </div>
+                                                <div class="token-item-info">
+                                                    <div class="token-item-symbol">
+                                                        ${token.symbol}
+                                                        <span class="token-status-allowed">✓ Allowed</span>
+                                                    </div>
+                                                    <div class="token-item-name">
+                                                        ${token.name}
+                                                        <a href="${this.getExplorerUrl(token.address)}" 
+                                                           target="_blank"
+                                                           class="token-explorer-link"
+                                                           onclick="event.stopPropagation();">
+                                                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                                            </svg>
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="token-item-right">
+                                                <div class="token-balance-with-usd">
+                                                    <div class="token-balance-amount">${formattedBalance}</div>
+                                                    <div class="token-balance-usd">${formattedUsdValue}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    `;
+
+                    // Add click handlers for search results
+                    const tokenItems = contractResult.querySelectorAll('.token-item');
+                    tokenItems.forEach(item => {
+                        item.addEventListener('click', () => this.handleTokenItemClick(type, item));
+                    });
+                } else {
+                    contractResult.innerHTML = `
+                        <div class="token-section">
+                            <h4>Search Results</h4>
+                            <div class="token-list-empty">
+                                No tokens found matching "${searchTerm}"
                             </div>
                         </div>
                     `;
@@ -969,7 +1111,9 @@ export class CreateOrder extends BaseComponent {
         if (!tokens || tokens.length === 0) {
             container.innerHTML = `
                 <div class="token-list-empty">
-                    No tokens found
+                    <div class="empty-state-icon">🔍</div>
+                    <div class="empty-state-text">No allowed tokens found</div>
+                    <div class="empty-state-subtext">Contact the contract owner to add tokens to the allowed list</div>
                 </div>
             `;
             return;
@@ -978,14 +1122,29 @@ export class CreateOrder extends BaseComponent {
         // Clear existing content
         container.innerHTML = '';
 
+        // Sort tokens: tokens with balance first, then alphabetically by symbol
+        const sortedTokens = [...tokens].sort((a, b) => {
+            const aBalance = Number(a.balance) || 0;
+            const bBalance = Number(b.balance) || 0;
+            
+            // First sort by balance (non-zero first)
+            if (aBalance > 0 && bBalance === 0) return -1;
+            if (aBalance === 0 && bBalance > 0) return 1;
+            
+            // Then sort alphabetically by symbol
+            return a.symbol.localeCompare(b.symbol);
+        });
+
         // Add each token to the container
-        tokens.forEach(token => {
+        sortedTokens.forEach(token => {
             const tokenElement = document.createElement('div');
-            tokenElement.className = 'token-item';
+            const balance = Number(token.balance) || 0;
+            const hasBalance = balance > 0;
+            
+            tokenElement.className = `token-item ${hasBalance ? 'token-has-balance' : 'token-no-balance'}`;
             tokenElement.dataset.address = token.address;
             
             // Format balance with up to 4 decimal places if they exist
-            const balance = token.balance ? Number(token.balance) : 0;
             const formattedBalance = balance.toLocaleString(undefined, { 
                 minimumFractionDigits: 2, 
                 maximumFractionDigits: 4,
@@ -1032,35 +1191,57 @@ export class CreateOrder extends BaseComponent {
                         <div class="token-item-info">
                             <div class="token-item-symbol">
                                 ${token.symbol}
-                                <a href="${this.getExplorerUrl(token.address)}" 
-                                   target="_blank"
-                                   class="token-explorer-link"
-                                   onclick="event.stopPropagation();">
-                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                    </svg>
-                                </a>
+                                <span class="token-status-allowed">✓ Allowed</span>
+                                ${hasBalance ? '<span class="token-balance-indicator">💰</span>' : ''}
                             </div>
                             <div class="token-item-name">${token.name}</div>
                         </div>
                     </div>
                     <div class="token-item-right">
                         <div class="token-balance-with-usd">
-                            <div class="token-balance-amount">${formattedBalance}</div>
+                            <div class="token-balance-amount ${hasBalance ? 'has-balance' : 'no-balance'}">
+                                ${formattedBalance}
+                                ${!hasBalance ? '<span class="no-balance-text">(No balance)</span>' : ''}
+                            </div>
                             <div class="token-balance-usd">${formattedUsdValue}</div>
+                        </div>
+                        <div class="token-item-actions">
+                            <a href="${this.getExplorerUrl(token.address)}" 
+                               target="_blank"
+                               class="token-explorer-link"
+                               onclick="event.stopPropagation();"
+                               title="View on Explorer">
+                                <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                    <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                </svg>
+                            </a>
                         </div>
                     </div>
                 </div>
             `;
 
-            // Add click event listener to the token element
-            tokenElement.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.handleTokenItemClick(type, tokenElement);
-            });
-
+            // Add click handler
+            tokenElement.addEventListener('click', () => this.handleTokenItemClick(type, tokenElement));
+            
+            // Add to container
             container.appendChild(tokenElement);
         });
+
+        // Add summary information
+        const tokensWithBalance = sortedTokens.filter(token => Number(token.balance) > 0).length;
+        const totalTokens = sortedTokens.length;
+        
+        if (totalTokens > 0) {
+            const summaryElement = document.createElement('div');
+            summaryElement.className = 'token-list-summary';
+            summaryElement.innerHTML = `
+                <div class="summary-text">
+                    Showing ${totalTokens} allowed tokens
+                    ${tokensWithBalance > 0 ? `(${tokensWithBalance} with balance)` : ''}
+                </div>
+            `;
+            container.appendChild(summaryElement);
+        }
     }
 
     getExplorerUrl(address) {
@@ -1413,7 +1594,7 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    handleTokenItemClick(type, tokenItem) {
+    async handleTokenItemClick(type, tokenItem) {
         try {
             const address = tokenItem.dataset.address;
             const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
@@ -1425,12 +1606,25 @@ export class CreateOrder extends BaseComponent {
             });
             
             if (token) {
-                this.handleTokenSelect(type, token);
-                
-                // Close the modal after selection
-                const modal = document.getElementById(`${type}TokenModal`);
-                if (modal) {
-                    modal.style.display = 'none';
+                // Validate that the token is allowed in the contract
+                try {
+                    const isAllowed = await contractService.isTokenAllowed(address);
+                    
+                    if (!isAllowed) {
+                        this.showError(`Token ${token.symbol} is not allowed for trading. Please select an allowed token.`);
+                        return;
+                    }
+                    
+                    this.handleTokenSelect(type, token);
+                    
+                    // Close the modal after selection
+                    const modal = document.getElementById(`${type}TokenModal`);
+                    if (modal) {
+                        modal.style.display = 'none';
+                    }
+                } catch (validationError) {
+                    this.debug('Token validation error:', validationError);
+                    this.showError('Unable to validate token. Please try again.');
                 }
             }
         } catch (error) {
