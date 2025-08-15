@@ -808,6 +808,16 @@ For Buyers:
             return 'Insufficient token balance';
         }
         
+        // Handle contract revert errors with detailed messages
+        if (error.code === -32603 && error.data?.message) {
+            return error.data.message;
+        }
+        
+        // Try to extract error from ethers error structure
+        if (error.error?.data?.message) {
+            return error.error.data.message;
+        }
+        
         switch (error.code) {
             case 'ACTION_REJECTED':
                 return 'Transaction was rejected by user';

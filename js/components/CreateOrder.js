@@ -5,6 +5,7 @@ import { erc20Abi } from '../abi/erc20.js';
 import { getContractAllowedTokens, getAllWalletTokens } from '../utils/contractTokens.js';
 import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
+import { validateSellBalance } from '../utils/balanceValidation.js';
 
 export class CreateOrder extends BaseComponent {
     constructor() {
@@ -534,6 +535,32 @@ export class CreateOrder extends BaseComponent {
             }
             if (!buyAmount || isNaN(buyAmount) || parseFloat(buyAmount) <= 0) {
                 this.showError('Please enter a valid buy amount');
+                return;
+            }
+
+            // Validate sell balance before proceeding
+            try {
+                this.debug('Validating sell balance...');
+                const balanceValidation = await validateSellBalance(
+                    this.sellToken.address, 
+                    sellAmount, 
+                    this.sellToken.decimals
+                );
+
+                if (!balanceValidation.hasSufficientBalance) {
+                    const errorMessage = `Insufficient ${balanceValidation.symbol} balance for selling.\n\n` +
+                        `Required: ${Number(balanceValidation.formattedRequired).toLocaleString()} ${balanceValidation.symbol}\n` +
+                        `Available: ${Number(balanceValidation.formattedBalance).toLocaleString()} ${balanceValidation.symbol}\n\n` +
+                        `Please reduce the sell amount or ensure you have sufficient balance.`;
+                    
+                    this.showError(errorMessage);
+                    return;
+                }
+
+                this.debug('Sell balance validation passed');
+            } catch (balanceError) {
+                this.debug('Balance validation error:', balanceError);
+                this.showError(`Failed to validate balance: ${balanceError.message}`);
                 return;
             }
 
@@ -1416,7 +1443,7 @@ export class CreateOrder extends BaseComponent {
     }
 
     // Use toast system for error and success messages
-    showError(message, duration = 5000) {
+    showError(message, duration = 0) {
         this.debug('Showing error toast:', message);
         if (window.showError) {
             return window.showError(message, duration);
@@ -1571,9 +1598,13 @@ export class CreateOrder extends BaseComponent {
         if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
             return 'Transaction was declined';
         }
-        if (error.code === -32603) {
-            return 'Transaction failed - please try again';
+        
+        // Handle contract revert errors with detailed messages
+        if (error.code === -32603 && error.data?.message) {
+            return error.data.message;
         }
+        
+        // Handle other specific error cases
         if (error.message?.includes('insufficient funds')) {
             return 'Insufficient funds for gas fees';
         }
@@ -1582,6 +1613,11 @@ export class CreateOrder extends BaseComponent {
         }
         if (error.message?.includes('gas required exceeds allowance')) {
             return 'Transaction requires too much gas';
+        }
+        
+        // Try to extract error from ethers error structure
+        if (error.error?.data?.message) {
+            return error.error.data.message;
         }
         
         // Default generic message
