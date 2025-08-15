@@ -1176,6 +1176,11 @@ export class CreateOrder extends BaseComponent {
             const hasBalance = balance > 0;
             
             tokenElement.className = `token-item ${hasBalance ? 'token-has-balance' : 'token-no-balance'}`;
+            
+            // For sell tokens, add disabled class if no balance
+            if (type === 'sell' && !hasBalance) {
+                tokenElement.classList.add('token-disabled');
+            }
             tokenElement.dataset.address = token.address;
             
             // Format balance with up to 4 decimal places if they exist
@@ -1270,6 +1275,7 @@ export class CreateOrder extends BaseComponent {
                 <div class="summary-text">
                     Showing ${totalTokens} allowed tokens
                     ${tokensWithBalance > 0 ? `(${tokensWithBalance} with balance)` : ''}
+                    ${type === 'sell' && tokensWithBalance < totalTokens ? ` - ${totalTokens - tokensWithBalance} disabled (no balance)` : ''}
                 </div>
             `;
             container.appendChild(summaryElement);
@@ -1770,6 +1776,15 @@ export class CreateOrder extends BaseComponent {
             });
             
             if (token) {
+                // For sell tokens, check if balance is zero
+                if (type === 'sell') {
+                    const balance = Number(token.balance) || 0;
+                    if (balance <= 0) {
+                        this.showWarning(`${token.symbol} has no balance available for selling. Please select a token with a balance.`);
+                        return; // Don't allow selection of tokens with zero balance for selling
+                    }
+                }
+                
                 // Validate that the token is allowed in the contract
                 try {
                     const isAllowed = await contractService.isTokenAllowed(address);
