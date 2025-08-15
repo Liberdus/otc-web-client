@@ -1310,6 +1310,22 @@
   opacity: 1;
 }
 
+/* Disabled token styling for sell selection */
+.token-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.token-disabled:hover {
+  background-color: inherit;
+  border-color: inherit;
+}
+
+.token-disabled .token-item-content {
+  opacity: 0.6;
+}
+
 .has-balance {
   color: #059669;
   font-weight: 600;
