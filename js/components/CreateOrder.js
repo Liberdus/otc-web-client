@@ -965,10 +965,6 @@ export class CreateOrder extends BaseComponent {
                                             <div class="token-item-info">
                                                 <div class="token-item-symbol">
                                                     ${token.symbol}
-                                                    ${isAllowed ? 
-                                                        '<span class="token-status-allowed">✓ Allowed</span>' : 
-                                                        '<span class="token-status-not-allowed">✗ Not Allowed</span>'
-                                                    }
                                                 </div>
                                                 <div class="token-item-name">
                                                     ${token.name}
@@ -1055,7 +1051,6 @@ export class CreateOrder extends BaseComponent {
                                                 <div class="token-item-info">
                                                     <div class="token-item-symbol">
                                                         ${token.symbol}
-                                                        <span class="token-status-allowed">✓ Allowed</span>
                                                     </div>
                                                     <div class="token-item-name">
                                                         ${token.name}
@@ -1191,8 +1186,6 @@ export class CreateOrder extends BaseComponent {
                         <div class="token-item-info">
                             <div class="token-item-symbol">
                                 ${token.symbol}
-                                <span class="token-status-allowed">✓ Allowed</span>
-                                ${hasBalance ? '<span class="token-balance-indicator">💰</span>' : ''}
                             </div>
                             <div class="token-item-name">${token.name}</div>
                         </div>

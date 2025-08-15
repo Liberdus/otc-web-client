@@ -1279,31 +1279,7 @@
   gap: 8px;
 }
 
-/* Token Status Indicators */
-.token-status-allowed {
-  background: #10b981;
-  color: white;
-  font-size: 0.7rem;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-left: 8px;
-  font-weight: 500;
-}
 
-.token-status-not-allowed {
-  background: #ef4444;
-  color: white;
-  font-size: 0.7rem;
-  padding: 2px 6px;
-  border-radius: 4px;
-  margin-left: 8px;
-  font-weight: 500;
-}
-
-.token-balance-indicator {
-  margin-left: 4px;
-  font-size: 0.8rem;
-}
 
 /* Token Balance States */
 .token-has-balance {
