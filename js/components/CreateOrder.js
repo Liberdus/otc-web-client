@@ -2,7 +2,8 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, walletManager } from '../config.js';
 import { erc20Abi } from '../abi/erc20.js';
-import { getTokenList, NETWORK_TOKENS } from '../utils/tokens.js';
+import { getContractAllowedTokens, getAllWalletTokens } from '../utils/contractTokens.js';
+import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
 
 export class CreateOrder extends BaseComponent {
@@ -148,6 +149,9 @@ export class CreateOrder extends BaseComponent {
                 throw new Error('Contract not initialized');
             }
             
+            // Initialize contract service
+            contractService.initialize();
+            
             // Enable form when wallet is connected
             this.setConnectedMode();
             
@@ -162,7 +166,7 @@ export class CreateOrder extends BaseComponent {
             // Load data with retries
             await Promise.all([
                 this.loadOrderCreationFee(),
-                this.loadTokens()
+                this.loadContractTokens()
             ]);
 
             this.updateFeeDisplay();
@@ -484,6 +488,30 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
 
+            // Validate that both tokens are allowed in the contract
+            try {
+                const [sellTokenAllowed, buyTokenAllowed] = await Promise.all([
+                    contractService.isTokenAllowed(this.sellToken.address),
+                    contractService.isTokenAllowed(this.buyToken.address)
+                ]);
+
+                if (!sellTokenAllowed) {
+                    this.showError(`Sell token ${this.sellToken.symbol} is not allowed for trading. Please select an allowed token.`);
+                    return;
+                }
+
+                if (!buyTokenAllowed) {
+                    this.showError(`Buy token ${this.buyToken.symbol} is not allowed for trading. Please select an allowed token.`);
+                    return;
+                }
+
+                this.debug('Token validation passed - both tokens are allowed');
+            } catch (validationError) {
+                this.debug('Token validation error:', validationError);
+                this.showError('Unable to validate tokens. Please try again.');
+                return;
+            }
+
             // Validate addresses
             if (!ethers.utils.isAddress(this.sellToken.address)) {
                 this.debug('Invalid sell token address:', this.sellToken.address);
@@ -715,12 +743,18 @@ export class CreateOrder extends BaseComponent {
         });
     }
 
-    async loadTokens() {
+    async loadContractTokens() {
         try {
-            this.debug('Loading tokens...');
-            // This gets tokens with balances from tokens.js
-            this.tokens = await getTokenList();
-            this.debug('Loaded tokens:', this.tokens);
+            this.debug('Loading all wallet tokens...');
+            
+            // Get all wallet tokens (both allowed and not allowed)
+            const { allowed, notAllowed } = await getAllWalletTokens();
+            this.tokens = allowed; // Keep allowed tokens for backward compatibility
+            this.allowedTokens = allowed;
+            this.notAllowedTokens = notAllowed;
+            
+            this.debug('Loaded allowed tokens:', allowed);
+            this.debug('Loaded not allowed tokens:', notAllowed);
 
             ['sell', 'buy'].forEach(type => {
                 const modal = document.getElementById(`${type}TokenModal`);
@@ -729,39 +763,20 @@ export class CreateOrder extends BaseComponent {
                     return;
                 }
 
-                const commonList = modal.querySelector(`#${type}CommonTokenList`);
-                const userList = modal.querySelector(`#${type}UserTokenList`);
+                // Display allowed tokens
+                const allowedTokensList = modal.querySelector(`#${type}AllowedTokenList`);
+                if (allowedTokensList) {
+                    this.displayTokens(allowed, allowedTokensList, type);
+                }
 
-                if (commonList && userList) {
-                    // Get network config for predefined tokens
-                    const networkConfig = getNetworkConfig();
-                    const predefinedTokens = NETWORK_TOKENS[networkConfig.name] || [];
-
-                    // We should merge predefined tokens with their balances from this.tokens
-                    const predefinedTokensWithBalances = predefinedTokens.map(token => {
-                        const tokenWithBalance = this.tokens.find(t => 
-                            t.address.toLowerCase() === token.address.toLowerCase()
-                        );
-                        return {
-                            ...token,
-                            balance: tokenWithBalance?.balance || '0'
-                        };
-                    });
-
-                    // Display predefined tokens with balances
-                    this.displayTokens(predefinedTokensWithBalances, commonList, type);
-
-                    // Display wallet tokens (tokens with balance)
-                    const walletTokens = this.tokens.filter(t => 
-                        t.balance && 
-                        Number(t.balance) > 0 &&
-                        !predefinedTokens.some(p => p.address.toLowerCase() === t.address.toLowerCase())
-                    );
-                    this.displayTokens(walletTokens, userList, type);
+                // Display not allowed tokens if any exist
+                const notAllowedSection = modal.querySelector(`#${type}NotAllowedSection`);
+                if (notAllowedSection && notAllowed.length > 0) {
+                    this.displayNotAllowedTokens(notAllowed, notAllowedSection, type);
                 }
             });
         } catch (error) {
-            this.debug('Error loading tokens:', error);
+            this.debug('Error loading wallet tokens:', error);
             this.showError('Failed to load tokens. Please try again.');
         }
     }
@@ -860,12 +875,12 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-sections">
                     <div id="${type}ContractResult"></div>
                     <div class="token-section">
-                        <h4>Common tokens</h4>
-                        <div class="token-list" id="${type}CommonTokenList"></div>
+                        <h4>Allowed tokens</h4>
+                        <div class="token-list" id="${type}AllowedTokenList"></div>
                     </div>
                     <div class="token-section">
-                        <h4>Tokens in wallet</h4>
-                        <div class="token-list" id="${type}UserTokenList"></div>
+                        <h4>Not Allowed Tokens</h4>
+                        <div class="token-list" id="${type}NotAllowedSection"></div>
                     </div>
                 </div>
             </div>
@@ -922,6 +937,9 @@ export class CreateOrder extends BaseComponent {
                     ]);
 
                     if (name && symbol && decimals !== null) {
+                        // Check if token is allowed in the contract
+                        const isAllowed = await contractService.isTokenAllowed(searchTerm);
+                        
                         const token = {
                             address: searchTerm,
                             name,
@@ -930,22 +948,42 @@ export class CreateOrder extends BaseComponent {
                             balance: balance ? ethers.utils.formatUnits(balance, decimals) : '0'
                         };
 
+                        // Get USD price and calculate USD value
+                        const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+                        const usdValue = Number(token.balance) * usdPrice;
+                        const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                            style: 'currency',
+                            currency: 'USD',
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                        });
+
+                        // Format balance
+                        const formattedBalance = Number(token.balance).toLocaleString(undefined, { 
+                            minimumFractionDigits: 2, 
+                            maximumFractionDigits: 4,
+                            useGrouping: true
+                        });
+
                         contractResult.innerHTML = `
                             <div class="token-section">
                                 <h4>Token Contract</h4>
                                 <div class="token-list">
-                                    <div class="token-item" data-address="${token.address}">
+                                    <div class="token-item ${isAllowed ? 'token-allowed' : 'token-not-allowed'}" data-address="${token.address}">
                                         <div class="token-item-left">
                                             <div class="token-icon">
                                                 ${this.getTokenIcon(token)}
                                             </div>
                                             <div class="token-item-info">
-                                                <div class="token-item-symbol">${token.symbol}</div>
+                                                <div class="token-item-symbol">
+                                                    ${token.symbol}
+                                                </div>
                                                 <div class="token-item-name">
                                                     ${token.name}
                                                     <a href="${this.getExplorerUrl(token.address)}" 
                                                        target="_blank"
-                                                       class="token-explorer-link">
+                                                       class="token-explorer-link"
+                                                       onclick="event.stopPropagation();">
                                                         <svg class="token-explorer-icon" viewBox="0 0 24 24">
                                                             <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
                                                         </svg>
@@ -953,19 +991,30 @@ export class CreateOrder extends BaseComponent {
                                                 </div>
                                             </div>
                                         </div>
-                                        ${balance ? `
-                                            <div class="token-item-balance">
-                                                ${Number(ethers.utils.formatUnits(balance, decimals)).toFixed(4)}
+                                        <div class="token-item-right">
+                                            <div class="token-balance-with-usd">
+                                                <div class="token-balance-amount">${formattedBalance}</div>
+                                                <div class="token-balance-usd">${formattedUsdValue}</div>
                                             </div>
-                                        ` : ''}
+                                        </div>
                                     </div>
                                 </div>
+                                ${!isAllowed ? `
+                                    <div class="token-not-allowed-message">
+                                        This token is not allowed for trading. Only tokens from the allowed list can be used.
+                                    </div>
+                                ` : ''}
                             </div>
                         `;
 
-                        // Add click handler
+                        // Add click handler only if token is allowed
                         const tokenItem = contractResult.querySelector('.token-item');
-                        tokenItem.addEventListener('click', () => this.handleTokenItemClick(type, tokenItem));
+                        if (isAllowed) {
+                            tokenItem.addEventListener('click', () => this.handleTokenItemClick(type, tokenItem));
+                        } else {
+                            tokenItem.style.cursor = 'not-allowed';
+                            tokenItem.title = 'This token is not allowed for trading';
+                        }
                     }
                 } catch (error) {
                     contractResult.innerHTML = `
@@ -973,6 +1022,85 @@ export class CreateOrder extends BaseComponent {
                             <h4>Token Contract</h4>
                             <div class="contract-error">
                                 Invalid or unsupported token contract
+                            </div>
+                        </div>
+                    `;
+                }
+            } else {
+                // Search in allowed tokens by name/symbol
+                const searchResults = this.tokens.filter(token => 
+                    token.name.toLowerCase().includes(searchTerm) ||
+                    token.symbol.toLowerCase().includes(searchTerm)
+                );
+
+                if (searchResults.length > 0) {
+                    contractResult.innerHTML = `
+                        <div class="token-section">
+                            <h4>Search Results</h4>
+                            <div class="token-list">
+                                ${searchResults.map(token => {
+                                    const balance = Number(token.balance) || 0;
+                                    const formattedBalance = balance.toLocaleString(undefined, { 
+                                        minimumFractionDigits: 2, 
+                                        maximumFractionDigits: 4,
+                                        useGrouping: true
+                                    });
+                                    const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+                                    const usdValue = balance * usdPrice;
+                                    const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                                        style: 'currency',
+                                        currency: 'USD',
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                    });
+
+                                    return `
+                                        <div class="token-item token-allowed" data-address="${token.address}">
+                                            <div class="token-item-left">
+                                                <div class="token-icon">
+                                                    ${this.getTokenIcon(token)}
+                                                </div>
+                                                <div class="token-item-info">
+                                                    <div class="token-item-symbol">
+                                                        ${token.symbol}
+                                                    </div>
+                                                    <div class="token-item-name">
+                                                        ${token.name}
+                                                        <a href="${this.getExplorerUrl(token.address)}" 
+                                                           target="_blank"
+                                                           class="token-explorer-link"
+                                                           onclick="event.stopPropagation();">
+                                                            <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                                                <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                                            </svg>
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="token-item-right">
+                                                <div class="token-balance-with-usd">
+                                                    <div class="token-balance-amount">${formattedBalance}</div>
+                                                    <div class="token-balance-usd">${formattedUsdValue}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    `;
+
+                    // Add click handlers for search results
+                    const tokenItems = contractResult.querySelectorAll('.token-item');
+                    tokenItems.forEach(item => {
+                        item.addEventListener('click', () => this.handleTokenItemClick(type, item));
+                    });
+                } else {
+                    contractResult.innerHTML = `
+                        <div class="token-section">
+                            <h4>Search Results</h4>
+                            <div class="token-list-empty">
+                                No tokens found matching "${searchTerm}"
                             </div>
                         </div>
                     `;
@@ -990,7 +1118,9 @@ export class CreateOrder extends BaseComponent {
         if (!tokens || tokens.length === 0) {
             container.innerHTML = `
                 <div class="token-list-empty">
-                    No tokens found
+                    <div class="empty-state-icon">🔍</div>
+                    <div class="empty-state-text">No allowed tokens found</div>
+                    <div class="empty-state-subtext">Contact the contract owner to add tokens to the allowed list</div>
                 </div>
             `;
             return;
@@ -999,14 +1129,29 @@ export class CreateOrder extends BaseComponent {
         // Clear existing content
         container.innerHTML = '';
 
+        // Sort tokens: tokens with balance first, then alphabetically by symbol
+        const sortedTokens = [...tokens].sort((a, b) => {
+            const aBalance = Number(a.balance) || 0;
+            const bBalance = Number(b.balance) || 0;
+            
+            // First sort by balance (non-zero first)
+            if (aBalance > 0 && bBalance === 0) return -1;
+            if (aBalance === 0 && bBalance > 0) return 1;
+            
+            // Then sort alphabetically by symbol
+            return a.symbol.localeCompare(b.symbol);
+        });
+
         // Add each token to the container
-        tokens.forEach(token => {
+        sortedTokens.forEach(token => {
             const tokenElement = document.createElement('div');
-            tokenElement.className = 'token-item';
+            const balance = Number(token.balance) || 0;
+            const hasBalance = balance > 0;
+            
+            tokenElement.className = `token-item ${hasBalance ? 'token-has-balance' : 'token-no-balance'}`;
             tokenElement.dataset.address = token.address;
             
             // Format balance with up to 4 decimal places if they exist
-            const balance = token.balance ? Number(token.balance) : 0;
             const formattedBalance = balance.toLocaleString(undefined, { 
                 minimumFractionDigits: 2, 
                 maximumFractionDigits: 4,
@@ -1053,14 +1198,133 @@ export class CreateOrder extends BaseComponent {
                         <div class="token-item-info">
                             <div class="token-item-symbol">
                                 ${token.symbol}
-                                <a href="${this.getExplorerUrl(token.address)}" 
-                                   target="_blank"
-                                   class="token-explorer-link"
-                                   onclick="event.stopPropagation();">
-                                    <svg class="token-explorer-icon" viewBox="0 0 24 24">
-                                        <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
-                                    </svg>
-                                </a>
+                            </div>
+                            <div class="token-item-name">${token.name}</div>
+                        </div>
+                    </div>
+                    <div class="token-item-right">
+                        <div class="token-balance-with-usd">
+                            <div class="token-balance-amount ${hasBalance ? 'has-balance' : 'no-balance'}">
+                                ${formattedBalance}
+                                ${!hasBalance ? '<span class="no-balance-text">(No balance)</span>' : ''}
+                            </div>
+                            <div class="token-balance-usd">${formattedUsdValue}</div>
+                        </div>
+                        <div class="token-item-actions">
+                            <a href="${this.getExplorerUrl(token.address)}" 
+                               target="_blank"
+                               class="token-explorer-link"
+                               onclick="event.stopPropagation();"
+                               title="View on Explorer">
+                                <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                    <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                </svg>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Add click handler
+            tokenElement.addEventListener('click', () => this.handleTokenItemClick(type, tokenElement));
+            
+            // Add to container
+            container.appendChild(tokenElement);
+        });
+
+        // Add summary information
+        const tokensWithBalance = sortedTokens.filter(token => Number(token.balance) > 0).length;
+        const totalTokens = sortedTokens.length;
+        
+        if (totalTokens > 0) {
+            const summaryElement = document.createElement('div');
+            summaryElement.className = 'token-list-summary';
+            summaryElement.innerHTML = `
+                <div class="summary-text">
+                    Showing ${totalTokens} allowed tokens
+                    ${tokensWithBalance > 0 ? `(${tokensWithBalance} with balance)` : ''}
+                </div>
+            `;
+            container.appendChild(summaryElement);
+        }
+    }
+
+    displayNotAllowedTokens(notAllowed, container, type) {
+        if (!container) return;
+
+        if (!notAllowed || notAllowed.length === 0) {
+            container.innerHTML = `
+                <div class="token-list-empty">
+                    <div class="empty-state-icon">🔍</div>
+                    <div class="empty-state-text">No not allowed tokens found</div>
+                    <div class="empty-state-subtext">This token is not allowed for trading.</div>
+                </div>
+            `;
+            return;
+        }
+
+        // Clear existing content
+        container.innerHTML = '';
+
+        // Sort tokens alphabetically by symbol
+        const sortedTokens = [...notAllowed].sort((a, b) => a.symbol.localeCompare(b.symbol));
+
+        // Add each token to the container
+        sortedTokens.forEach(token => {
+            const tokenElement = document.createElement('div');
+            const balance = Number(token.balance) || 0;
+            const hasBalance = balance > 0;
+            
+            tokenElement.className = `token-item token-not-allowed`;
+            tokenElement.dataset.address = token.address;
+            
+            // Format balance with up to 4 decimal places if they exist
+            const formattedBalance = balance.toLocaleString(undefined, { 
+                minimumFractionDigits: 2, 
+                maximumFractionDigits: 4,
+                useGrouping: true // Keeps the thousand separators
+            });
+            
+            // Get USD price and calculate USD value
+            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+            const usdValue = balance * usdPrice;
+            const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+
+            // Generate background color for fallback icon
+            const colors = [
+                '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+                '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+            ];
+            const colorIndex = token.address ? 
+                parseInt(token.address.slice(-6), 16) % colors.length :
+                Math.floor(Math.random() * colors.length);
+            const backgroundColor = colors[colorIndex];
+            
+            tokenElement.innerHTML = `
+                <div class="token-item-content">
+                    <div class="token-item-left">
+                        <div class="token-icon">
+                            ${token.logoURI ? `
+                                <img src="${token.logoURI}" 
+                                    alt="${token.symbol}" 
+                                    class="token-icon-image"
+                                    onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+                                <div class="token-icon-fallback" style="display:none;background:${backgroundColor}">
+                                    ${token.symbol.charAt(0).toUpperCase()}
+                                </div>` : `
+                                <div class="token-icon-fallback" style="background:${backgroundColor}">
+                                    ${token.symbol.charAt(0).toUpperCase()}
+                                </div>`
+                            }
+                        </div>
+                        <div class="token-item-info">
+                            <div class="token-item-symbol">
+                                ${token.symbol}
                             </div>
                             <div class="token-item-name">${token.name}</div>
                         </div>
@@ -1070,16 +1334,25 @@ export class CreateOrder extends BaseComponent {
                             <div class="token-balance-amount">${formattedBalance}</div>
                             <div class="token-balance-usd">${formattedUsdValue}</div>
                         </div>
+                        <div class="token-item-actions">
+                            <a href="${this.getExplorerUrl(token.address)}" 
+                               target="_blank"
+                               class="token-explorer-link"
+                               onclick="event.stopPropagation();"
+                               title="View on Explorer">
+                                <svg class="token-explorer-icon" viewBox="0 0 24 24">
+                                    <path fill="currentColor" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z" />
+                                </svg>
+                            </a>
+                        </div>
                     </div>
                 </div>
             `;
 
-            // Add click event listener to the token element
-            tokenElement.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.handleTokenItemClick(type, tokenElement);
-            });
-
+            // Add click handler
+            tokenElement.addEventListener('click', () => this.handleTokenItemClick(type, tokenElement));
+            
+            // Add to container
             container.appendChild(tokenElement);
         });
     }
@@ -1434,24 +1707,52 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    handleTokenItemClick(type, tokenItem) {
+    async handleTokenItemClick(type, tokenItem) {
         try {
             const address = tokenItem.dataset.address;
+            
+            // Check if this is a not allowed token
+            const isNotAllowedToken = tokenItem.classList.contains('token-not-allowed');
+            
+            if (isNotAllowedToken) {
+                // Find the token in not allowed tokens
+                const token = this.notAllowedTokens?.find(t => t.address.toLowerCase() === address.toLowerCase());
+                if (token) {
+                    this.showWarning(`${token.symbol} is not allowed for trading on this platform. You can view your balance but cannot use it for orders.`);
+                }
+                return; // Don't allow selection of not allowed tokens
+            }
+            
+            // Handle allowed tokens
             const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
             
             this.debug('Token item clicked:', {
                 type,
                 address,
-                token
+                token,
+                isNotAllowed: isNotAllowedToken
             });
             
             if (token) {
-                this.handleTokenSelect(type, token);
-                
-                // Close the modal after selection
-                const modal = document.getElementById(`${type}TokenModal`);
-                if (modal) {
-                    modal.style.display = 'none';
+                // Validate that the token is allowed in the contract
+                try {
+                    const isAllowed = await contractService.isTokenAllowed(address);
+                    
+                    if (!isAllowed) {
+                        this.showError(`Token ${token.symbol} is not allowed for trading. Please select an allowed token.`);
+                        return;
+                    }
+                    
+                    this.handleTokenSelect(type, token);
+                    
+                    // Close the modal after selection
+                    const modal = document.getElementById(`${type}TokenModal`);
+                    if (modal) {
+                        modal.style.display = 'none';
+                    }
+                } catch (validationError) {
+                    this.debug('Token validation error:', validationError);
+                    this.showError('Unable to validate token. Please try again.');
                 }
             }
         } catch (error) {

@@ -7,8 +7,9 @@ const networkConfig = {
         name: "Polygon",
         displayName: "Polygon Mainnet",
         isDefault: true,
-        contractAddress: /* "0x34396a792510d6fb8ec0f70b68b8739456af06c6",  */// new
-        "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837", // old
+        contractAddress: "0x2F786290BAe87D1e8c01A97e6529030bbCF9f147", // New contract with allowed tokens 08/15/25
+        /* "0x34396a792510d6fb8ec0f70b68b8739456af06c6",  */// old 08/14/25
+        /* "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837", */ // old 08/13/25
         contractABI: CONTRACT_ABI,
         explorer: "https://polygonscan.com",
         rpcUrl: "https://polygon-rpc.com",

@@ -3,7 +3,6 @@ import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 import { getNetworkConfig } from '../config.js';
-import { NETWORK_TOKENS } from '../utils/tokens.js';
 import { PricingService } from '../services/PricingService.js';
 import { walletManager } from '../config.js';
 import { createLogger } from '../services/LogService.js';
@@ -111,60 +110,8 @@ export class ViewOrders extends BaseComponent {
                 return this.getDefaultTokenIcon();
             }
 
-            // Debug log the token list and search attempt
-            this.debug('Looking for token icon:', {
-                searchAddress: token.address.toLowerCase(),
-                tokenListLength: this.tokenList?.length || 0,
-                tokenList: this.tokenList
-            });
-
-            // First check if the token exists in our token list
-            const tokenFromList = this.tokenList.find(t => {
-                const matches = t.address.toLowerCase() === token.address.toLowerCase();
-                this.debug(`Comparing addresses: ${t.address.toLowerCase()} vs ${token.address.toLowerCase()} = ${matches}`);
-                return matches;
-            });
-
-            this.debug('Token from list:', tokenFromList);
-
-            // If we found a token with a logo URI, use it
-            if (tokenFromList?.logoURI) {
-                this.debug('Using logo URI from token list:', tokenFromList.logoURI);
-                return `
-                    <div class="token-icon">
-                        <img src="${tokenFromList.logoURI}" 
-                             alt="${tokenFromList.symbol}" 
-                             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
-                             class="token-icon-image" />
-                        <div class="token-icon-fallback" style="display:none">
-                            ${tokenFromList.symbol.charAt(0).toUpperCase()}
-                        </div>
-                    </div>
-                `;
-            }
-
-            // If token is in NETWORK_TOKENS, use that logo
-            const networkToken = NETWORK_TOKENS[getNetworkConfig().name]?.find(t => 
-                t.address.toLowerCase() === token.address.toLowerCase()
-            );
-
-            if (networkToken?.logoURI) {
-                this.debug('Using logo URI from NETWORK_TOKENS:', networkToken.logoURI);
-                return `
-                    <div class="token-icon">
-                        <img src="${networkToken.logoURI}" 
-                             alt="${networkToken.symbol}" 
-                             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
-                             class="token-icon-image" />
-                        <div class="token-icon-fallback" style="display:none">
-                            ${networkToken.symbol.charAt(0).toUpperCase()}
-                        </div>
-                    </div>
-                `;
-            }
-
-            // Fallback to color-based icon
-            this.debug('No logo URI found, using fallback icon');
+            // Generate color-based icon for all tokens
+            this.debug('Generating color-based icon for token:', token.symbol);
             const symbol = token.symbol || '?';
             const firstLetter = symbol.charAt(0).toUpperCase();
             

@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
 import { getNetworkConfig } from '../config.js';
-import { NETWORK_TOKENS } from '../utils/tokens.js';
 import { erc20Abi } from '../abi/erc20.js';
 import { createLogger } from './LogService.js';
 
@@ -614,22 +613,13 @@ export class WebSocketService {
             // Normalize address to lowercase for consistent comparison
             const normalizedAddress = tokenAddress.toLowerCase();
 
-            // 1. First check our tokenCache
+            // 1. First check cache
             if (this.tokenCache.has(normalizedAddress)) {
                 this.debug('Token info found in cache:', normalizedAddress);
                 return this.tokenCache.get(normalizedAddress);
             }
 
-            // 2. Then check NETWORK_TOKENS (predefined list)
-            const networkConfig = getNetworkConfig();
-            const predefinedToken = NETWORK_TOKENS[networkConfig.name]?.[normalizedAddress];
-            if (predefinedToken) {
-                this.debug('Token info found in predefined list:', normalizedAddress);
-                this.tokenCache.set(normalizedAddress, predefinedToken);
-                return predefinedToken;
-            }
-
-            // 3. If not found, fetch from contract using queueRequest
+            // 2. Fetch from contract using queueRequest
             this.debug('Fetching token info from contract:', normalizedAddress);
             return await this.queueRequest(async () => {
                 const contract = new ethers.Contract(tokenAddress, erc20Abi, this.provider);
