@@ -8,16 +8,6 @@ const debug = logger.debug.bind(logger);
 const error = logger.error.bind(logger);
 const warn = logger.warn.bind(logger);
 
-// Create an in-memory cache for token data
-const tokenCache = new Map();
-const metadataCache = new Map();
-const balanceCache = new Map();
-
-// Cache TTL constants
-const TOKEN_LIST_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-const METADATA_CACHE_TTL = 60 * 60 * 1000; // 1 hour
-const BALANCE_CACHE_TTL = 60 * 1000; // 1 minute
-
 // Rate limiting constants
 const BASE_DELAY = 200; // Base delay between requests
 const MAX_RETRIES = 3; // Maximum retries for rate limited requests
@@ -53,14 +43,6 @@ export async function getContractAllowedTokens() {
     try {
         debug('Getting contract allowed tokens...');
         
-        // Check cache first
-        const cacheKey = 'allowedTokens';
-        const cachedData = tokenCache.get(cacheKey);
-        if (cachedData && Date.now() - cachedData.timestamp < TOKEN_LIST_CACHE_TTL) {
-            debug('Using cached allowed tokens');
-            return cachedData.data;
-        }
-
         // Get allowed tokens from contract
         const allowedTokenAddresses = await contractService.getAllowedTokens();
         debug(`Found ${allowedTokenAddresses.length} allowed tokens`);
@@ -116,12 +98,6 @@ export async function getContractAllowedTokens() {
             }
         }
 
-        // Cache the result
-        tokenCache.set(cacheKey, {
-            timestamp: Date.now(),
-            data: tokensWithData
-        });
-
         debug(`Successfully processed ${tokensWithData.length} tokens`);
         return tokensWithData;
 
@@ -144,12 +120,6 @@ export async function getContractAllowedTokens() {
  */
 async function getTokenMetadata(tokenAddress) {
     try {
-        // Check cache first
-        const cachedMetadata = metadataCache.get(tokenAddress);
-        if (cachedMetadata && Date.now() - cachedMetadata.timestamp < METADATA_CACHE_TTL) {
-            return cachedMetadata.data;
-        }
-
         // Known token fallbacks for common tokens
         const knownTokens = {
             '0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6': {
@@ -190,10 +160,6 @@ async function getTokenMetadata(tokenAddress) {
         
         if (knownToken) {
             debug(`Using known metadata for ${knownToken.symbol}`);
-            metadataCache.set(tokenAddress, {
-                timestamp: Date.now(),
-                data: knownToken
-            });
             return knownToken;
         }
 
@@ -220,12 +186,6 @@ async function getTokenMetadata(tokenAddress) {
             decimals: parseInt(decimals)
         };
 
-        // Cache the metadata
-        metadataCache.set(tokenAddress, {
-            timestamp: Date.now(),
-            data: metadata
-        });
-
         return metadata;
 
     } catch (err) {
@@ -240,12 +200,6 @@ async function getTokenMetadata(tokenAddress) {
                 decimals: 18
             };
             
-            // Cache the fallback to prevent repeated failed calls
-            metadataCache.set(tokenAddress, {
-                timestamp: Date.now(),
-                data: fallbackMetadata
-            });
-            
             return fallbackMetadata;
         }
         
@@ -257,12 +211,6 @@ async function getTokenMetadata(tokenAddress) {
             name: 'Unknown Token',
             decimals: 18
         };
-        
-        // Cache the fallback
-        metadataCache.set(tokenAddress, {
-            timestamp: Date.now(),
-            data: fallbackMetadata
-        });
         
         return fallbackMetadata;
     }
@@ -281,14 +229,7 @@ async function getUserTokenBalance(tokenAddress) {
         }
 
         const userAddress = window.ethereum.selectedAddress;
-        const cacheKey = `${tokenAddress}-${userAddress}`;
         
-        // Check cache first
-        const cachedBalance = balanceCache.get(cacheKey);
-        if (cachedBalance && Date.now() - cachedBalance.timestamp < BALANCE_CACHE_TTL) {
-            return cachedBalance.data;
-        }
-
         const provider = contractService.getProvider();
         const tokenContract = new ethers.Contract(
             tokenAddress,
@@ -305,12 +246,6 @@ async function getUserTokenBalance(tokenAddress) {
         ]);
 
         const balance = ethers.utils.formatUnits(rawBalance, decimals);
-
-        // Cache the balance
-        balanceCache.set(cacheKey, {
-            timestamp: Date.now(),
-            data: balance
-        });
 
         return balance;
 
@@ -344,15 +279,7 @@ export async function isTokenAllowed(tokenAddress) {
  * Clear all caches (useful for testing or when switching networks)
  */
 export function clearTokenCaches() {
-    tokenCache.clear();
-    metadataCache.clear();
-    balanceCache.clear();
-    
-    // Reset rate limiting state
-    lastRequestTime = 0;
-    consecutiveRateLimitErrors = 0;
-    
-    debug('All token caches cleared and rate limiting reset');
+    debug('Caching disabled - no caches to clear');
 }
 
 /**
@@ -365,14 +292,15 @@ export function resetRateLimiting() {
 }
 
 /**
- * Get cache statistics for debugging
+ * Get cache statistics (for debugging)
  * @returns {Object} Cache statistics
  */
 export function getCacheStats() {
     return {
-        tokenCacheSize: tokenCache.size,
-        metadataCacheSize: metadataCache.size,
-        balanceCacheSize: balanceCache.size
+        tokenCacheSize: 0,
+        metadataCacheSize: 0,
+        balanceCacheSize: 0,
+        cachingEnabled: false
     };
 }
 
@@ -410,14 +338,6 @@ export async function getAllWalletTokens() {
     try {
         debug('Getting all wallet tokens...');
         
-        // Check cache first
-        const cacheKey = 'allWalletTokens';
-        const cachedData = tokenCache.get(cacheKey);
-        if (cachedData && Date.now() - cachedData.timestamp < TOKEN_LIST_CACHE_TTL) {
-            debug('Using cached wallet tokens');
-            return cachedData.data;
-        }
-
         // Get allowed tokens first
         const allowedTokens = await getContractAllowedTokens();
         const allowedAddresses = new Set(allowedTokens.map(token => token.address.toLowerCase()));
@@ -456,12 +376,6 @@ export async function getAllWalletTokens() {
             notAllowed: notAllowedTokens
         };
 
-        // Cache the result
-        tokenCache.set(cacheKey, {
-            timestamp: Date.now(),
-            data: result
-        });
-
         debug(`Successfully processed ${markedAllowedTokens.length} allowed and ${notAllowedTokens.length} not allowed tokens`);
         return result;
 
@@ -480,14 +394,6 @@ async function getUserWalletTokens(userAddress) {
     try {
         debug(`Getting wallet tokens for ${userAddress}...`);
         
-        // Check cache first
-        const cacheKey = `walletTokens_${userAddress}`;
-        const cachedData = tokenCache.get(cacheKey);
-        if (cachedData && Date.now() - cachedData.timestamp < TOKEN_LIST_CACHE_TTL) {
-            debug('Using cached wallet tokens');
-            return cachedData.data;
-        }
-
         const provider = contractService.getProvider();
         
         // Get recent Transfer events to find tokens the user has interacted with
@@ -538,12 +444,6 @@ async function getUserWalletTokens(userAddress) {
                 // Continue with next token
             }
         }
-
-        // Cache the result
-        tokenCache.set(cacheKey, {
-            timestamp: Date.now(),
-            data: walletTokens
-        });
 
         debug(`Found ${walletTokens.length} tokens with balance in wallet`);
         return walletTokens;
