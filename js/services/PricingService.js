@@ -1,5 +1,4 @@
 import { getNetworkConfig } from '../config.js';
-import { NETWORK_TOKENS } from '../utils/tokens.js';
 import { createLogger } from './LogService.js';
 
 export class PricingService {
@@ -131,7 +130,7 @@ export class PricingService {
 
         this.refreshPromise = (async () => {
             try {
-                // Get unique token addresses from orders and NETWORK_TOKENS
+                // Get unique token addresses from orders
                 const tokenAddresses = new Set();
                 
                 // Add tokens from orders
@@ -140,13 +139,6 @@ export class PricingService {
                         tokenAddresses.add(order.sellToken.toLowerCase());
                         tokenAddresses.add(order.buyToken.toLowerCase());
                     }
-                }
-
-                // Add tokens from NETWORK_TOKENS to ensure we always have prices for common tokens
-                const networkConfig = getNetworkConfig();
-                const networkTokens = NETWORK_TOKENS[networkConfig.name] || [];
-                for (const token of networkTokens) {
-                    tokenAddresses.add(token.address.toLowerCase());
                 }
 
                 if (tokenAddresses.size === 0) {
