@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { getNetworkConfig } from '../config.js';
+import { getNetworkConfig, walletManager } from '../config.js';
 import { createLogger } from './LogService.js';
 
 // Initialize logger
@@ -103,9 +103,31 @@ class ContractService {
             debug(`Token ${tokenAddress} allowed: ${isAllowed}`);
             
             return isAllowed;
-        } catch (error) {
-            error(`Failed to check if token ${tokenAddress} is allowed:`, error);
+        } catch (err) {
+            error('Failed to check if token is allowed:', err);
             return false;
+        }
+    }
+
+    /**
+     * Get the current user's wallet address
+     * @returns {Promise<string|null>} User's wallet address or null if not connected
+     */
+    async getUserAddress() {
+        try {
+            // Use the existing wallet manager to get the current address
+            const address = await walletManager.getCurrentAddress();
+            
+            if (address) {
+                debug(`User address: ${address}`);
+                return address;
+            }
+            
+            debug('No wallet address available - user not connected');
+            return null;
+        } catch (err) {
+            error('Failed to get user address:', err);
+            return null;
         }
     }
 
@@ -133,8 +155,8 @@ class ContractService {
             debug('Contract validation successful');
             
             return true;
-        } catch (error) {
-            error('Contract validation failed:', error);
+        } catch (err) {
+            error('Contract validation failed:', err);
             return false;
         }
     }
@@ -160,9 +182,9 @@ class ContractService {
                 allowedTokens: allowedTokens.slice(0, 5), // First 5 for display
                 hasMoreTokens: allowedTokens.length > 5
             };
-        } catch (error) {
-            error('Failed to get contract info:', error);
-            throw error;
+        } catch (err) {
+            error('Failed to get contract info:', err);
+            throw err;
         }
     }
 }

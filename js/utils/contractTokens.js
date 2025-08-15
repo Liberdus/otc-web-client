@@ -401,3 +401,155 @@ export async function getContractInfo() {
         throw err;
     }
 }
+
+/**
+ * Get all tokens in user's wallet (both allowed and not allowed)
+ * @returns {Promise<Object>} Object with allowed and notAllowed token arrays
+ */
+export async function getAllWalletTokens() {
+    try {
+        debug('Getting all wallet tokens...');
+        
+        // Check cache first
+        const cacheKey = 'allWalletTokens';
+        const cachedData = tokenCache.get(cacheKey);
+        if (cachedData && Date.now() - cachedData.timestamp < TOKEN_LIST_CACHE_TTL) {
+            debug('Using cached wallet tokens');
+            return cachedData.data;
+        }
+
+        // Get allowed tokens first
+        const allowedTokens = await getContractAllowedTokens();
+        const allowedAddresses = new Set(allowedTokens.map(token => token.address.toLowerCase()));
+        
+        // Get user's wallet address
+        const userAddress = await contractService.getUserAddress();
+        if (!userAddress) {
+            debug('No user address available');
+            return { allowed: allowedTokens, notAllowed: [] };
+        }
+
+        // Get all ERC20 tokens from user's wallet
+        const walletTokens = await getUserWalletTokens(userAddress);
+        debug(`Found ${walletTokens.length} tokens in wallet`);
+
+        // Separate allowed and not allowed tokens
+        const notAllowedTokens = [];
+        
+        for (const token of walletTokens) {
+            if (!allowedAddresses.has(token.address.toLowerCase())) {
+                notAllowedTokens.push({
+                    ...token,
+                    isAllowed: false
+                });
+            }
+        }
+
+        // Mark allowed tokens
+        const markedAllowedTokens = allowedTokens.map(token => ({
+            ...token,
+            isAllowed: true
+        }));
+
+        const result = {
+            allowed: markedAllowedTokens,
+            notAllowed: notAllowedTokens
+        };
+
+        // Cache the result
+        tokenCache.set(cacheKey, {
+            timestamp: Date.now(),
+            data: result
+        });
+
+        debug(`Successfully processed ${markedAllowedTokens.length} allowed and ${notAllowedTokens.length} not allowed tokens`);
+        return result;
+
+    } catch (err) {
+        error('Failed to get all wallet tokens:', err);
+        return { allowed: [], notAllowed: [] };
+    }
+}
+
+/**
+ * Get all ERC20 tokens in user's wallet
+ * @param {string} userAddress - User's wallet address
+ * @returns {Promise<Array>} Array of token objects with metadata and balances
+ */
+async function getUserWalletTokens(userAddress) {
+    try {
+        debug(`Getting wallet tokens for ${userAddress}...`);
+        
+        // Check cache first
+        const cacheKey = `walletTokens_${userAddress}`;
+        const cachedData = tokenCache.get(cacheKey);
+        if (cachedData && Date.now() - cachedData.timestamp < TOKEN_LIST_CACHE_TTL) {
+            debug('Using cached wallet tokens');
+            return cachedData.data;
+        }
+
+        const provider = contractService.getProvider();
+        
+        // Get recent Transfer events to find tokens the user has interacted with
+        const currentBlock = await provider.getBlockNumber();
+        const fromBlock = Math.max(0, currentBlock - 10000); // Look back 10k blocks
+        
+        // Get Transfer events where user is recipient
+        const filter = {
+            fromBlock: fromBlock,
+            toBlock: 'latest',
+            topics: [
+                ethers.utils.id('Transfer(address,address,uint256)'),
+                null, // from address (any)
+                ethers.utils.hexZeroPad(userAddress, 32) // to address (user)
+            ]
+        };
+
+        const logs = await provider.getLogs(filter);
+        debug(`Found ${logs.length} Transfer events to user`);
+
+        // Extract unique token addresses from Transfer events
+        const tokenAddresses = [...new Set(logs.map(log => log.address))];
+        debug(`Found ${tokenAddresses.length} unique token addresses`);
+        
+        // Log the first few addresses for debugging
+        if (tokenAddresses.length > 0) {
+            debug('Sample token addresses found:', tokenAddresses.slice(0, 5));
+        }
+
+        const walletTokens = [];
+        
+        // Check balance for each token address from Transfer events
+        for (const tokenAddress of tokenAddresses) {
+            try {
+                await enforceRateLimit(100); // Shorter delay for balance checks
+                
+                const balance = await getUserTokenBalance(tokenAddress);
+                if (Number(balance) > 0) {
+                    const metadata = await getTokenMetadata(tokenAddress);
+                    walletTokens.push({
+                        address: tokenAddress,
+                        ...metadata,
+                        balance: balance
+                    });
+                }
+            } catch (err) {
+                debug(`Error checking token ${tokenAddress}:`, err.message);
+                // Continue with next token
+            }
+        }
+
+        // Cache the result
+        tokenCache.set(cacheKey, {
+            timestamp: Date.now(),
+            data: walletTokens
+        });
+
+        debug(`Found ${walletTokens.length} tokens with balance in wallet`);
+        return walletTokens;
+
+    } catch (err) {
+        error('Failed to get wallet tokens:', err);
+        return [];
+    }
+}

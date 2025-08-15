@@ -1279,8 +1279,6 @@
   gap: 8px;
 }
 
-
-
 /* Token Balance States */
 .token-has-balance {
   border-left: 3px solid #10b981;
@@ -1289,6 +1287,17 @@
 .token-no-balance {
   border-left: 3px solid #6b7280;
   opacity: 0.7;
+}
+
+.token-not-allowed {
+  border-left: 3px solid #ef4444;
+  opacity: 0.8;
+  background-color: #fef2f2;
+}
+
+.token-not-allowed:hover {
+  background-color: #fee2e2;
+  opacity: 1;
 }
 
 .token-has-balance:hover {
