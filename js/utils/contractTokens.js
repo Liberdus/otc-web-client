@@ -18,6 +18,33 @@ const TOKEN_LIST_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const METADATA_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const BALANCE_CACHE_TTL = 60 * 1000; // 1 minute
 
+// Rate limiting constants
+const BASE_DELAY = 200; // Base delay between requests
+const MAX_RETRIES = 3; // Maximum retries for rate limited requests
+const BACKOFF_MULTIPLIER = 2; // Exponential backoff multiplier
+
+// Global rate limiting state
+let lastRequestTime = 0;
+let consecutiveRateLimitErrors = 0;
+
+/**
+ * Rate limiting utility function
+ * @param {number} minDelay - Minimum delay in milliseconds
+ * @returns {Promise<void>}
+ */
+async function enforceRateLimit(minDelay = BASE_DELAY) {
+    const now = Date.now();
+    const timeSinceLastRequest = now - lastRequestTime;
+    
+    if (timeSinceLastRequest < minDelay) {
+        const delay = minDelay - timeSinceLastRequest;
+        debug(`Rate limiting: waiting ${delay}ms`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    lastRequestTime = Date.now();
+}
+
 /**
  * Get allowed tokens from contract with metadata and balances
  * @returns {Promise<Array>} Array of token objects with metadata and balances
@@ -44,32 +71,50 @@ export async function getContractAllowedTokens() {
         }
 
         // Get metadata and balances for each token
-        const tokensWithData = await Promise.all(
-            allowedTokenAddresses.map(async (address) => {
-                try {
-                    const [metadata, balance] = await Promise.all([
-                        getTokenMetadata(address),
-                        getUserTokenBalance(address)
-                    ]);
+        const tokensWithData = [];
+        
+        // Reset rate limiting state for new batch
+        consecutiveRateLimitErrors = 0;
+        
+        for (const address of allowedTokenAddresses) {
+            try {
+                // Enforce rate limiting with exponential backoff
+                const currentDelay = BASE_DELAY * Math.pow(BACKOFF_MULTIPLIER, consecutiveRateLimitErrors);
+                await enforceRateLimit(currentDelay);
+                
+                const [metadata, balance] = await Promise.all([
+                    getTokenMetadata(address),
+                    getUserTokenBalance(address)
+                ]);
 
-                    return {
-                        address,
-                        ...metadata,
-                        balance: balance || '0'
-                    };
-                } catch (error) {
-                    error(`Error processing token ${address}:`, error);
-                    // Return basic token info even if metadata/balance fails
-                    return {
-                        address,
-                        symbol: 'UNKNOWN',
-                        name: 'Unknown Token',
-                        decimals: 18,
-                        balance: '0'
-                    };
+                tokensWithData.push({
+                    address,
+                    ...metadata,
+                    balance: balance || '0'
+                });
+                
+                // Reset consecutive errors on success
+                consecutiveRateLimitErrors = 0;
+                
+            } catch (err) {
+                error(`Error processing token ${address}:`, err);
+                
+                // Increment consecutive errors for rate limiting
+                if (err.code === -32005 || err.message?.includes('rate limit')) {
+                    consecutiveRateLimitErrors++;
+                    warn(`Rate limit error ${consecutiveRateLimitErrors}/${MAX_RETRIES} for token ${address}`);
                 }
-            })
-        );
+                
+                // Return basic token info even if metadata/balance fails
+                tokensWithData.push({
+                    address,
+                    symbol: 'UNKNOWN',
+                    name: 'Unknown Token',
+                    decimals: 18,
+                    balance: '0'
+                });
+            }
+        }
 
         // Cache the result
         tokenCache.set(cacheKey, {
@@ -80,8 +125,8 @@ export async function getContractAllowedTokens() {
         debug(`Successfully processed ${tokensWithData.length} tokens`);
         return tokensWithData;
 
-    } catch (error) {
-        error('Failed to get contract allowed tokens:', error);
+    } catch (err) {
+        error('Failed to get contract allowed tokens:', err);
         
         // Show toast error and return empty list as per migration plan
         if (window.showError) {
@@ -103,6 +148,53 @@ async function getTokenMetadata(tokenAddress) {
         const cachedMetadata = metadataCache.get(tokenAddress);
         if (cachedMetadata && Date.now() - cachedMetadata.timestamp < METADATA_CACHE_TTL) {
             return cachedMetadata.data;
+        }
+
+        // Known token fallbacks for common tokens
+        const knownTokens = {
+            '0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6': {
+                symbol: 'WBTC',
+                name: 'Wrapped Bitcoin',
+                decimals: 8
+            },
+            '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359': {
+                symbol: 'USDC',
+                name: 'USD Coin',
+                decimals: 6
+            },
+            '0xc2132d05d31c914a87c6611c10748aeb04b58e8f': {
+                symbol: 'USDT',
+                name: 'Tether USD',
+                decimals: 6
+            },
+            '0x693ed886545970f0a3adf8c59af5ccdb6ddf0a76': {
+                symbol: 'LIB',
+                name: 'Liberdus',
+                decimals: 18
+            },
+            '0x7ceb23fd6bc0add59e62ac25578270cff1b9f619': {
+                symbol: 'WETH',
+                name: 'Wrapped Ether',
+                decimals: 18
+            },
+            '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270': {
+                symbol: 'WPOL',
+                name: 'Wrapped Polygon Ecosystem Token',
+                decimals: 18
+            }
+        };
+
+        // Check if we have known metadata for this token
+        const normalizedAddress = tokenAddress.toLowerCase();
+        const knownToken = knownTokens[normalizedAddress];
+        
+        if (knownToken) {
+            debug(`Using known metadata for ${knownToken.symbol}`);
+            metadataCache.set(tokenAddress, {
+                timestamp: Date.now(),
+                data: knownToken
+            });
+            return knownToken;
         }
 
         const provider = contractService.getProvider();
@@ -136,9 +228,43 @@ async function getTokenMetadata(tokenAddress) {
 
         return metadata;
 
-    } catch (error) {
-        error(`Failed to get metadata for token ${tokenAddress}:`, error);
-        throw error;
+    } catch (err) {
+        // Check if it's a rate limit error
+        if (err.code === -32005 || err.message?.includes('rate limit')) {
+            warn(`Rate limit hit while getting metadata for token ${tokenAddress}, using fallback`);
+            
+            // Return fallback metadata for rate-limited requests
+            const fallbackMetadata = {
+                symbol: 'UNKNOWN',
+                name: 'Unknown Token',
+                decimals: 18
+            };
+            
+            // Cache the fallback to prevent repeated failed calls
+            metadataCache.set(tokenAddress, {
+                timestamp: Date.now(),
+                data: fallbackMetadata
+            });
+            
+            return fallbackMetadata;
+        }
+        
+        error(`Failed to get metadata for token ${tokenAddress}:`, err);
+        
+        // Return fallback metadata
+        const fallbackMetadata = {
+            symbol: 'UNKNOWN',
+            name: 'Unknown Token',
+            decimals: 18
+        };
+        
+        // Cache the fallback
+        metadataCache.set(tokenAddress, {
+            timestamp: Date.now(),
+            data: fallbackMetadata
+        });
+        
+        return fallbackMetadata;
     }
 }
 
@@ -188,8 +314,14 @@ async function getUserTokenBalance(tokenAddress) {
 
         return balance;
 
-    } catch (error) {
-        debug(`Failed to get balance for token ${tokenAddress}:`, error);
+    } catch (err) {
+        // Check if it's a rate limit error
+        if (err.code === -32005 || err.message?.includes('rate limit')) {
+            warn(`Rate limit hit while getting balance for token ${tokenAddress}, returning 0`);
+            return '0';
+        }
+        
+        debug(`Failed to get balance for token ${tokenAddress}:`, err);
         return '0';
     }
 }
@@ -202,8 +334,8 @@ async function getUserTokenBalance(tokenAddress) {
 export async function isTokenAllowed(tokenAddress) {
     try {
         return await contractService.isTokenAllowed(tokenAddress);
-    } catch (error) {
-        error(`Failed to check if token ${tokenAddress} is allowed:`, error);
+    } catch (err) {
+        error(`Failed to check if token ${tokenAddress} is allowed:`, err);
         return false;
     }
 }
@@ -215,7 +347,21 @@ export function clearTokenCaches() {
     tokenCache.clear();
     metadataCache.clear();
     balanceCache.clear();
-    debug('All token caches cleared');
+    
+    // Reset rate limiting state
+    lastRequestTime = 0;
+    consecutiveRateLimitErrors = 0;
+    
+    debug('All token caches cleared and rate limiting reset');
+}
+
+/**
+ * Reset rate limiting state (useful when switching networks or after errors)
+ */
+export function resetRateLimiting() {
+    lastRequestTime = 0;
+    consecutiveRateLimitErrors = 0;
+    debug('Rate limiting state reset');
 }
 
 /**
@@ -237,8 +383,8 @@ export function getCacheStats() {
 export async function validateContractService() {
     try {
         return await contractService.validateContract();
-    } catch (error) {
-        error('Contract service validation failed:', error);
+    } catch (err) {
+        error('Contract service validation failed:', err);
         return false;
     }
 }
@@ -250,8 +396,8 @@ export async function validateContractService() {
 export async function getContractInfo() {
     try {
         return await contractService.getContractInfo();
-    } catch (error) {
-        error('Failed to get contract info:', error);
-        throw error;
+    } catch (err) {
+        error('Failed to get contract info:', err);
+        throw err;
     }
 }
