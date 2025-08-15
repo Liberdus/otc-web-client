@@ -445,7 +445,7 @@ class App {
         }
     }
 
-    showError(message, duration = 5000) {
+    showError(message, duration = 0) {
         this.debug('Showing error toast:', message);
         return showError(message, duration);
     }

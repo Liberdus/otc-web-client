@@ -31,7 +31,7 @@ export class BaseComponent {
         return element;
     }
 
-    showError(message, duration = 5000) {
+    showError(message, duration = 0) {
         this.debug('Showing error toast:', message);
         if (window.showError) {
             return window.showError(message, duration);

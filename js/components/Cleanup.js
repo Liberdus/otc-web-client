@@ -537,7 +537,7 @@ export class Cleanup extends BaseComponent {
         }
     }
 
-    showError(message, duration = 5000) {
+    showError(message, duration = 0) {
         this.error('Error:', message);
         
         // Show toast notification

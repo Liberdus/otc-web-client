@@ -39,12 +39,16 @@ export class Toast {
      * @param {string} message - The message to display
      * @param {string} type - The type of toast (error, success, warning, info)
      * @param {number} duration - Duration in milliseconds (default: 5000)
+     * @param {boolean} persistent - Whether the toast should persist until manually closed (default: false)
      */
-    showToast(message, type = 'info', duration = 5000) {
-        this.debug(`Showing toast: ${type} - ${message}`);
+    showToast(message, type = 'info', duration = 5000, persistent = false) {
+        this.debug(`Showing toast: ${type} - ${message}, persistent: ${persistent}`);
         
         const toast = this.createToastElement(message, type);
-        this.addToastToQueue(toast, duration);
+        
+        // For persistent toasts (especially errors), set duration to 0 to prevent auto-dismiss
+        const actualDuration = persistent ? 0 : duration;
+        this.addToastToQueue(toast, actualDuration);
         
         return toast;
     }
@@ -170,7 +174,7 @@ export class Toast {
     /**
      * Show a toast element
      * @param {HTMLElement} toast - The toast element
-     * @param {number} duration - Duration in milliseconds
+     * @param {number} duration - Duration in milliseconds (0 for persistent)
      */
     showToastElement(toast, duration) {
         // Add toast to container
@@ -181,13 +185,15 @@ export class Toast {
             toast.classList.add('toast-show');
         });
         
-        // Set up auto-remove
-        const timeoutId = setTimeout(() => {
-            this.removeToast(toast);
-        }, duration);
-        
-        // Store timeout ID for potential early removal
-        toast.dataset.timeoutId = timeoutId;
+        // Set up auto-remove only if duration is greater than 0
+        if (duration > 0) {
+            const timeoutId = setTimeout(() => {
+                this.removeToast(toast);
+            }, duration);
+            
+            // Store timeout ID for potential early removal
+            toast.dataset.timeoutId = timeoutId;
+        }
         
         // Process next toast
         setTimeout(() => {
@@ -268,25 +274,26 @@ export function getToast() {
  * @param {string} message - The message to display
  * @param {string} type - The type of toast
  * @param {number} duration - Duration in milliseconds
+ * @param {boolean} persistent - Whether the toast should persist until manually closed
  */
-export function showToast(message, type = 'info', duration = 5000) {
+export function showToast(message, type = 'info', duration = 5000, persistent = false) {
     const toast = getToast();
-    return toast.showToast(message, type, duration);
+    return toast.showToast(message, type, duration, persistent);
 }
 
 // Convenience functions for different toast types
-export function showError(message, duration = 5000) {
-    return showToast(message, 'error', duration);
+export function showError(message, duration = 0, persistent = true) {
+    return showToast(message, 'error', duration, persistent);
 }
 
-export function showSuccess(message, duration = 5000) {
-    return showToast(message, 'success', duration);
+export function showSuccess(message, duration = 5000, persistent = false) {
+    return showToast(message, 'success', duration, persistent);
 }
 
-export function showWarning(message, duration = 5000) {
-    return showToast(message, 'warning', duration);
+export function showWarning(message, duration = 5000, persistent = false) {
+    return showToast(message, 'warning', duration, persistent);
 }
 
-export function showInfo(message, duration = 5000) {
-    return showToast(message, 'info', duration);
+export function showInfo(message, duration = 5000, persistent = false) {
+    return showToast(message, 'info', duration, persistent);
 }
