@@ -85,7 +85,9 @@ class App {
             }
         });
 
-        this.currentTab = 'view-orders';
+        // Treat presence of signer as connected for initial render to avoid flicker
+        const isInitiallyConnected = !!window.walletManager?.getSigner?.();
+        this.currentTab = isInitiallyConnected ? 'create-order' : 'view-orders';
 
         // Add wallet connect button handler
         const walletConnectBtn = document.getElementById('walletConnect');
@@ -98,6 +100,8 @@ class App {
             if (event === 'connect') {
                 this.debug('Wallet connected, reinitializing components...');
                 this.updateTabVisibility(true);
+                // When connected, default to create-order to avoid flicker between tabs
+                this.currentTab = 'create-order';
                 this.reinitializeComponents();
             } else if (event === 'disconnect') {
                 this.debug('Wallet disconnected, updating tab visibility...');
@@ -147,8 +151,8 @@ class App {
             }
         };
 
-        // Update initial tab visibility
-        this.updateTabVisibility(false);
+        // Update initial tab visibility based on initial connection state
+        this.updateTabVisibility(!!isInitiallyConnected);
 
         // Add new property to track WebSocket readiness
         this.wsInitialized = false;
@@ -215,12 +219,14 @@ class App {
 
         await window.webSocket.syncAllOrders();
 
-        // Initialize components in read-only mode initially (based on connection, not provider presence)
+        // Initialize components based on connection (read-only if not connected)
         const readOnlyMode = !window.walletManager?.isWalletConnected();
-        await this.initializeComponents(readOnlyMode);
+        // Prefer signer presence for initial render
+        const initialReadOnlyMode = !isInitiallyConnected;
+        await this.initializeComponents(initialReadOnlyMode);
         
-        // Show the initial tab (view-orders) in read-only mode
-        await this.showTab('view-orders');
+        // Show the initial tab based on connection state (force read-only if needed for first paint)
+        await this.showTab(this.currentTab, initialReadOnlyMode);
         
         // Remove loading overlay after initialization
         if (this.loadingOverlay && this.loadingOverlay.parentElement) {
@@ -470,7 +476,7 @@ class App {
         return this.toast.showToast(message, type, duration);
     }
 
-    async showTab(tabId) {
+    async showTab(tabId, readOnlyOverride = null) {
         try {
             this.debug('Switching to tab:', tabId);
             
@@ -513,8 +519,10 @@ class App {
                 // Initialize component for this tab
                 const component = this.components[tabId];
                 if (component?.initialize) {
-                    const readOnlyMode = !window.walletManager?.isWalletConnected();
-                    await component.initialize(readOnlyMode);
+                    const computedReadOnly = readOnlyOverride !== null
+                        ? !!readOnlyOverride
+                        : !window.walletManager?.isWalletConnected();
+                    await component.initialize(computedReadOnly);
                 }
                 
                 // Remove loading overlay after initialization
