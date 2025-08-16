@@ -1,6 +1,6 @@
 import { BaseComponent } from './components/BaseComponent.js';
 import { CreateOrder } from './components/CreateOrder.js';
-import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled } from './config.js';
+import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled, getNetworkById } from './config.js';
 import { WalletUI } from './components/WalletUI.js';
 import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
@@ -96,16 +96,51 @@ class App {
         }
 
         // Add wallet connection state handler
-        walletManager.addListener((event, data) => {
-            if (event === 'connect') {
-                this.debug('Wallet connected, reinitializing components...');
-                this.updateTabVisibility(true);
-                // When connected, default to create-order to avoid flicker between tabs
-                this.currentTab = 'create-order';
-                this.reinitializeComponents();
-            } else if (event === 'disconnect') {
-                this.debug('Wallet disconnected, updating tab visibility...');
-                this.updateTabVisibility(false);
+        walletManager.addListener(async (event, data) => {
+            switch (event) {
+                case 'connect': {
+                    this.debug('Wallet connected, reinitializing components...');
+                    this.updateTabVisibility(true);
+                    // When connected, default to create-order to avoid flicker between tabs
+                    this.currentTab = 'create-order';
+                    await this.reinitializeComponents(false);
+                    break;
+                }
+                case 'disconnect': {
+                    this.debug('Wallet disconnected, updating tab visibility...');
+                    this.updateTabVisibility(false);
+                    break;
+                }
+                case 'accountsChanged': {
+                    try {
+                        this.debug('Account changed, reinitializing components...');
+                        await this.reinitializeComponents(true);
+                        if (data?.account) {
+                            const short = `${data.account.slice(0,6)}...${data.account.slice(-4)}`;
+                            this.showInfo(`Switched account to ${short}`);
+                        } else {
+                            this.showInfo('Account changed');
+                        }
+                    } catch (error) {
+                        console.error('[App] Error handling accountsChanged:', error);
+                    }
+                    break;
+                }
+                case 'chainChanged': {
+                    try {
+                        this.debug('Chain changed event received:', data?.chainId);
+                        const network = data?.chainId ? getNetworkById(data.chainId) : null;
+                        if (network?.isDefault) {
+                            await this.reinitializeComponents(true);
+                            this.showInfo(`Switched to ${network.displayName || network.name}`);
+                        } else {
+                            this.showWarning('Wrong Network. Please switch to the default network.');
+                        }
+                    } catch (error) {
+                        console.error('[App] Error handling chainChanged:', error);
+                    }
+                    break;
+                }
             }
         });
 
@@ -540,7 +575,7 @@ class App {
     }
 
     // Add new method to reinitialize components
-    async reinitializeComponents() {
+    async reinitializeComponents(preserveOrders = false) {
         if (this.isReinitializing) {
             this.debug('Already reinitializing, skipping...');
             return;
@@ -561,8 +596,8 @@ class App {
                 }
             });
             
-            // Clean up WebSocket service
-            if (window.webSocket?.cleanup) {
+            // Optionally clean up WebSocket service (clears order cache). Preserve on account/chain change.
+            if (!preserveOrders && window.webSocket?.cleanup) {
                 try {
                     window.webSocket.cleanup();
                 } catch (error) {
