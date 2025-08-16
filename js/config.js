@@ -2,6 +2,9 @@ import { abi as CONTRACT_ABI } from './abi/OTCSwap.js';
 import { ethers } from 'ethers';
 import { createLogger } from './services/LogService.js';
 
+export const APP_BRAND = 'LiberdusOTC';
+export const APP_LOGO = 'assets/1.png';
+
 const networkConfig = {
     "137": {
         name: "Polygon",

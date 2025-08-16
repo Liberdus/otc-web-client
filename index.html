@@ -9,7 +9,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OTC Swap</title>
+    <title>LiberdusOTC</title>
+    <!-- Favicon using the same logo -->
+    <link rel="icon" type="image/png" href="assets/1.png" />
+    <link rel="shortcut icon" type="image/png" href="assets/1.png" />
     <!-- Normalize.css for consistent styling across browsers -->
     <link
       rel="stylesheet"
@@ -26,6 +29,7 @@
     <link rel="stylesheet" href="css/components/contract-params.css" />
     <link rel="stylesheet" href="css/components/debug.css" />
     <link rel="stylesheet" href="css/components/toast.css" />
+    <link rel="stylesheet" href="css/components/footer.css" />
     <!-- Import map for ethers.js library -->
     <script type="importmap">
       {
@@ -45,8 +49,8 @@
         <!-- Logo and app name -->
         <div class="header-left">
           <div class="logo-container">
-            <img src="assets/1.png" alt="LiberSwap Logo" class="logo-image" />
-            <h1>LiberOTCSwap</h1>
+            <img src="assets/1.png" alt="LiberdusOTC Logo" class="logo-image" />
+            <h1>LiberdusOTC</h1>
             <span class="version">v1.0.25</span>
           </div>
         </div>
@@ -312,6 +316,7 @@
               class="contract-params-container"
             ></div>
           </div>
+          <div id="app-footer" class="app-footer"></div>
         </div>
       </main>
     </div>

@@ -1,6 +1,6 @@
 import { BaseComponent } from './components/BaseComponent.js';
 import { CreateOrder } from './components/CreateOrder.js';
-import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled, getNetworkById } from './config.js';
+import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled, getNetworkById, APP_BRAND, APP_LOGO } from './config.js';
 import { WalletUI } from './components/WalletUI.js';
 import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
@@ -12,6 +12,7 @@ import { PricingService } from './services/PricingService.js';
 import { createLogger } from './services/LogService.js';
 import { DebugPanel } from './components/DebugPanel.js';
 import { getToast, showError, showSuccess, showWarning, showInfo } from './components/Toast.js';
+import { Footer } from './components/Footer.js';
 
 class App {
     constructor() {
@@ -32,6 +33,32 @@ class App {
         // Initialize toast component
         this.toast = getToast();
         this.debug('Toast component initialized');
+
+        // Set brand in document title, header, and favicon from constants
+        try {
+            if (typeof APP_BRAND === 'string' && APP_BRAND.length > 0) {
+                document.title = APP_BRAND;
+                const headerTitle = document.querySelector('.header-left h1');
+                if (headerTitle) {
+                    headerTitle.textContent = APP_BRAND;
+                }
+            }
+            
+            // Set favicon dynamically
+            if (typeof APP_LOGO === 'string' && APP_LOGO.length > 0) {
+                const favicon = document.querySelector('link[rel="icon"]');
+                const shortcutIcon = document.querySelector('link[rel="shortcut icon"]');
+                
+                if (favicon) {
+                    favicon.href = APP_LOGO;
+                }
+                if (shortcutIcon) {
+                    shortcutIcon.href = APP_LOGO;
+                }
+            }
+        } catch (e) {
+            this.warn('Failed to set brand name in DOM', e);
+        }
 
         await this.initializeWalletManager();
         await this.initializePricingService();
@@ -55,6 +82,14 @@ class App {
         // Initialize wallet UI and store reference
         this.walletUI = new WalletUI();
         this.components['wallet-info'] = this.walletUI;
+
+        // Initialize footer (persists across tabs)
+        try {
+            this.footer = new Footer('app-footer');
+            this.footer.initialize();
+        } catch (e) {
+            this.warn('Footer failed to initialize', e);
+        }
         
         this.handleConnectWallet = async (e) => {
             e && e.preventDefault();

@@ -2083,7 +2083,7 @@ export class CreateOrder extends BaseComponent {
                 this.debug(`Auto-filled ${type} amount with balance: ${formattedBalance}`);
                 
                 // Show success feedback
-                this.showSuccess(`Filled ${type} amount with available balance`);
+                /* this.showSuccess(`Filled ${type} amount with available balance`); */
             }
         } catch (error) {
             this.error(`Error handling ${type} balance click:`, error);
