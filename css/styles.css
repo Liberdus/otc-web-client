@@ -549,6 +549,17 @@ body {
   color: var(--text-secondary);
 }
 
+/* Intro page spacing and contrast improvements */
+.intro-lead {
+  color: var(--text-tertiary); /* stronger contrast in dark mode */
+  opacity: 0.9; /* keep it slightly softer than pure white */
+  margin-bottom: 16px; /* add space before subtitle */
+}
+
+.intro-subtitle {
+  margin-top: 0;
+}
+
 /* Tertiary text */
 .text-tertiary {
   color: var(--text-tertiary);

@@ -24,10 +24,10 @@ export class Intro extends BaseComponent {
 		this.container.innerHTML = `
 			<div class="tab-content-wrapper">
 				<h2>Welcome to LiberdusOTC</h2>
-				<p class="text-secondary">Create orders by depositing tokens into escrow and setting the buy price, or fill existing orders to buy tokens at the set buy price set by the seller</p>
+				<p class="intro-lead">Create orders by depositing tokens into escrow and setting the buy price, or fill existing orders to buy tokens at the set buy price set by the seller</p>
 				
 				<div class="intro-content">
-					<h3>How to Use This Service</h3>
+					<h3 class="intro-subtitle">How to Use This Service</h3>
 					
 					<div class="intro-sections-grid">
 						<div class="intro-section">
