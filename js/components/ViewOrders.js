@@ -86,6 +86,19 @@ export class ViewOrders extends BaseComponent {
             this.currentAccount = walletManager.getAccount()?.toLowerCase();
             this.debug('Current account:', this.currentAccount);
             
+            // Add wallet state listener to refresh UI when wallet state changes
+            this.walletListener = (event, data) => {
+                this.debug('Wallet event received:', event, data);
+                if (event === 'connect' || event === 'disconnect' || event === 'accountsChanged') {
+                    this.debug('Wallet state changed, refreshing orders view');
+                    this.currentAccount = walletManager.getAccount()?.toLowerCase();
+                    this.refreshOrdersView().catch(error => {
+                        this.error('Error refreshing orders after wallet state change:', error);
+                    });
+                }
+            };
+            walletManager.addListener(this.walletListener);
+            
             // Initialize table and setup WebSocket
             await super.init();
             await this.setupWebSocket();
@@ -671,6 +684,20 @@ For Buyers:
                 throw new Error('MetaMask is not installed. Please install MetaMask to take orders.');
             }
 
+            // Check if wallet is connected and has an account
+            const connectedAccount = walletManager.getAccount();
+            if (!connectedAccount) {
+                throw new Error('Please sign in to fill order');
+            }
+
+            // Additional check to ensure signer is properly connected
+            try {
+                const signer = this.provider.getSigner();
+                await signer.getAddress(); // This will throw if not properly connected
+            } catch (error) {
+                throw new Error('Please sign in to fill order');
+            }
+
             if (button) {
                 button.disabled = true;
                 button.textContent = 'Filling...';
@@ -856,6 +883,12 @@ For Buyers:
     }
 
     cleanup() {
+        // Remove wallet listener
+        if (this.walletListener) {
+            walletManager.removeListener(this.walletListener);
+            this.walletListener = null;
+        }
+        
         // Only clear timers, keep table structure
         if (this.expiryTimers) {
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
