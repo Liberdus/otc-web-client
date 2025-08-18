@@ -1,5 +1,6 @@
 import { ViewOrders } from './ViewOrders.js';
 import { createLogger } from '../services/LogService.js';
+import { ethers } from 'ethers';
 
 export class MyOrders extends ViewOrders {
     constructor() {
