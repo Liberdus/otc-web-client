@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { getNetworkConfig } from '../config.js';
 import { erc20Abi } from '../abi/erc20.js';
 import { createLogger } from './LogService.js';
+import { tokenIconService } from './TokenIconService.js';
 
 export class WebSocketService {
     constructor() {
@@ -629,11 +630,21 @@ export class WebSocketService {
                     contract.name()
                 ]);
 
+                // Get icon URL for the token
+                let iconUrl = null;
+                try {
+                    const chainId = 137; // Polygon - TODO: might want to get this dynamically
+                    iconUrl = await tokenIconService.getIconUrl(tokenAddress, chainId);
+                } catch (err) {
+                    this.debug(`Failed to get icon for token ${tokenAddress}:`, err);
+                }
+
                 const tokenInfo = {
                     address: normalizedAddress,
                     symbol,
                     decimals: Number(decimals),
-                    name
+                    name,
+                    iconUrl: iconUrl
                 };
 
                 // Cache the result

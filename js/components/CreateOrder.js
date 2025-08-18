@@ -6,6 +6,8 @@ import { getContractAllowedTokens, getAllWalletTokens } from '../utils/contractT
 import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
 import { validateSellBalance } from '../utils/balanceValidation.js';
+import { tokenIconService } from '../services/TokenIconService.js';
+import { generateTokenIconHTML, getFallbackIconData } from '../utils/tokenIcons.js';
 
 export class CreateOrder extends BaseComponent {
     constructor() {
@@ -798,6 +800,11 @@ export class CreateOrder extends BaseComponent {
             
             this.debug('Loaded allowed tokens:', allowed);
             this.debug('Loaded not allowed tokens:', notAllowed);
+            
+            // Debug: Check if tokens have iconUrl
+            for (const token of allowed) {
+                this.debug(`Token ${token.symbol} has iconUrl: ${!!token.iconUrl}`, token.iconUrl);
+            }
 
             ['sell', 'buy'].forEach(type => {
                 const modal = document.getElementById(`${type}TokenModal`);
@@ -1034,7 +1041,7 @@ export class CreateOrder extends BaseComponent {
                                     <div class="token-item ${isAllowed ? 'token-allowed' : 'token-not-allowed'}" data-address="${token.address}">
                                         <div class="token-item-left">
                                             <div class="token-icon">
-                                                ${this.getTokenIcon(token)}
+                                                <div class="loading-spinner"></div>
                                             </div>
                                             <div class="token-item-info">
                                                 <div class="token-item-symbol">
@@ -1077,6 +1084,10 @@ export class CreateOrder extends BaseComponent {
                             tokenItem.style.cursor = 'not-allowed';
                             tokenItem.title = 'This token is not allowed for trading';
                         }
+
+                        // Render token icon asynchronously
+                        const iconContainer = tokenItem.querySelector('.token-icon');
+                        this.renderTokenIcon(token, iconContainer);
                     }
                 } catch (error) {
                     contractResult.innerHTML = `
@@ -1120,7 +1131,7 @@ export class CreateOrder extends BaseComponent {
                                         <div class="token-item token-allowed" data-address="${token.address}">
                                             <div class="token-item-left">
                                                 <div class="token-icon">
-                                                    ${this.getTokenIcon(token)}
+                                                    <div class="loading-spinner"></div>
                                                 </div>
                                                 <div class="token-item-info">
                                                     <div class="token-item-symbol">
@@ -1154,8 +1165,12 @@ export class CreateOrder extends BaseComponent {
 
                     // Add click handlers for search results
                     const tokenItems = contractResult.querySelectorAll('.token-item');
-                    tokenItems.forEach(item => {
+                    tokenItems.forEach((item, index) => {
                         item.addEventListener('click', () => this.handleTokenItemClick(type, item));
+                        
+                        // Render token icon asynchronously
+                        const iconContainer = item.querySelector('.token-icon');
+                        this.renderTokenIcon(searchResults[index], iconContainer);
                     });
                 } else {
                     contractResult.innerHTML = `
@@ -1249,8 +1264,8 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-item-content">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.logoURI ? `
-                                <img src="${token.logoURI}" 
+                            ${token.iconUrl ? `
+                                <img src="${token.iconUrl}" 
                                     alt="${token.symbol}" 
                                     class="token-icon-image"
                                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
@@ -1377,8 +1392,8 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-item-content">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.logoURI ? `
-                                <img src="${token.logoURI}" 
+                            ${token.iconUrl ? `
+                                <img src="${token.iconUrl}" 
                                     alt="${token.symbol}" 
                                     class="token-icon-image"
                                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
@@ -1435,34 +1450,54 @@ export class CreateOrder extends BaseComponent {
     }
 
     // Add helper method for token icons
-    getTokenIcon(token) {
-        if (token.iconUrl) {
+    async getTokenIcon(token) {
+        try {
+            this.debug(`Getting icon for token ${token.symbol} (${token.address})`);
+            this.debug(`Token object:`, token);
+            
+            // If token already has an iconUrl, use it
+            if (token.iconUrl) {
+                this.debug('Using existing iconUrl for token:', token.symbol, token.iconUrl);
+                return generateTokenIconHTML(token.iconUrl, token.symbol, token.address);
+            }
+            
+            // Otherwise, get icon URL from token icon service
+            const chainId = walletManager.chainId ? parseInt(walletManager.chainId, 16) : 137; // Default to Polygon
+            const iconUrl = await tokenIconService.getIconUrl(token.address, chainId);
+            
+            // Generate HTML using the utility function
+            return generateTokenIconHTML(iconUrl, token.symbol, token.address);
+        } catch (error) {
+            this.debug('Error getting token icon:', error);
+            // Fallback to basic fallback icon
+            const fallbackData = getFallbackIconData(token.address, token.symbol);
             return `
                 <div class="token-icon">
-                    <img src="${token.iconUrl}" alt="${token.symbol}" class="token-icon-image">
+                    <div class="token-icon-fallback" style="background: ${fallbackData.backgroundColor}">
+                        ${fallbackData.text}
+                    </div>
                 </div>
             `;
         }
+    }
 
-        // Fallback to letter-based icon
-        const symbol = token.symbol || '?';
-        const firstLetter = symbol.charAt(0).toUpperCase();
-        const colors = [
-            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
-            '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
-        ];
-        
-        // Generate consistent color based on address
-        const colorIndex = parseInt(token.address.slice(-6), 16) % colors.length;
-        const backgroundColor = colors[colorIndex];
-        
-        return `
-            <div class="token-icon">
-                <div class="token-icon-fallback" style="background: ${backgroundColor}">
-                    ${firstLetter}
+    // Helper method to render token icon asynchronously
+    async renderTokenIcon(token, container) {
+        try {
+            const iconHtml = await this.getTokenIcon(token);
+            container.innerHTML = iconHtml;
+        } catch (error) {
+            this.debug('Error rendering token icon:', error);
+            // Fallback to basic icon
+            const fallbackData = getFallbackIconData(token.address, token.symbol);
+            container.innerHTML = `
+                <div class="token-icon">
+                    <div class="token-icon-fallback" style="background: ${fallbackData.backgroundColor}">
+                        ${fallbackData.text}
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        }
     }
 
     cleanup() {
@@ -1717,7 +1752,6 @@ export class CreateOrder extends BaseComponent {
                 symbol: token.symbol,
                 decimals: token.decimals || 18,
                 balance: token.balance || '0',
-                logoURI: token.logoURI,
                 usdPrice: usdPrice
             };
 
@@ -1738,8 +1772,8 @@ export class CreateOrder extends BaseComponent {
                     <div class="token-selector-content">
                         <div class="token-selector-left">
                             <div class="token-icon small">
-                                ${token.logoURI ? `
-                                    <img src="${token.logoURI}" 
+                                ${token.iconUrl ? `
+                                    <img src="${token.iconUrl}" 
                                         alt="${token.symbol}" 
                                         class="token-icon-image"
                                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
@@ -1976,8 +2010,8 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-item" data-address="${token.address}">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.logoURI ? 
-                                `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
+                            ${token.iconUrl ? 
+                                `<img src="${token.iconUrl}" alt="${token.symbol}" class="token-icon-image">` :
                                 `<div class="token-icon-fallback">${token.symbol.charAt(0)}</div>`
                             }
                         </div>

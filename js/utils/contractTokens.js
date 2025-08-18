@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
+import { tokenIconService } from '../services/TokenIconService.js';
 
 // Initialize logger
 const logger = createLogger('CONTRACT_TOKENS');
@@ -45,7 +46,7 @@ export async function getContractAllowedTokens() {
         
         // Get allowed tokens from contract
         const allowedTokenAddresses = await contractService.getAllowedTokens();
-        debug(`Found ${allowedTokenAddresses.length} allowed tokens`);
+        debug(`Found ${allowedTokenAddresses.length} allowed tokens:`, allowedTokenAddresses);
 
         if (allowedTokenAddresses.length === 0) {
             debug('No allowed tokens found');
@@ -69,10 +70,30 @@ export async function getContractAllowedTokens() {
                     getUserTokenBalance(address)
                 ]);
 
+                // Get icon URL for the token
+                let iconUrl = null;
+                try {
+                    const chainId = 137; // Polygon - you might want to get this dynamically
+                    debug(`Fetching icon for token ${address} (${metadata.symbol})`);
+                    iconUrl = await tokenIconService.getIconUrl(address, chainId);
+                    debug(`Icon result for ${metadata.symbol}: ${iconUrl}`);
+                } catch (err) {
+                    debug(`Failed to get icon for token ${address} (${metadata.symbol}):`, err);
+                }
+                
+                debug(`Token ${metadata.symbol} final object:`, {
+                    address,
+                    symbol: metadata.symbol,
+                    name: metadata.name,
+                    balance: balance || '0',
+                    iconUrl: iconUrl
+                });
+
                 tokensWithData.push({
                     address,
                     ...metadata,
-                    balance: balance || '0'
+                    balance: balance || '0',
+                    iconUrl: iconUrl
                 });
                 
                 // Reset consecutive errors on success
@@ -433,10 +454,21 @@ async function getUserWalletTokens(userAddress) {
                 const balance = await getUserTokenBalance(tokenAddress);
                 if (Number(balance) > 0) {
                     const metadata = await getTokenMetadata(tokenAddress);
+                    
+                    // Get icon URL for the token
+                    let iconUrl = null;
+                    try {
+                        const chainId = 137; // Polygon - you might want to get this dynamically
+                        iconUrl = await tokenIconService.getIconUrl(tokenAddress, chainId);
+                    } catch (err) {
+                        debug(`Failed to get icon for token ${tokenAddress}:`, err);
+                    }
+                    
                     walletTokens.push({
                         address: tokenAddress,
                         ...metadata,
-                        balance: balance
+                        balance: balance,
+                        iconUrl: iconUrl
                     });
                 }
             } catch (err) {

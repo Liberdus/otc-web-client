@@ -50,8 +50,58 @@ export const DEBUG_CONFIG = {
     BASE_COMPONENT: false,
     PRICING: false,
     TOKENS: false,
+    TOKEN_ICON_SERVICE: true, // Add token icon service debugging
     TOAST: true, // Enable toast debugging for testing
     // Add more specific flags as needed
+};
+
+// Token Icon Service Configuration
+export const TOKEN_ICON_CONFIG = {
+    // CoinGecko API configuration
+    COINGECKO_API_BASE: 'https://api.coingecko.com/api/v3',
+    COINGECKO_ICON_BASE: 'https://assets.coingecko.com/coins/images',
+    
+    // CoinGecko chain mapping
+    CHAIN_ID_MAP: {
+        '1': 'ethereum',
+        '137': 'polygon-pos',
+        '56': 'binance-smart-chain',
+        '42161': 'arbitrum-one',
+        '10': 'optimistic-ethereum',
+        '43114': 'avalanche',
+        '250': 'fantom',
+        '25': 'cronos'
+    },
+    
+    // Known token mappings for Polygon (expandable)
+    KNOWN_TOKENS: {
+        "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": "usd-coin", // USDC
+        "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": "tether", // USDT
+        "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": "weth", // WETH
+        "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": "matic-network", // WMATIC
+        "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6": "wrapped-bitcoin", // WBTC
+    },
+    
+    // Special cases
+    SPECIAL_TOKENS: {
+        "0x693ed886545970f0a3adf8c59af5ccdb6ddf0a76": "assets/32.png" // Liberdus
+    },
+    
+    // Rate limiting configuration
+    RATE_LIMIT_DELAY: 100, // ms between requests
+    MAX_CACHE_SIZE: 1000, // Maximum number of cached icons
+    CACHE_EXPIRY: 24 * 60 * 60 * 1000, // 24 hours in ms
+    
+    // Icon validation configuration
+    VALIDATION_TIMEOUT: 5000, // 5 seconds timeout for icon validation
+    MAX_RETRIES: 3, // Maximum retries for failed icon requests
+    
+    // Fallback configuration
+    ENABLE_FALLBACK_ICONS: true, // Enable color-based fallback icons
+    FALLBACK_COLORS: [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+        '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+    ]
 };
 
 export const getAllNetworks = () => Object.values(networkConfig);
