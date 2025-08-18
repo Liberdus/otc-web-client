@@ -293,7 +293,8 @@ export class ViewOrders extends BaseComponent {
             // Filter orders based on status and fillable flag
             ordersToDisplay = ordersToDisplay.filter(order => {
                 const currentTime = Math.floor(Date.now() / 1000);
-                const isExpired = currentTime > order.timings.expiresAt;
+                const expiresAt = order?.timings?.expiresAt;
+                const isExpired = typeof expiresAt === 'number' ? currentTime > expiresAt : false;
                 const isActive = order.status === 'Active' && !isExpired;
                 const canFill = window.webSocket.canFillOrder(order, walletManager.getAccount());
                 const isUserOrder = order.maker?.toLowerCase() === walletManager.getAccount()?.toLowerCase();
@@ -867,7 +868,7 @@ For Buyers:
         try {
             const tr = document.createElement('tr');
             tr.dataset.orderId = order.id.toString();
-            tr.dataset.timestamp = order.timings.createdAt.toString();
+                            tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
 
             // Get token info from WebSocket cache
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
@@ -882,6 +883,18 @@ For Buyers:
                 buyTokenUsdPrice 
             } = order.dealMetrics || {};
 
+            // Fallback amount formatting if dealMetrics not yet populated
+            const safeFormattedSellAmount = typeof formattedSellAmount !== 'undefined'
+                ? formattedSellAmount
+                : (order?.sellAmount && sellTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals)
+                    : '0');
+            const safeFormattedBuyAmount = typeof formattedBuyAmount !== 'undefined'
+                ? formattedBuyAmount
+                : (order?.buyAmount && buyTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals)
+                    : '0');
+
             // Format USD prices
             const formatUsdPrice = (price) => {
                 if (!price) return '';
@@ -890,12 +903,21 @@ For Buyers:
                 return `$${price.toFixed(4)}`;
             };
 
-            // Add price-estimate class if using default price
-            const sellPriceClass = sellTokenUsdPrice ? '' : 'price-estimate';
-            const buyPriceClass = buyTokenUsdPrice ? '' : 'price-estimate';
+            // Determine prices with fallback to current pricing service map
+            const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
+                ? sellTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.sellToken) : undefined);
+            const resolvedBuyPrice = typeof buyTokenUsdPrice !== 'undefined' 
+                ? buyTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.buyToken) : undefined);
+
+            // Mark as estimate if not explicitly present in pricing map
+            const sellPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
+            const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
 
             const orderStatus = window.webSocket.getOrderStatus(order);
-            const expiryText = this.formatTimeDiff(order.timings.expiresAt - Math.floor(Date.now() / 1000));
+                            const expiryEpoch = order?.timings?.expiresAt;
+                            const expiryText = typeof expiryEpoch === 'number' ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) : 'Unknown';
 
             tr.innerHTML = `
                 <td>${order.id}</td>
@@ -906,11 +928,11 @@ For Buyers:
                         </div>
                         <div class="token-details">
                             <span>${sellTokenInfo.symbol}</span>
-                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
+                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(resolvedSellPrice)}</span>
                         </div>
                     </div>
                 </td>
-                <td>${formattedSellAmount}</td>
+                <td>${safeFormattedSellAmount}</td>
                 <td>
                     <div class="token-info">
                         <div class="token-icon">
@@ -918,22 +940,26 @@ For Buyers:
                         </div>
                         <div class="token-details">
                             <span>${buyTokenInfo.symbol}</span>
-                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
+                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(resolvedBuyPrice)}</span>
                         </div>
                     </div>
                 </td>
-                <td>${formattedBuyAmount}</td>
+                <td>${safeFormattedBuyAmount}</td>
                 <td>${(deal || 0).toFixed(6)}</td>
                 <td>${expiryText}</td>
                 <td class="order-status">${orderStatus}</td>
                 <td class="action-column"></td>`;
 
-            // Render token icons asynchronously
-            const sellTokenIconContainer = tr.querySelector('.token-info:first-child .token-icon');
-            const buyTokenIconContainer = tr.querySelector('.token-info:last-child .token-icon');
+            // Render token icons asynchronously (target explicit columns)
+            const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
+            const buyTokenIconContainer = tr.querySelector('td:nth-child(4) .token-icon');
             
-            this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
-            this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
+            if (sellTokenIconContainer) {
+                this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
+            }
+            if (buyTokenIconContainer) {
+                this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
+            }
 
             // Start expiry timer for this row
             this.startExpiryTimer(tr);
@@ -1002,8 +1028,9 @@ For Buyers:
             if (!order) return;
 
             const currentTime = Math.floor(Date.now() / 1000);
-            const isExpired = currentTime > order.timings.expiresAt;
-            const timeDiff = order.timings.expiresAt - currentTime;
+            const expiresAt = order?.timings?.expiresAt;
+            const isExpired = typeof expiresAt === 'number' ? currentTime > expiresAt : false;
+            const timeDiff = typeof expiresAt === 'number' ? expiresAt - currentTime : 0;
             const currentAccount = walletManager.getAccount()?.toLowerCase();
             const isUserOrder = order.maker?.toLowerCase() === currentAccount;
 

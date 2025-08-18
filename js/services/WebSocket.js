@@ -140,6 +140,13 @@ export class WebSocketService {
                         this.debug('Price update received, updating all deals...');
                         this.updateAllDeals();
                     });
+                    // Trigger initial allowed token price fetch after contract is ready
+                    try {
+                        await window.pricingService.getAllowedTokens();
+                        await window.pricingService.fetchAllowedTokensPrices();
+                    } catch (err) {
+                        this.debug('Initial allowed token fetch after WS init failed:', err);
+                    }
                 } else {
                     this.debug('Warning: PricingService not available');
                 }
@@ -235,7 +242,7 @@ export class WebSocketService {
                         id: orderData.id,
                         maker: orderData.maker,
                         status: orderData.status,
-                        timestamp: orderData.timings.createdAt
+                        timestamp: orderData.timings?.createdAt || 0
                     });
                     
                     // Notify subscribers
@@ -396,7 +403,14 @@ export class WebSocketService {
                                 timestamp: order.timestamp.toNumber(),
                                 status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
                                 orderCreationFee: order.orderCreationFee,
-                                tries: order.tries
+                                tries: order.tries,
+                                timings: {
+                                    createdAt: order.timestamp.toNumber(),
+                                    expiresAt: order.timestamp.toNumber() + (this.orderExpiry ? this.orderExpiry.toNumber() : 604800), // Default 7 days
+                                    graceEndsAt: order.timestamp.toNumber() +
+                                        (this.orderExpiry ? this.orderExpiry.toNumber() : 604800) +
+                                        (this.gracePeriod ? this.gracePeriod.toNumber() : 604800) // Default 7 + 7 days
+                                }
                             };
                             this.orderCache.set(i, orderData);
                             this.debug('Added order to cache:', orderData);
@@ -694,7 +708,7 @@ export class WebSocketService {
     // Use this to determine to provide a fill button in the UI
     canFillOrder(order, currentAccount) {
         if (order.status !== 'Active') return false;
-        if (Date.now()/1000 > order.timings.expiresAt) return false;
+        if (order.timings?.expiresAt && Date.now()/1000 > order.timings.expiresAt) return false;
         if (order.maker?.toLowerCase() === currentAccount?.toLowerCase()) return false;
         return order.taker === ethers.constants.AddressZero || 
                order.taker?.toLowerCase() === currentAccount?.toLowerCase();
@@ -704,7 +718,7 @@ export class WebSocketService {
     // Use this to determine to provide a cancel button in the UI
     canCancelOrder(order, currentAccount) {
         if (order.status !== 'Active') return false;
-        if (Date.now()/1000 > order.timings.graceEndsAt) return false;
+        if (order.timings?.graceEndsAt && Date.now()/1000 > order.timings.graceEndsAt) return false;
         return order.maker?.toLowerCase() === currentAccount?.toLowerCase();
     }
 
@@ -718,11 +732,11 @@ export class WebSocketService {
         // Then check timing using cached timings
         const currentTime = Math.floor(Date.now() / 1000);
 
-        if (currentTime > order.timings.graceEndsAt) {
+                    if (order.timings?.graceEndsAt && currentTime > order.timings.graceEndsAt) {
             this.debug('Order not active: Past grace period');
             return '';
         }
-        if (currentTime > order.timings.expiresAt) {
+                    if (order.timings?.expiresAt && currentTime > order.timings.expiresAt) {
             this.debug('Order status: Awaiting Clean');
             return 'Expired';
         }

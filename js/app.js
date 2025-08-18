@@ -9,6 +9,7 @@ import { TakerOrders } from './components/TakerOrders.js';
 import { Cleanup } from './components/Cleanup.js';
 import { ContractParams } from './components/ContractParams.js';
 import { PricingService } from './services/PricingService.js';
+import { contractService } from './services/ContractService.js';
 import { createLogger } from './services/LogService.js';
 import { DebugPanel } from './components/DebugPanel.js';
 import { getToast, showError, showSuccess, showWarning, showInfo } from './components/Toast.js';
@@ -141,7 +142,8 @@ class App {
 					this.updateTabVisibility(true);
 					// When connected, default to create-order to avoid flicker between tabs
 					this.currentTab = 'create-order';
-					await this.reinitializeComponents(false);
+					// Preserve WebSocket order cache to avoid clearing orders on connect
+					await this.reinitializeComponents(true);
 					break;
 				}
 				case 'disconnect': {
@@ -327,18 +329,17 @@ class App {
 	async initializePricingService() {
 		try {
 			this.debug('Initializing pricing service...');
+			// Ensure contract service is initialized before use
+			try {
+				contractService.initialize();
+			} catch (e) {
+				this.debug('ContractService initialize skipped/failed:', e);
+			}
 			// Initialize PricingService first and make it globally available
 			window.pricingService = new PricingService();
 			
-			// Fetch allowed tokens and their prices
-			try {
-				await window.pricingService.getAllowedTokens();
-				await window.pricingService.fetchAllowedTokensPrices();
-				this.debug('Allowed tokens prices fetched successfully');
-			} catch (error) {
-				this.debug('Error fetching allowed tokens prices:', error);
-				// Continue initialization even if price fetching fails
-			}
+			// Defer allowed token fetch until WebSocket/contract is ready
+			// The pricing service will refresh later when WebSocket finishes init
 			
 			await window.pricingService.initialize();
 			this.debug('Pricing service initialized');
@@ -623,8 +624,20 @@ class App {
 			// Reinitialize all components in connected mode
 			await this.initializeComponents(false);
 			
+			// Ensure WebSocket is initialized and synced when preserving orders
+			if (preserveOrders && window.webSocket) {
+				try {
+					await window.webSocket.waitForInitialization();
+					if (window.webSocket.orderCache.size === 0) {
+						await window.webSocket.syncAllOrders();
+					}
+				} catch (e) {
+					this.debug('WebSocket not ready during reinit (preserveOrders)', e);
+				}
+			}
+			
 			// Re-show the current tab
-			await this.showTab(this.currentTab);
+			await this.showTab(this.currentTab, !window.walletManager?.isWalletConnected());
 			
 			this.debug('Components reinitialized');
 		} catch (error) {
@@ -682,11 +695,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 	try {
 		window.app.load();
 		
-		// Add network config button event listener here
-		const networkConfigButton = document.querySelector('.network-config-button');
-		if (networkConfigButton) {
-			networkConfigButton.addEventListener('click', showAppParametersPopup);
-		}
+		// Add network config button event listener here (element doesn't exist in HTML, so commented out)
+		// const networkConfigButton = document.querySelector('.network-config-button');
+		// if (networkConfigButton) {
+		// 	networkConfigButton.addEventListener('click', showAppParametersPopup);
+		// }
 		
 		window.app.debug('Initialization complete');
 	} catch (error) {
@@ -695,9 +708,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Network selector functionality
-const networkButton = document.querySelector('.network-button');
-const networkDropdown = document.querySelector('.network-dropdown');
-const networkBadge = document.querySelector('.network-badge');
+let networkButton, networkDropdown, networkBadge;
 
 // Dynamically populate network options
 const populateNetworkOptions = () => {
@@ -757,8 +768,13 @@ const populateNetworkOptions = () => {
 	});
 };
 
-// Initialize network dropdown
-populateNetworkOptions();
+// Initialize network dropdown when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+	networkButton = document.querySelector('.network-button');
+	networkDropdown = document.querySelector('.network-dropdown');
+	networkBadge = document.querySelector('.network-badge');
+	populateNetworkOptions();
+});
 
 // Function to show application parameters in a popup
 function showAppParametersPopup() {

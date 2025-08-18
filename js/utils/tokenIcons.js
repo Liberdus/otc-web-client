@@ -110,14 +110,14 @@ export function generateTokenIconHTML(iconUrl, symbol, address, size = 'normal')
                 <div class="token-icon${sizeClass}">
                     <img src="${iconUrl}" alt="${symbol}" class="token-icon-image" 
                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                    ${generateFallbackIconHTML(symbol, address, size)}
+                    ${generateFallbackIconHTML(symbol, address, size, true)}
                 </div>
             `;
         } else {
             // Use fallback icon
             return `
                 <div class="token-icon${sizeClass}">
-                    ${generateFallbackIconHTML(symbol, address, size)}
+                    ${generateFallbackIconHTML(symbol, address, size, false)}
                 </div>
             `;
         }
@@ -134,12 +134,13 @@ export function generateTokenIconHTML(iconUrl, symbol, address, size = 'normal')
  * @param {string} size - Icon size
  * @returns {string} HTML string for fallback icon
  */
-function generateFallbackIconHTML(symbol, address, size) {
+function generateFallbackIconHTML(symbol, address, size, forceHidden = false) {
     const fallbackData = getFallbackIconData(address, symbol);
     const sizeClass = size !== 'normal' ? ` ${size}` : '';
+    const displayStyle = forceHidden ? 'display: none; ' : '';
     
     return `
-        <div class="token-icon-fallback${sizeClass}" style="background: ${fallbackData.backgroundColor}">
+        <div class="token-icon-fallback${sizeClass}" style="${displayStyle}background: ${fallbackData.backgroundColor}">
             ${fallbackData.text}
         </div>
     `;

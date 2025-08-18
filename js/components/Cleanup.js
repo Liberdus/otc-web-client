@@ -206,10 +206,11 @@ export class Cleanup extends BaseComponent {
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
             
-            // Filter eligible orders
-            const eligibleOrders = orders.filter(order => 
-                currentTime > order.timings.graceEndsAt
-            );
+            // Filter eligible orders (defensive against missing timings)
+            const eligibleOrders = orders.filter(order => {
+                const graceEndsAt = order?.timings?.graceEndsAt;
+                return typeof graceEndsAt === 'number' && currentTime > graceEndsAt;
+            });
 
             // Get the first order that will be cleaned (lowest ID)
             const nextOrderToClean = eligibleOrders.length > 0 
@@ -384,9 +385,10 @@ export class Cleanup extends BaseComponent {
 
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
-            const eligibleOrders = orders.filter(order => 
-                currentTime > order.timings.graceEndsAt
-            );
+            const eligibleOrders = orders.filter(order => {
+                const graceEndsAt = order?.timings?.graceEndsAt;
+                return typeof graceEndsAt === 'number' && currentTime > graceEndsAt;
+            });
 
             if (eligibleOrders.length === 0) {
                 throw new Error('No eligible orders to clean');

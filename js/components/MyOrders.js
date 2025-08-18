@@ -531,8 +531,8 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
             // Create the row element first
             const tr = document.createElement('tr');
             tr.dataset.orderId = order.id.toString();
-            tr.dataset.timestamp = order.timings.createdAt.toString();
-            
+            tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
+
             // Get token info from WebSocket cache
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
             const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
@@ -546,6 +546,18 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 buyTokenUsdPrice 
             } = order.dealMetrics || {};
 
+            // Fallback amount formatting if dealMetrics not yet populated
+            const safeFormattedSellAmount = typeof formattedSellAmount !== 'undefined'
+                ? formattedSellAmount
+                : (order?.sellAmount && sellTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals)
+                    : '0');
+            const safeFormattedBuyAmount = typeof formattedBuyAmount !== 'undefined'
+                ? formattedBuyAmount
+                : (order?.buyAmount && buyTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals)
+                    : '0');
+
             // Format USD prices with appropriate precision
             const formatUsdPrice = (price) => {
                 if (!price) return '';
@@ -554,30 +566,21 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 return `$${price.toFixed(4)}`;
             };
 
-            // Format expiry time
-            const formatTimeDiff = (seconds) => {
-                const days = Math.floor(Math.abs(seconds) / 86400);
-                const hours = Math.floor((Math.abs(seconds) % 86400) / 3600);
-                const minutes = Math.floor((Math.abs(seconds) % 3600) / 60);
-                
-                const prefix = seconds < 0 ? '-' : '';
-                
-                if (days > 0) {
-                    return `${prefix}${days}D ${hours}H ${minutes}M`;
-                } else if (hours > 0) {
-                    return `${prefix}${hours}H ${minutes}M`;
-                } else {
-                    return `${prefix}${minutes}M`;
-                }
-            };
+            // Determine prices with fallback to current pricing service map
+            const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
+                ? sellTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.sellToken) : undefined);
+            const resolvedBuyPrice = typeof buyTokenUsdPrice !== 'undefined' 
+                ? buyTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.buyToken) : undefined);
+
+            // Mark as estimate if not explicitly present in pricing map
+            const sellPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
+            const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
 
             const currentTime = Math.floor(Date.now() / 1000);
-            const timeUntilExpiry = order.timings.expiresAt - currentTime;
-            const expiryText = formatTimeDiff(timeUntilExpiry);
-
-            // Add price-estimate class if using default price
-            const sellPriceClass = sellTokenUsdPrice ? '' : 'price-estimate';
-            const buyPriceClass = buyTokenUsdPrice ? '' : 'price-estimate';
+            const timeUntilExpiry = order?.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
+            const expiryText = this.formatTimeDiff(timeUntilExpiry);
 
             // Get order status from WebSocket cache
             const orderStatus = window.webSocket.getOrderStatus(order);
@@ -586,24 +589,24 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 <td>${order.id}</td>
                 <td>
                     <div class="token-info">
-                        ${this.getTokenIcon(sellTokenInfo)}
+                        <div class="token-icon"><div class="loading-spinner"></div></div>
                         <div class="token-details">
                             <span>${sellTokenInfo.symbol}</span>
-                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
+                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(resolvedSellPrice)}</span>
                         </div>
                     </div>
                 </td>
-                <td>${formattedSellAmount}</td>
+                <td>${safeFormattedSellAmount}</td>
                 <td>
                     <div class="token-info">
-                        ${this.getTokenIcon(buyTokenInfo)}
+                        <div class="token-icon"><div class="loading-spinner"></div></div>
                         <div class="token-details">
                             <span>${buyTokenInfo.symbol}</span>
-                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
+                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(resolvedBuyPrice)}</span>
                         </div>
                     </div>
                 </td>
-                <td>${formattedBuyAmount}</td>
+                <td>${safeFormattedBuyAmount}</td>
                 <td>${(deal || 0).toFixed(6)}</td>
                 <td>${expiryText}</td>
                 <td class="order-status">${orderStatus}</td>
@@ -686,6 +689,16 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 actionCell.textContent = '-';
             }
 
+            // Render token icons asynchronously (match column positions)
+            const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
+            const buyTokenIconContainer = tr.querySelector('td:nth-child(4) .token-icon');
+            if (sellTokenIconContainer) {
+                this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
+            }
+            if (buyTokenIconContainer) {
+                this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
+            }
+
             // Start the expiry timer
             this.startExpiryTimer(tr);
 
@@ -758,7 +771,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
             if (!order) return;
 
             const currentTime = Math.floor(Date.now() / 1000);
-            const timeDiff = order.timings.expiresAt - currentTime;
+                            const timeDiff = order.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
             const currentAccount = window.walletManager.getAccount()?.toLowerCase();
 
             // Update expiry text
@@ -820,7 +833,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 }
             } else if (order.maker?.toLowerCase() === currentAccount) {
                 actionCell.innerHTML = '<span class="your-order">Your Order</span>';
-            } else if (currentTime > order.timings.expiresAt) {
+            } else if (order.timings?.expiresAt && currentTime > order.timings.expiresAt) {
                 actionCell.innerHTML = '<span class="expired-order">Expired</span>';
             } else {
                 actionCell.textContent = '-';

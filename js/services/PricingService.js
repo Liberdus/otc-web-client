@@ -385,6 +385,13 @@ export class PricingService {
     async getAllowedTokens() {
         try {
             this.debug('Fetching allowed tokens from contract...');
+            // If WebSocket/contract not ready yet, return empty list gracefully
+            if (!window.webSocket?.contract) {
+                this.warn('Contract not available yet; skipping allowed tokens fetch');
+                this.allowedTokens.clear();
+                this.allowedTokensLastFetched = Date.now();
+                return [];
+            }
             const allowedTokenAddresses = await contractService.getAllowedTokens();
             
             // Update allowed tokens set
