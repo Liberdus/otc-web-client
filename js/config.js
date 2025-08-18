@@ -213,9 +213,20 @@ export class WalletManager {
                 const accounts = await window.ethereum.request({ method: 'eth_accounts' });
                 if (accounts.length > 0) {
                     this.debug('Auto-connecting to existing MetaMask session');
-                    await this.initializeSigner(accounts[0]);
+                    // Ensure internal state reflects connected session
+                    this.account = accounts[0];
                     const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                    this.chainId = chainId;
+                    // Enforce default network behavior on reload (same as connect flow)
                     this.handleChainChanged(chainId);
+                    this.isConnected = true;
+                    // Initialize signer and contract for the session
+                    await this.initializeSigner(this.account);
+                    // Notify listeners so UI can react as connected
+                    this.notifyListeners('connect', {
+                        account: this.account,
+                        chainId: this.chainId
+                    });
                 }
             } else {
                 this.debug('User has manually disconnected, skipping auto-connect');
