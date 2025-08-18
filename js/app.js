@@ -15,6 +15,7 @@ import { DebugPanel } from './components/DebugPanel.js';
 import { getToast, showError, showSuccess, showWarning, showInfo } from './components/Toast.js';
 import { Footer } from './components/Footer.js';
 import { Intro } from './components/Intro.js';
+import { versionService } from './services/VersionService.js';
 
 class App {
 	constructor() {
@@ -693,6 +694,9 @@ window.getToast = getToast;
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
 	try {
+		// Check version first, before anything else happens
+		await versionService.initialize();
+		
 		window.app.load();
 		
 		// Add network config button event listener here (element doesn't exist in HTML, so commented out)
