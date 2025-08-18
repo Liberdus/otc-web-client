@@ -329,6 +329,17 @@ class App {
 			this.debug('Initializing pricing service...');
 			// Initialize PricingService first and make it globally available
 			window.pricingService = new PricingService();
+			
+			// Fetch allowed tokens and their prices
+			try {
+				await window.pricingService.getAllowedTokens();
+				await window.pricingService.fetchAllowedTokensPrices();
+				this.debug('Allowed tokens prices fetched successfully');
+			} catch (error) {
+				this.debug('Error fetching allowed tokens prices:', error);
+				// Continue initialization even if price fetching fails
+			}
+			
 			await window.pricingService.initialize();
 			this.debug('Pricing service initialized');
 		} catch (error) {

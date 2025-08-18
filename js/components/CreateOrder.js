@@ -801,6 +801,19 @@ export class CreateOrder extends BaseComponent {
             this.debug('Loaded allowed tokens:', allowed);
             this.debug('Loaded not allowed tokens:', notAllowed);
             
+            // Trigger price fetching for allowed tokens
+            if (window.pricingService && allowed.length > 0) {
+                try {
+                    this.debug('Triggering price fetching for allowed tokens...');
+                    const allowedAddresses = allowed.map(token => token.address);
+                    await window.pricingService.fetchPricesForTokens(allowedAddresses);
+                    this.debug('Price fetching completed for allowed tokens');
+                } catch (error) {
+                    this.debug('Error fetching prices for allowed tokens:', error);
+                    // Continue with token loading even if price fetching fails
+                }
+            }
+            
             // Debug: Check if tokens have iconUrl
             for (const token of allowed) {
                 this.debug(`Token ${token.symbol} has iconUrl: ${!!token.iconUrl}`, token.iconUrl);
@@ -1714,7 +1727,7 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    handleTokenSelect(type, token) {
+    async handleTokenSelect(type, token) {
         try {
             this.debug(`Token selected for ${type}:`, token);
             
@@ -1730,13 +1743,33 @@ export class CreateOrder extends BaseComponent {
                 return;
             }
             
-            // Get USD price from pricing service
+            // Enhanced price fetching with loading states
             this.debug('Pricing service state:', {
                 exists: !!window.pricingService,
                 hasGetPrice: !!window.pricingService?.getPrice,
                 tokenAddress: token.address
             });
-            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+            
+            let usdPrice = 0;
+            let isPriceEstimated = true;
+            
+            if (window.pricingService) {
+                usdPrice = window.pricingService.getPrice(token.address) || 0;
+                isPriceEstimated = window.pricingService.isPriceEstimated(token.address);
+                
+                // If price is estimated, try to fetch it
+                if (isPriceEstimated) {
+                    this.debug(`Price for ${token.symbol} is estimated, attempting to fetch...`);
+                    try {
+                        await window.pricingService.fetchPricesForTokens([token.address]);
+                        usdPrice = window.pricingService.getPrice(token.address) || 0;
+                        isPriceEstimated = window.pricingService.isPriceEstimated(token.address);
+                        this.debug(`Updated price for ${token.symbol}: $${usdPrice} (estimated: ${isPriceEstimated})`);
+                    } catch (error) {
+                        this.debug(`Failed to fetch price for ${token.symbol}:`, error);
+                    }
+                }
+            }
             // Handle zero balance case
             const balance = parseFloat(token.balance) || 0;
             const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
@@ -1862,7 +1895,7 @@ export class CreateOrder extends BaseComponent {
                         return;
                     }
                     
-                    this.handleTokenSelect(type, token);
+                    await this.handleTokenSelect(type, token);
                     
                     // Close the modal after selection
                     const modal = document.getElementById(`${type}TokenModal`);

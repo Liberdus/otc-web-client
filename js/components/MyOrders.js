@@ -1,11 +1,11 @@
 import { ViewOrders } from './ViewOrders.js';
-import { PricingService } from '../services/PricingService.js';
 import { createLogger } from '../services/LogService.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
-        this.pricingService = new PricingService();
+        // Use global pricing service instead of local instance
+        this.pricingService = window.pricingService;
         
         // Initialize logger
         const logger = createLogger('MY_ORDERS');
@@ -277,6 +277,7 @@ export class MyOrders extends ViewOrders {
                     <div class="refresh-container">
                         <button id="refresh-prices-btn" class="refresh-prices-button">↻ Refresh Prices</button>
                         <span class="refresh-status"></span>
+                        <span class="last-updated" id="last-updated-timestamp"></span>
                     </div>
                     ${paginationControls}
                 </div>
@@ -411,6 +412,10 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
         // Add refresh button functionality
         const refreshButton = this.container.querySelector('#refresh-prices-btn');
         const statusIndicator = this.container.querySelector('.refresh-status');
+        const lastUpdatedElement = this.container.querySelector('#last-updated-timestamp');
+        
+        // Initialize last updated timestamp
+        this.updateLastUpdatedTimestamp(lastUpdatedElement);
         
         let refreshTimeout;
         if (refreshButton) {
@@ -427,6 +432,8 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                     if (result.success) {
                         statusIndicator.className = 'refresh-status success';
                         statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                        // Update timestamp after successful refresh
+                        this.updateLastUpdatedTimestamp(lastUpdatedElement);
                     } else {
                         statusIndicator.className = 'refresh-status error';
                         statusIndicator.textContent = result.message;
@@ -502,6 +509,20 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 this.currentPage = 1; // Reset to first page when sort changes
                 this.refreshOrdersView();
             });
+        }
+    }
+
+    // Update last updated timestamp
+    updateLastUpdatedTimestamp(element) {
+        if (!element || !this.pricingService) return;
+        
+        const lastUpdateTime = this.pricingService.getLastUpdateTime();
+        if (lastUpdateTime && lastUpdateTime !== 'Never') {
+            element.textContent = `Last updated: ${lastUpdateTime}`;
+            element.style.display = 'inline';
+        } else {
+            element.textContent = 'No prices loaded yet';
+            element.style.display = 'inline';
         }
     }
 

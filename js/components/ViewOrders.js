@@ -3,7 +3,6 @@ import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 import { getNetworkConfig } from '../config.js';
-import { PricingService } from '../services/PricingService.js';
 import { walletManager } from '../config.js';
 import { createLogger } from '../services/LogService.js';
 import { tokenIconService } from '../services/TokenIconService.js';
@@ -42,18 +41,20 @@ export class ViewOrders extends BaseComponent {
         // Add loading state
         this.isLoading = false;
 
-        // Add pricing service
-        this.pricingService = new PricingService();
+        // Use global pricing service instead of local instance
+        this.pricingService = window.pricingService;
 
-        // Subscribe to pricing updates
-        this.pricingService.subscribe((event) => {
-            if (event === 'refreshComplete') {
-                this.debug('Prices updated, refreshing orders view');
-                this.refreshOrdersView().catch(error => {
-                    this.error('Error refreshing orders after price update:', error);
-                });
-            }
-        });
+        // Subscribe to pricing updates from global service
+        if (window.pricingService) {
+            window.pricingService.subscribe((event) => {
+                if (event === 'refreshComplete') {
+                    this.debug('Prices updated, refreshing orders view');
+                    this.refreshOrdersView().catch(error => {
+                        this.error('Error refreshing orders after price update:', error);
+                    });
+                }
+            });
+        }
 
         // Subscribe to WebSocket updates
         if (window.webSocket) {
@@ -143,6 +144,20 @@ export class ViewOrders extends BaseComponent {
             this.debug('Error rendering token icon:', error);
             // Fallback to basic icon
             container.innerHTML = generateTokenIconHTML('fallback', token.symbol, token.address);
+        }
+    }
+
+    // Update last updated timestamp
+    updateLastUpdatedTimestamp(element) {
+        if (!element || !this.pricingService) return;
+        
+        const lastUpdateTime = this.pricingService.getLastUpdateTime();
+        if (lastUpdateTime && lastUpdateTime !== 'Never') {
+            element.textContent = `Last updated: ${lastUpdateTime}`;
+            element.style.display = 'inline';
+        } else {
+            element.textContent = 'No prices loaded yet';
+            element.style.display = 'inline';
         }
     }
 
@@ -495,6 +510,7 @@ For Buyers:
                 <div class="refresh-container">
                     <button id="refresh-prices-btn" class="refresh-prices-button">↻ Refresh Prices</button>
                     <span class="refresh-status"></span>
+                    <span class="last-updated" id="last-updated-timestamp"></span>
                 </div>
 
                 <div class="pagination-controls">
@@ -512,6 +528,10 @@ For Buyers:
         // Setup refresh button functionality
         const refreshButton = bottomControls.querySelector('#refresh-prices-btn');
         const statusIndicator = bottomControls.querySelector('.refresh-status');
+        const lastUpdatedElement = bottomControls.querySelector('#last-updated-timestamp');
+        
+        // Initialize last updated timestamp
+        this.updateLastUpdatedTimestamp(lastUpdatedElement);
         
         let refreshTimeout;
         refreshButton.addEventListener('click', async () => {
@@ -527,6 +547,8 @@ For Buyers:
                 if (result.success) {
                     statusIndicator.className = 'refresh-status success';
                     statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                    // Update timestamp after successful refresh
+                    this.updateLastUpdatedTimestamp(lastUpdatedElement);
                     await this.refreshOrdersView();
                 } else {
                     statusIndicator.className = 'refresh-status error';

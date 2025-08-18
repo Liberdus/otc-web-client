@@ -586,6 +586,7 @@
   align-items: center;
   gap: 8px;
   min-width: 300px;
+  position: relative;
 }
 
 .refresh-prices-button {
@@ -623,6 +624,11 @@
   margin-left: 8px;
   white-space: nowrap;
   color: var(--text-secondary-color);
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 
 .refresh-status.success {
@@ -631,6 +637,16 @@
 
 .refresh-status.error {
   color: var(--error-color);
+}
+
+/* Phase 3: Last updated timestamp styling */
+.last-updated {
+  font-size: 12px;
+  color: var(--text-secondary-color);
+  margin-left: 8px;
+  white-space: nowrap;
+  opacity: 0.8;
+  font-style: italic;
 }
 
 /* These CSS variables should be defined in your theme CSS */
