@@ -957,7 +957,7 @@ export class CreateOrder extends BaseComponent {
         modal.innerHTML = `
             <div class="token-modal-content">
                 <div class="token-modal-header">
-                    <h3>Select Token</h3>
+                    <h3>Select ${type.charAt(0).toUpperCase() + type.slice(1)} Token</h3>
                     <button class="token-modal-close">&times;</button>
                 </div>
                 <div class="token-modal-search">
@@ -1250,7 +1250,12 @@ export class CreateOrder extends BaseComponent {
             const balance = Number(token.balance) || 0;
             const hasBalance = balance > 0;
             
-            tokenElement.className = `token-item ${hasBalance ? 'token-has-balance' : 'token-no-balance'}`;
+            // For buy tokens, don't grey out tokens with no balance and don't add border classes
+            if (type === 'buy') {
+                tokenElement.className = 'token-item';
+            } else {
+                tokenElement.className = `token-item ${hasBalance ? 'token-has-balance' : 'token-no-balance'}`;
+            }
             
             // For sell tokens, add disabled class if no balance
             if (type === 'sell' && !hasBalance) {

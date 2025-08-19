@@ -1242,6 +1242,16 @@
   opacity: 0.7;
 }
 
+/* Buy token modal specific styling - remove borders and ensure consistent hover */
+#buyTokenModal .token-item {
+  border-left: none !important;
+}
+
+#buyTokenModal .token-item:hover {
+  background-color: var(--bg-tertiary) !important;
+  opacity: 1 !important;
+}
+
 .token-not-allowed {
   border-left: 3px solid #ef4444;
   opacity: 0.8;
