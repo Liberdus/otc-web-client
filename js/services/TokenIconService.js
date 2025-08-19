@@ -109,6 +109,11 @@ export class TokenIconService {
                 const cachedData = this.cache.get(cacheKey);
                 if (this.isCacheValid(cachedData.timestamp)) {
                     debug('Icon found in memory cache:', normalizedAddress);
+                    // If cached iconUrl is null (unknown token), return fallback
+                    if (cachedData.iconUrl === null) {
+                        debug('Cached unknown token, using fallback icon');
+                        return this.getFallbackIconData(tokenAddress);
+                    }
                     return cachedData.iconUrl;
                 } else {
                     // Remove expired cache entry
@@ -184,6 +189,19 @@ export class TokenIconService {
                                 this.cacheTimestamps.set(cacheKey, cacheData.timestamp);
                                 this.saveCacheToStorage();
                                 return iconUrl;
+                            } else {
+                                // If iconUrl is null, it means the token is unknown
+                                // Cache this result to prevent infinite retries
+                                debug(`Token ${tokenAddress} is unknown, caching result to prevent retries`);
+                                const cacheData = {
+                                    iconUrl: null,
+                                    timestamp: Date.now(),
+                                    isUnknown: true
+                                };
+                                this.cache.set(cacheKey, cacheData);
+                                this.cacheTimestamps.set(cacheKey, cacheData.timestamp);
+                                this.saveCacheToStorage();
+                                break; // Exit the retry loop for unknown tokens
                             }
                         } catch (error) {
                             retryCount++;
