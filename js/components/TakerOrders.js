@@ -13,6 +13,8 @@ export class TakerOrders extends ViewOrders {
         this.warn = logger.warn.bind(logger);
     }
 
+
+
     async refreshOrdersView() {
         if (this.isLoading) return;
         this.isLoading = true;
@@ -23,8 +25,20 @@ export class TakerOrders extends ViewOrders {
             // Get current user address
             const userAddress = await window.walletManager.getAccount();
             if (!userAddress) {
-                this.warn('No wallet connected');
-                throw new Error('No wallet connected');
+                this.debug('No wallet connected, showing empty state');
+                // Show empty state for taker orders when no wallet is connected
+                const tbody = this.container.querySelector('tbody');
+                if (tbody) {
+                    tbody.innerHTML = `
+                        <tr class="empty-message">
+                            <td colspan="8" class="no-orders-message">
+                                <div class="placeholder-text">
+                                    Please connect your wallet to view your taker orders
+                                </div>
+                            </td>
+                        </tr>`;
+                }
+                return; // Exit early without throwing error
             }
 
             // Get all orders and filter for taker
