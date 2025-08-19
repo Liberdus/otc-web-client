@@ -10,6 +10,9 @@ import { tokenIconService } from '../services/TokenIconService.js';
 import { generateTokenIconHTML, getFallbackIconData } from '../utils/tokenIcons.js';
 
 export class CreateOrder extends BaseComponent {
+    // Liberdus token address constant
+    static LIBERDUS_ADDRESS = '0x693ed886545970f0a3adf8c59af5ccdb6ddf0a76';
+    
     constructor() {
         super('create-order');
         this.contract = null;
@@ -500,6 +503,15 @@ export class CreateOrder extends BaseComponent {
             // Check if the same token is selected for both buy and sell
             if (this.sellToken.address.toLowerCase() === this.buyToken.address.toLowerCase()) {
                 this.showError(`Cannot create an order with the same token (${this.sellToken.symbol}) for both buy and sell. Please select different tokens.`);
+                return;
+            }
+
+            // Validate that one of the tokens must be Liberdus (LIB)
+            const sellTokenIsLiberdus = this.isLiberdusToken(this.sellToken.address);
+            const buyTokenIsLiberdus = this.isLiberdusToken(this.buyToken.address);
+            
+            if (!sellTokenIsLiberdus && !buyTokenIsLiberdus) {
+                this.showError('One of the tokens must be Liberdus (LIB). Please select Liberdus as either the buy or sell token.');
                 return;
             }
 
@@ -1460,6 +1472,11 @@ export class CreateOrder extends BaseComponent {
             return '#';
         }
         return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
+    }
+
+    // Helper method to check if a token is Liberdus
+    isLiberdusToken(tokenAddress) {
+        return tokenAddress.toLowerCase() === CreateOrder.LIBERDUS_ADDRESS.toLowerCase();
     }
 
     // Add helper method for token icons
