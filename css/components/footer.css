@@ -87,29 +87,84 @@
   margin-bottom: 0;
 }
 
-.intro-note {
-  padding: 12px 16px;
-  background: #e3f2fd;
-  border: 1px solid #bbdefb;
-  border-radius: 8px;
+/* FAQ Section Styles */
+.faq-section {
+  margin-top: 32px;
   text-align: center;
-  grid-column: 1 / -1;
 }
 
-.intro-note p {
-  margin: 0;
-  color: #1976d2;
-  font-weight: 500;
+.faq-toggle {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  padding: 12px 20px;
   font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
-[data-theme="dark"] .intro-note {
-  background: #1a237e;
-  border-color: #3f51b5;
+.faq-toggle .chevron {
+  transition: transform 0.2s ease;
 }
 
-[data-theme="dark"] .intro-note p {
-  color: #90caf9;
+.faq-toggle.expanded .chevron {
+  transform: rotate(180deg);
+}
+
+.faq-toggle:hover {
+  background: var(--bg-secondary, #f5f5f5);
+  border-color: var(--border-hover, #ccc);
+}
+
+[data-theme="dark"] .faq-toggle:hover {
+  background: var(--bg-secondary, #2a2a2a);
+  border-color: var(--border-hover, #555);
+}
+
+.faq-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  margin-top: 16px;
+}
+
+.faq-content.expanded {
+  max-height: 2000px;
+}
+
+.faq-item {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.faq-item:last-child {
+  margin-bottom: 0;
+}
+
+.faq-item h4 {
+  color: var(--text-primary);
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.faq-item p {
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.6;
+  font-size: 14px;
 }
 
 /* Responsive design for smaller screens */
@@ -131,5 +186,22 @@
 
   .intro-section li {
     font-size: 12px;
+  }
+
+  .faq-item {
+    padding: 16px;
+  }
+
+  .faq-item h4 {
+    font-size: 14px;
+  }
+
+  .faq-item p {
+    font-size: 13px;
+  }
+
+  .faq-toggle {
+    padding: 10px 16px;
+    font-size: 13px;
   }
 }
