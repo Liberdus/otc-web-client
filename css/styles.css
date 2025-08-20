@@ -104,6 +104,11 @@ body {
   display: none !important;
 }
 
+/* Preserve layout while hiding visually */
+.is-hidden {
+  visibility: hidden !important;
+}
+
 .main-content {
   display: none; /* Hide initially */
   padding: 0;
