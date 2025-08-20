@@ -447,21 +447,21 @@ export class CreateOrder extends BaseComponent {
             takerToggle.parentNode.replaceChild(newTakerToggle, takerToggle);
             
             // Add click listener
-            newTakerToggle.addEventListener('click', function(e) {
+            newTakerToggle.addEventListener('click', (e) => {
                 this.debug('Taker toggle clicked');
                 e.preventDefault();
                 e.stopPropagation();
                 
-                this.classList.toggle('active');
+                newTakerToggle.classList.toggle('active');
                 const takerInputContent = document.querySelector('.taker-input-content');
                 if (takerInputContent) {
                     takerInputContent.classList.toggle('hidden');
                 }
                 
                 // Update chevron direction
-                const chevron = this.querySelector('.chevron-down');
+                const chevron = newTakerToggle.querySelector('.chevron-down');
                 if (chevron) {
-                    if (this.classList.contains('active')) {
+                    if (newTakerToggle.classList.contains('active')) {
                         chevron.style.transform = 'rotate(180deg)';
                     } else {
                         chevron.style.transform = 'rotate(0deg)';
