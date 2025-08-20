@@ -99,10 +99,8 @@ export class ViewOrders extends BaseComponent {
             };
             walletManager.addListener(this.walletListener);
             
-            // Initialize table and setup WebSocket
-            await super.init();
+            // Setup WebSocket subscriptions
             await this.setupWebSocket();
-            await this.refreshOrdersView();
             
             this.debug('ViewOrders initialization complete');
         } catch (error) {
@@ -218,8 +216,9 @@ export class ViewOrders extends BaseComponent {
 
     async initialize(readOnlyMode = true) {
         if (!this.initialized) {
-            // First time setup - create table structure
+            // First time setup - create table structure and setup WebSocket
             await this.setupTable();
+            await this.setupWebSocket();
             this.initialized = true;
         }
         // Just refresh the view with current cache
@@ -395,6 +394,16 @@ export class ViewOrders extends BaseComponent {
     }
 
     async setupTable() {
+        // Prevent multiple table setups
+        if (this._tableSetup) {
+            this.debug('Table already setup, skipping...');
+            return;
+        }
+        this._tableSetup = true;
+        
+        // Clear existing content to prevent duplicates
+        this.container.innerHTML = '';
+        
         const tableContainer = this.createElement('div', 'table-container');
         
         // Main filter controls
@@ -899,6 +908,10 @@ For Buyers:
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
             this.expiryTimers.clear();
         }
+        
+        // Reset table setup flag to allow re-initialization if needed
+        this._tableSetup = false;
+        
         // Don't clear the table
     }
 
