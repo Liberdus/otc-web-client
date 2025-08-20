@@ -18,6 +18,8 @@ export class CreateOrder extends BaseComponent {
         this.contract = null;
         this.provider = null;
         this.initialized = false;
+        this.isRendered = false;
+        this.hasLoadedData = false;
         this.tokenCache = new Map();
         this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
         this.isSubmitting = false;
@@ -25,6 +27,8 @@ export class CreateOrder extends BaseComponent {
         this.sellToken = null;
         this.buyToken = null;
         this.tokenSelectorListeners = {};  // Store listeners to prevent duplicates
+        this.boundWindowClickHandler = null;
+        this.amountInputListeners = {};
         
         // Initialize logger
         const logger = createLogger('CREATE_ORDER');
@@ -51,6 +55,7 @@ export class CreateOrder extends BaseComponent {
         this.debug('Resetting CreateOrder component state...');
         this.initialized = false;
         this.initializing = false;
+        this.hasLoadedData = false;
         this.tokens = [];
         this.sellToken = null;
         this.buyToken = null;
@@ -96,7 +101,7 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    async initialize(readOnlyMode = true) {
+    async initialize(readOnlyMode = true, options = {}) {
         if (this.initializing || this.initialized) {
             this.debug('Already initializing or initialized, skipping...');
             return;
@@ -109,9 +114,12 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug('Starting initialization...');
             
-            // Render the HTML first
+            // Render the HTML once
             const container = document.getElementById('create-order');
-            container.innerHTML = this.render();
+            if (!this.isRendered) {
+                container.innerHTML = this.render();
+                this.isRendered = true;
+            }
             
             // Handle read-only mode first, before any other initialization
             if (readOnlyMode) {
@@ -165,8 +173,10 @@ export class CreateOrder extends BaseComponent {
             // Enable form when wallet is connected
             this.setConnectedMode();
             
-            // Setup UI immediately
-            this.populateTokenDropdowns();
+            // Setup UI only on first render to preserve user input on tab switches
+            if (!this.hasLoadedData) {
+                this.populateTokenDropdowns();
+            }
             this.setupCreateOrderListener();
             
             // Wait for contract to be ready
@@ -179,6 +189,7 @@ export class CreateOrder extends BaseComponent {
             ]);
 
             this.updateFeeDisplay();
+            this.hasLoadedData = true;
             
             // Initialize token selectors
             this.initializeTokenSelectors();
@@ -282,7 +293,7 @@ export class CreateOrder extends BaseComponent {
     }
 
     setReadOnlyMode() {
-        console.log('[CreateOrder] Setting read-only mode');
+        this.debug('Setting read-only mode');
         const createOrderBtn = document.getElementById('createOrderBtn');
         const orderCreationFee = document.getElementById('orderCreationFee');
         
@@ -419,14 +430,14 @@ export class CreateOrder extends BaseComponent {
         // Setup taker toggle functionality
         const takerToggle = document.querySelector('.taker-toggle');
         if (takerToggle) {
-            console.log('[CreateOrder] Setting up taker toggle functionality');
+            this.debug('Setting up taker toggle functionality');
             // Remove existing listeners using clone technique
             const newTakerToggle = takerToggle.cloneNode(true);
             takerToggle.parentNode.replaceChild(newTakerToggle, takerToggle);
             
             // Add click listener
             newTakerToggle.addEventListener('click', function(e) {
-                console.log('[CreateOrder] Taker toggle clicked');
+                this.debug('Taker toggle clicked');
                 e.preventDefault();
                 e.stopPropagation();
                 
@@ -447,7 +458,7 @@ export class CreateOrder extends BaseComponent {
                 }
             });
         } else {
-            console.log('[CreateOrder] Taker toggle button not found');
+            this.debug('Taker toggle button not found');
         }
     }
 
@@ -1550,6 +1561,11 @@ export class CreateOrder extends BaseComponent {
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
             this.expiryTimers.clear();
         }
+        // Remove global click handler for modals if present
+        if (this.boundWindowClickHandler) {
+            window.removeEventListener('click', this.boundWindowClickHandler);
+            this.boundWindowClickHandler = null;
+        }
     }
 
     // Add this method to the CreateOrder class
@@ -2039,18 +2055,6 @@ export class CreateOrder extends BaseComponent {
                 // Create new listener for opening modal
                 this.tokenSelectorListeners[type] = async () => {
                     modal.style.display = 'block';
-                    
-                    // Pre-fetch prices for all allowed tokens in background
-                    if (window.pricingService && this.tokens?.length > 0) {
-                        const tokenAddresses = this.tokens.map(t => t.address);
-                        window.pricingService.fetchPricesForTokens(tokenAddresses)
-                            .then(() => {
-                                this.debug('Pre-fetched prices for all tokens');
-                            })
-                            .catch(error => {
-                                this.debug('Failed to pre-fetch prices:', error);
-                            });
-                    }
                 };
 
                 // Add new listener
@@ -2063,12 +2067,15 @@ export class CreateOrder extends BaseComponent {
                     };
                 }
 
-                // Close modal when clicking outside
-                window.addEventListener('click', (event) => {
-                    if (event.target.classList.contains('token-modal')) {
-                        event.target.style.display = 'none';
-                    }
-                });
+                // Close modal when clicking outside (register once)
+                if (!this.boundWindowClickHandler) {
+                    this.boundWindowClickHandler = (event) => {
+                        if (event.target.classList?.contains('token-modal')) {
+                            event.target.style.display = 'none';
+                        }
+                    };
+                    window.addEventListener('click', this.boundWindowClickHandler);
+                }
             }
         });
     }
@@ -2114,7 +2121,13 @@ export class CreateOrder extends BaseComponent {
         ['sell', 'buy'].forEach(type => {
             const amountInput = document.getElementById(`${type}Amount`);
             if (amountInput) {
-                amountInput.addEventListener('input', () => this.updateTokenAmounts(type));
+                // Remove prior listener if present
+                if (this.amountInputListeners[type]) {
+                    amountInput.removeEventListener('input', this.amountInputListeners[type]);
+                }
+                // Create and store new listener
+                this.amountInputListeners[type] = () => this.updateTokenAmounts(type);
+                amountInput.addEventListener('input', this.amountInputListeners[type]);
             }
         });
 

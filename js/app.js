@@ -150,6 +150,15 @@ class App {
 				case 'disconnect': {
 					this.debug('Wallet disconnected, updating tab visibility...');
 					this.updateTabVisibility(false);
+					// Clear CreateOrder state only; no need to initialize since tab is hidden
+					try {
+						const createOrderComponent = this.components['create-order'];
+						if (createOrderComponent?.resetState) {
+							createOrderComponent.resetState();
+						}
+					} catch (error) {
+						console.warn('[App] Error resetting CreateOrder on disconnect:', error);
+					}
 					break;
 				}
 				case 'accountsChanged': {
@@ -579,10 +588,6 @@ class App {
 					const computedReadOnly = readOnlyOverride !== null
 						? !!readOnlyOverride
 						: !window.walletManager?.isWalletConnected();
-					// Reset CreateOrder component state to ensure fresh token loading when switching to it
-					if (tabId === 'create-order' && component?.resetState && !computedReadOnly) {
-						component.resetState();
-					}
 					await component.initialize(computedReadOnly);
 				}
 				
