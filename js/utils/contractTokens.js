@@ -264,12 +264,11 @@ async function getTokenMetadata(tokenAddress) {
  */
 async function getUserTokenBalance(tokenAddress) {
     try {
-        // Check if wallet is connected
-        if (!window.ethereum || !window.ethereum.selectedAddress) {
+        // Get user's wallet address using the same method as getAllWalletTokens
+        const userAddress = await contractService.getUserAddress();
+        if (!userAddress) {
             return '0';
         }
-
-        const userAddress = window.ethereum.selectedAddress;
         
         const provider = contractService.getProvider();
         const tokenContract = new ethers.Contract(

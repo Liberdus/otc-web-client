@@ -46,6 +46,19 @@ export class CreateOrder extends BaseComponent {
         };
     }
 
+    // Method to reset component state for account switching
+    resetState() {
+        this.debug('Resetting CreateOrder component state...');
+        this.initialized = false;
+        this.initializing = false;
+        this.tokens = [];
+        this.sellToken = null;
+        this.buyToken = null;
+        this.feeToken = null;
+        this.tokenCache.clear();
+        this.resetBalanceDisplays();
+    }
+
     async initializeContract() {
         try {
             this.debug('Initializing contract...');

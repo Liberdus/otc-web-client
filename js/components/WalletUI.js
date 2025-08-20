@@ -190,9 +190,9 @@ export class WalletUI extends BaseComponent {
                     break;
                 case 'accountsChanged':
                     this.debug('Account change event received');
-                    // Clean up CreateOrder component when account changes
-                    if (window.app?.components['create-order']?.cleanup) {
-                        window.app.components['create-order'].cleanup();
+                    // Reset CreateOrder component state when account changes to force fresh token loading
+                    if (window.app?.components['create-order']?.resetState) {
+                        window.app.components['create-order'].resetState();
                     }
                     this.updateUI(data.account);
                     break;

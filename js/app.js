@@ -569,6 +569,10 @@ class App {
 					const computedReadOnly = readOnlyOverride !== null
 						? !!readOnlyOverride
 						: !window.walletManager?.isWalletConnected();
+					// Reset CreateOrder component state to ensure fresh token loading when switching to it
+					if (tabId === 'create-order' && component?.resetState && !computedReadOnly) {
+						component.resetState();
+					}
 					await component.initialize(computedReadOnly);
 				}
 				
@@ -620,6 +624,8 @@ class App {
 			// Reinitialize existing CreateOrder component when wallet is connected
 			const createOrderComponent = this.components['create-order'];
 			if (createOrderComponent) {
+				// Reset component state to force fresh token loading
+				createOrderComponent.resetState();
 				await createOrderComponent.initialize(false);
 			}
 			
@@ -654,6 +660,10 @@ class App {
 		const activeComponent = this.components[this.currentTab];
 		if (activeComponent?.initialize) {
 			this.debug('Refreshing active component:', this.currentTab);
+			// Reset CreateOrder component state to ensure fresh token loading
+			if (this.currentTab === 'create-order' && activeComponent?.resetState) {
+				activeComponent.resetState();
+			}
 			await activeComponent.initialize(false);
 		}
 	}
