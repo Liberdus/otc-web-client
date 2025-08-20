@@ -61,6 +61,31 @@ class ContractService {
             
             return allowedTokens;
         } catch (error) {
+            // If WS provider is rate limited, try read-only HTTP fallbacks
+            const isRateLimit = error?.code === -32005 || /rate limit/i.test(error?.message || '');
+            if (isRateLimit) {
+                this.warn('WS rate limited while fetching allowed tokens, retrying via HTTP provider...');
+                try {
+                    const net = getNetworkConfig();
+                    const rpcUrls = [net.rpcUrl, ...(net.fallbackRpcUrls || [])].filter(Boolean);
+                    for (const url of rpcUrls) {
+                        try {
+                            this.debug(`Trying HTTP provider: ${url}`);
+                            const httpProvider = new ethers.providers.JsonRpcProvider(url);
+                            const httpContract = new ethers.Contract(net.contractAddress, net.contractABI, httpProvider);
+                            const allowedTokens = await httpContract.getAllowedTokens();
+                            this.debug(`HTTP provider succeeded. Found ${allowedTokens.length} allowed tokens`);
+                            return allowedTokens;
+                        } catch (e) {
+                            const isRl = e?.code === -32005 || /rate limit/i.test(e?.message || '');
+                            this.warn(`HTTP provider failed (${url})${isRl ? ' due to rate limit' : ''}`);
+                            continue;
+                        }
+                    }
+                } catch (fallbackErr) {
+                    this.warn('HTTP fallback attempt failed:', fallbackErr);
+                }
+            }
             this.error('Failed to get allowed tokens:', error);
             throw new Error(`Failed to get allowed tokens: ${error.message}`);
         }

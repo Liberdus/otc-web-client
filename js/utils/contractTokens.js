@@ -170,7 +170,7 @@ export async function getContractAllowedTokens() {
                 } catch (err) {
                     debug(`Icon fetch failed for ${address} (${metadata.symbol}):`, err?.message || err);
                 }
-
+                
                 return {
                     address,
                     ...metadata,
@@ -319,10 +319,10 @@ async function getTokenMetadata(tokenAddress) {
                 'function decimals() view returns (uint8)'
             ], provider);
             [symbol, name, decimals] = await Promise.all([
-                tokenContract.symbol(),
-                tokenContract.name(),
-                tokenContract.decimals()
-            ]);
+            tokenContract.symbol(),
+            tokenContract.name(),
+            tokenContract.decimals()
+        ]);
         }
 
         const metadata = {
@@ -382,7 +382,7 @@ async function getUserTokenBalance(tokenAddress) {
         if (cached && (Date.now() - cached.ts) < BALANCE_CACHE_TTL_MS) {
             return cached.value;
         }
-
+        
         const provider = contractService.getProvider();
 
         // First, try multicall for decimals and balanceOf
@@ -416,9 +416,9 @@ async function getUserTokenBalance(tokenAddress) {
                 'function decimals() view returns (uint8)'
             ], provider);
             [rawBalance, decimals] = await Promise.all([
-                tokenContract.balanceOf(userAddress),
-                tokenContract.decimals()
-            ]);
+            tokenContract.balanceOf(userAddress),
+            tokenContract.decimals()
+        ]);
         }
 
         const balance = ethers.utils.formatUnits(rawBalance, decimals);
@@ -565,31 +565,14 @@ export async function getAllWalletTokens() {
     try {
         debug('Getting all wallet tokens...');
         
-        // Get allowed tokens first
+        // Get allowed tokens only (no wallet scanning)
         const allowedTokens = await getContractAllowedTokens();
-        const allowedAddresses = new Set(allowedTokens.map(token => token.address.toLowerCase()));
         
         // Get user's wallet address
         const userAddress = await contractService.getUserAddress();
         if (!userAddress) {
             debug('No user address available');
             return { allowed: allowedTokens, notAllowed: [] };
-        }
-
-        // Get all ERC20 tokens from user's wallet
-        const walletTokens = await getUserWalletTokens(userAddress);
-        debug(`Found ${walletTokens.length} tokens in wallet`);
-
-        // Separate allowed and not allowed tokens
-        const notAllowedTokens = [];
-        
-        for (const token of walletTokens) {
-            if (!allowedAddresses.has(token.address.toLowerCase())) {
-                notAllowedTokens.push({
-                    ...token,
-                    isAllowed: false
-                });
-            }
         }
 
         // Mark allowed tokens
@@ -600,97 +583,14 @@ export async function getAllWalletTokens() {
 
         const result = {
             allowed: markedAllowedTokens,
-            notAllowed: notAllowedTokens
+            notAllowed: []
         };
 
-        debug(`Successfully processed ${markedAllowedTokens.length} allowed and ${notAllowedTokens.length} not allowed tokens`);
+        debug(`Successfully processed ${markedAllowedTokens.length} allowed tokens`);
         return result;
 
     } catch (err) {
         error('Failed to get all wallet tokens:', err);
         return { allowed: [], notAllowed: [] };
-    }
-}
-
-/**
- * Get all ERC20 tokens in user's wallet
- * @param {string} userAddress - User's wallet address
- * @returns {Promise<Array>} Array of token objects with metadata and balances
- */
-async function getUserWalletTokens(userAddress) {
-    try {
-        debug(`Getting wallet tokens for ${userAddress}...`);
-        
-        const provider = contractService.getProvider();
-        
-        // Get recent Transfer events to find tokens the user has interacted with
-        const currentBlock = await provider.getBlockNumber();
-        const fromBlock = Math.max(0, currentBlock - 10000); // Look back 10k blocks
-        
-        // Get Transfer events where user is recipient
-        const filter = {
-            fromBlock: fromBlock,
-            toBlock: 'latest',
-            topics: [
-                ethers.utils.id('Transfer(address,address,uint256)'),
-                null, // from address (any)
-                ethers.utils.hexZeroPad(userAddress, 32) // to address (user)
-            ]
-        };
-
-        const logs = await provider.getLogs(filter);
-        debug(`Found ${logs.length} Transfer events to user`);
-
-        // Extract unique token addresses from Transfer events
-        const tokenAddresses = [...new Set(logs.map(log => log.address))];
-        debug(`Found ${tokenAddresses.length} unique token addresses`);
-        
-        // Log the first few addresses for debugging
-        if (tokenAddresses.length > 0) {
-            debug('Sample token addresses found:', tokenAddresses.slice(0, 5));
-        }
-
-        // Batch fetch all balances via multicall
-        const balanceMap = await getBatchTokenBalances(tokenAddresses, userAddress);
-
-        // Process tokens with positive balances only
-        const tokensWithPositive = tokenAddresses.filter(addr => {
-            const entry = balanceMap.get(addr.toLowerCase());
-            return entry && Number(entry.formatted) > 0;
-        });
-
-        const walletTokens = await mapWithConcurrency(tokensWithPositive, async (tokenAddress) => {
-            try {
-                const metadata = await getTokenMetadata(tokenAddress);
-                const entry = balanceMap.get(tokenAddress.toLowerCase());
-                const balance = entry?.formatted || '0';
-
-                let iconUrl = null;
-                try {
-                    const networkConfig = getNetworkConfig();
-                    const chainId = parseInt(networkConfig.chainId, 16);
-                    iconUrl = await tokenIconService.getIconUrl(tokenAddress, chainId);
-                } catch (err) {
-                    debug(`Failed to get icon for token ${tokenAddress}:`, err);
-                }
-
-                return {
-                    address: tokenAddress,
-                    ...metadata,
-                    balance,
-                    iconUrl
-                };
-            } catch (err) {
-                debug(`Error building wallet token ${tokenAddress}:`, err.message);
-                return null;
-            }
-        });
-
-        debug(`Found ${walletTokens.length} tokens with balance in wallet`);
-        return walletTokens;
-
-    } catch (err) {
-        error('Failed to get wallet tokens:', err);
-        return [];
     }
 }
