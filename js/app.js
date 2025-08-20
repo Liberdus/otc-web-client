@@ -676,9 +676,10 @@ class App {
 		if (activeComponent?.initialize) {
 			this.debug('Refreshing active component:', this.currentTab);
 			// Reset CreateOrder component state to ensure fresh token loading
-			if (this.currentTab === 'create-order' && activeComponent?.resetState) {
-				activeComponent.resetState();
-			}
+			// if (this.currentTab === 'create-order' && activeComponent?.resetState) {
+			// 	activeComponent.resetState();  // Commented out - not resetting form
+			// }
+			// TODO: maybe add to active depending on event
 			await activeComponent.initialize(false);
 		}
 	}

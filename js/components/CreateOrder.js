@@ -57,8 +57,8 @@ export class CreateOrder extends BaseComponent {
         this.initializing = false;
         this.hasLoadedData = false;
         this.tokens = [];
-        this.sellToken = null;
-        this.buyToken = null;
+        // this.sellToken = null;  // Commented out - not resetting form
+        // this.buyToken = null;   // Commented out - not resetting form
         this.feeToken = null;
         this.tokenCache.clear();
         this.resetBalanceDisplays();
@@ -719,7 +719,7 @@ export class CreateOrder extends BaseComponent {
             }
 
             this.showSuccess('Order created successfully!');
-            this.resetForm();
+            // this.resetForm();  // Commented out - not resetting form
             
             // Reload orders if needed
             if (window.app?.loadOrders) {
@@ -769,54 +769,54 @@ export class CreateOrder extends BaseComponent {
 
     resetForm() {
         // Clear token inputs and amounts
-        document.getElementById('sellToken').value = '';
-        document.getElementById('sellAmount').value = '';
-        document.getElementById('buyToken').value = '';
-        document.getElementById('buyAmount').value = '';
+        // document.getElementById('sellToken').value = '';  // Commented out - not resetting form
+        // document.getElementById('sellAmount').value = '';  // Commented out - not resetting form
+        // document.getElementById('buyToken').value = '';  // Commented out - not resetting form
+        // document.getElementById('buyAmount').value = '';  // Commented out - not resetting form
         
         // Clear taker address input
-        const takerInput = document.getElementById('takerAddress');
-        if (takerInput) {
-            takerInput.value = '';
-        }
+        // const takerInput = document.getElementById('takerAddress');  // Commented out - not resetting form
+        // if (takerInput) {  // Commented out - not resetting form
+        //     takerInput.value = '';  // Commented out - not resetting form
+        // }  // Commented out - not resetting form
         
         // Clear balance displays
-        this.resetBalanceDisplays();
+        // this.resetBalanceDisplays();  // Commented out - not resetting form
         
         // Clear component state
-        this.sellToken = null;
-        this.buyToken = null;
+        // this.sellToken = null;  // Commented out - not resetting form
+        // this.buyToken = null;  // Commented out - not resetting form
         
         // Reset token selectors to default state
-        ['sell', 'buy'].forEach(type => {
-            const selector = document.getElementById(`${type}TokenSelector`);
-            if (selector) {
-                selector.innerHTML = `
-                    <span class="token-selector-content">
-                        <span>Select Token</span>
-                        <svg width="12" height="12" viewBox="0 0 12 12">
-                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        </svg>
-                    </span>
-                `;
-            }
-        });
+        // ['sell', 'buy'].forEach(type => {  // Commented out - not resetting form
+        //     const selector = document.getElementById(`${type}TokenSelector`);  // Commented out - not resetting form
+        //     if (selector) {  // Commented out - not resetting form
+        //         selector.innerHTML = `  // Commented out - not resetting form
+        //             <span class="token-selector-content">  // Commented out - not resetting form
+        //                 <span>Select Token</span>  // Commented out - not resetting form
+        //                 <svg width="12" height="12" viewBox="0 0 12 12">  // Commented out - not resetting form
+        //                     <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>  // Commented out - not resetting form
+        //                 </svg>  // Commented out - not resetting form
+        //             </span>  // Commented out - not resetting form
+        //         `;  // Commented out - not resetting form
+        //     }  // Commented out - not resetting form
+        // });  // Commented out - not resetting form
         
         // Remove any token address tooltips
-        document.querySelectorAll('.token-address-tooltip').forEach(tooltip => {
-            tooltip.remove();
-        });
+        // document.querySelectorAll('.token-address-tooltip').forEach(tooltip => {  // Commented out - not resetting form
+        //     tooltip.remove();  // Commented out - not resetting form
+        // });  // Commented out - not resetting form
         
         // Remove USD amount displays
-        ['sell', 'buy'].forEach(type => {
-            const usdDisplay = document.getElementById(`${type}AmountUSD`);
-            if (usdDisplay) {
-                usdDisplay.remove();
-            }
-        });
+        // ['sell', 'buy'].forEach(type => {  // Commented out - not resetting form
+        //     const usdDisplay = document.getElementById(`${type}AmountUSD`);  // Commented out - not resetting form
+        //     if (usdDisplay) {  // Commented out - not resetting form
+        //         usdDisplay.remove();  // Commented out - not resetting form
+        //     }  // Commented out - not resetting form
+        // });  // Commented out - not resetting form
         
         // Update create button state
-        this.updateCreateButtonState();
+        // this.updateCreateButtonState();  // Commented out - not resetting form
     }
 
     async loadContractTokens() {
