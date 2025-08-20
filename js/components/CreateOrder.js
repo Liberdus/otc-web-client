@@ -463,6 +463,13 @@ export class CreateOrder extends BaseComponent {
                 if (chevron) {
                     if (newTakerToggle.classList.contains('active')) {
                         chevron.style.transform = 'rotate(180deg)';
+                        // Focus on taker address input when toggle is activated
+                        setTimeout(() => {
+                            const takerAddressInput = document.getElementById('takerAddress');
+                            if (takerAddressInput) {
+                                takerAddressInput.focus();
+                            }
+                        }, 100); // Small delay to ensure DOM is updated
                     } else {
                         chevron.style.transform = 'rotate(0deg)';
                     }
@@ -1943,6 +1950,11 @@ export class CreateOrder extends BaseComponent {
                 amountInput.parentNode.replaceChild(newInput, amountInput);
                 // Add new listener
                 newInput.addEventListener('input', () => this.updateTokenAmounts(type));
+                
+                // Focus on the input field after token selection
+                setTimeout(() => {
+                    newInput.focus();
+                }, 100); // Small delay to ensure DOM is updated
             }
         } catch (error) {
             this.debug('Error in handleTokenSelect:', error);
