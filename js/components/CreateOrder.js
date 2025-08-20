@@ -659,7 +659,21 @@ export class CreateOrder extends BaseComponent {
                     if (!tx) return; // User rejected the transaction
 
                     this.showInfo('Waiting for confirmation...');
-                    await tx.wait();
+                    
+                    // Add timeout handling for tx.wait()
+                    const waitPromise = tx.wait();
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Transaction timeout - please check your wallet')), 30000)
+                    );
+                    
+                    const receipt = await Promise.race([waitPromise, timeoutPromise]);
+                    
+                    // Verify transaction was actually successful
+                    if (!receipt || receipt.status === 0) {
+                        throw new Error('Transaction failed on-chain');
+                    }
+                    
+                    this.debug('Transaction confirmed successfully:', receipt);
                     
                     // After success: clear cached balances and refresh any open token modals
                     try {
@@ -681,6 +695,18 @@ export class CreateOrder extends BaseComponent {
                     retryCount++;
                     this.debug(`Create order attempt ${retryCount} failed:`, error);
 
+                    // Handle timeout specifically
+                    if (error.message?.includes('Transaction timeout')) {
+                        this.showError('Transaction timed out. Please check your wallet and try again.');
+                        return; // Don't retry timeouts, let user try manually
+                    }
+
+                    // Handle on-chain failures
+                    if (error.message?.includes('Transaction failed on-chain')) {
+                        this.showError('Transaction failed on-chain. Please check your balance and try again.');
+                        return; // Don't retry on-chain failures
+                    }
+
                     if (retryCount <= maxRetries && 
                         (error.message?.includes('nonce') || 
                          error.message?.includes('replacement fee too low'))) {
@@ -699,33 +725,6 @@ export class CreateOrder extends BaseComponent {
             if (window.app?.loadOrders) {
                 window.app.loadOrders();
             }
-
-            // Clear form inputs
-            document.getElementById('sellAmount').value = '';
-            document.getElementById('buyAmount').value = '';
-            document.getElementById('takerAddress').value = '';
-            
-            // Reset token selectors if needed
-            this.sellToken = null;
-            this.buyToken = null;
-            
-            // Update UI to reflect cleared state
-            const sellTokenSelector = document.getElementById('sellTokenSelector');
-            const buyTokenSelector = document.getElementById('buyTokenSelector');
-            
-            if (sellTokenSelector) {
-                sellTokenSelector.innerHTML = 'Select Token';
-            }
-            if (buyTokenSelector) {
-                buyTokenSelector.innerHTML = 'Select Token';
-            }
-            
-            // Reset any other UI elements
-            this.updateCreateButtonState();
-            
-            // Show success message
-            this.showSuccess('Order created successfully!');
-
         } catch (error) {
             this.debug('Create order error:', error);
             const userMessage = this.getUserFriendlyError(error);
@@ -1699,16 +1698,11 @@ export class CreateOrder extends BaseComponent {
             this.debug(`Current allowance: ${currentAllowance.toString()}`);
             this.debug(`Required amount: ${requiredAmount.toString()}`);
 
-            // If allowance is insufficient, reset and approve new amount
+            // If allowance is insufficient, approve only what's needed
             if (currentAllowance.lt(requiredAmount)) {
-                if (!currentAllowance.isZero()) {
-                    this.debug('Resetting existing allowance');
-                    const resetTx = await tokenContract.approve(this.contract.address, 0);
-                    await resetTx.wait();
-                    this.debug('Allowance reset successful');
-                }
-
-                this.showInfo('Requesting token approval...');
+                const additionalAmount = requiredAmount.sub(currentAllowance);
+                
+                this.showInfo(`Requesting additional token approval (${ethers.utils.formatUnits(additionalAmount, await this.getTokenDecimals(tokenAddress))} more needed)...`);
                 const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
                 this.showInfo('Please confirm the approval in your wallet...');
                 
@@ -1735,6 +1729,16 @@ export class CreateOrder extends BaseComponent {
             return 'Transaction was declined';
         }
         
+        // Handle timeout specifically
+        if (error.message?.includes('Transaction timeout')) {
+            return 'Transaction timed out. Please check your wallet and try again.';
+        }
+        
+        // Handle on-chain failures
+        if (error.message?.includes('Transaction failed on-chain')) {
+            return 'Transaction failed on-chain. Please check your balance and try again.';
+        }
+        
         // Handle contract revert errors with detailed messages
         if (error.code === -32603 && error.data?.message) {
             return error.data.message;
@@ -1758,6 +1762,35 @@ export class CreateOrder extends BaseComponent {
         
         // Default generic message
         return 'Transaction failed - please try again';
+    }
+
+    // Helper method to verify transaction status
+    async verifyTransactionStatus(txHash) {
+        try {
+            const provider = walletManager.getProvider();
+            if (!provider) {
+                throw new Error('Provider not available');
+            }
+
+            // Wait a bit for transaction to be mined
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Get transaction receipt
+            const receipt = await provider.getTransactionReceipt(txHash);
+            
+            if (!receipt) {
+                throw new Error('Transaction not found on-chain');
+            }
+
+            if (receipt.status === 0) {
+                throw new Error('Transaction failed on-chain');
+            }
+
+            return receipt;
+        } catch (error) {
+            this.debug('Transaction verification failed:', error);
+            throw error;
+        }
     }
 
     // Update the fee display in the UI
