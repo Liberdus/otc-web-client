@@ -1,6 +1,7 @@
 import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, walletManager } from '../config.js';
+import { setVisibility } from '../utils/ui.js';
 import { erc20Abi } from '../abi/erc20.js';
 import { getContractAllowedTokens, getAllWalletTokens, clearTokenCaches } from '../utils/contractTokens.js';
 import { contractService } from '../services/ContractService.js';
@@ -119,6 +120,16 @@ export class CreateOrder extends BaseComponent {
             if (!this.isRendered) {
                 container.innerHTML = this.render();
                 this.isRendered = true;
+
+                // Initialize initial visibility state for static elements
+                const sellUsd = document.getElementById('sellAmountUSD');
+                const buyUsd = document.getElementById('buyAmountUSD');
+                const sellBal = document.getElementById('sellTokenBalanceDisplay');
+                const buyBal = document.getElementById('buyTokenBalanceDisplay');
+                setVisibility(sellUsd, false);
+                setVisibility(buyUsd, false);
+                setVisibility(sellBal, false);
+                setVisibility(buyBal, false);
             }
             
             // Handle read-only mode first, before any other initialization
@@ -363,8 +374,8 @@ export class CreateOrder extends BaseComponent {
                 balanceAmount.textContent = formattedBalance;
                 balanceUSDElement.textContent = `• $${balanceUSD}`;
                 
-                // Show the balance display
-                balanceDisplay.style.display = 'block';
+                // Show the balance display without layout shift
+                setVisibility(balanceDisplay, true);
                 
                 // Update ARIA label with current balance
                 const balanceBtn = document.getElementById(`${type}TokenBalanceBtn`);
@@ -387,7 +398,7 @@ export class CreateOrder extends BaseComponent {
         try {
             const balanceDisplay = document.getElementById(`${type}TokenBalanceDisplay`);
             if (balanceDisplay) {
-                balanceDisplay.style.display = 'none';
+                setVisibility(balanceDisplay, false);
                 this.debug(`Hidden ${type} balance display`);
             }
         } catch (error) {
@@ -903,6 +914,13 @@ export class CreateOrder extends BaseComponent {
             // Assemble input wrapper
             inputWrapper.appendChild(label);
             inputWrapper.appendChild(amountInput);
+            // Pre-create USD display to preserve layout; keep hidden until valid
+            const usdDisplayStatic = document.createElement('div');
+            usdDisplayStatic.id = `${type}AmountUSD`;
+            usdDisplayStatic.className = 'amount-usd is-hidden';
+            usdDisplayStatic.setAttribute('aria-hidden', 'true');
+            usdDisplayStatic.textContent = '≈ $0.00';
+            inputWrapper.appendChild(usdDisplayStatic);
             
             // Create token selector button
             const tokenSelector = document.createElement('button');
@@ -930,8 +948,8 @@ export class CreateOrder extends BaseComponent {
             // Create balance display (hidden until a token is selected) AS A SIBLING UNDER THE SELECTOR
             const balanceDisplay = document.createElement('div');
             balanceDisplay.id = `${type}TokenBalanceDisplay`;
-            balanceDisplay.className = 'token-balance-display';
-            balanceDisplay.style.display = 'none';
+            balanceDisplay.className = 'token-balance-display is-hidden';
+            balanceDisplay.setAttribute('aria-hidden', 'true');
             balanceDisplay.innerHTML = `
                 <button id="${type}TokenBalanceBtn" class="balance-clickable" aria-label="Click to fill ${type} amount with available balance">
                     <span class="balance-amount" id="${type}TokenBalanceAmount">0.00</span>
@@ -1811,12 +1829,12 @@ export class CreateOrder extends BaseComponent {
         try {
             this.debug(`Token selected for ${type}:`, token);
             
-            // Clear USD display if no token is selected
+            // Hide USD display if no token is selected (preserve layout)
             if (!token) {
                 this[`${type}Token`] = null;
                 const usdDisplay = document.getElementById(`${type}AmountUSD`);
                 if (usdDisplay) {
-                    usdDisplay.remove();
+                    setVisibility(usdDisplay, false);
                 }
                 // Hide balance display when no token is selected
                 this.hideBalanceDisplay(type);
@@ -2046,25 +2064,24 @@ export class CreateOrder extends BaseComponent {
             // Find USD display element
             let usdDisplay = document.getElementById(`${type}AmountUSD`);
             
-            // If no token selected or amount is 0/empty, remove the USD display
+            // If no token selected or amount is 0/empty, hide the USD display without removing
             if (!token || !amount || amount === '0') {
                 if (usdDisplay) {
-                    usdDisplay.remove();
+                    setVisibility(usdDisplay, false);
                 }
                 return;
             }
             
             if (token && amount) {
                 const usdValue = Number(amount) * token.usdPrice;
-                // Create USD display element if it doesn't exist
+                // Ensure USD display element exists (in template) and update it
                 if (!usdDisplay) {
-                    usdDisplay = document.createElement('div');
-                    usdDisplay.id = `${type}AmountUSD`;
-                    usdDisplay.className = 'amount-usd';
-                    const amountInput = document.getElementById(`${type}Amount`);
-                    amountInput.parentNode.insertBefore(usdDisplay, amountInput.nextSibling);
+                    usdDisplay = document.getElementById(`${type}AmountUSD`);
                 }
-                usdDisplay.textContent = `$${usdValue.toFixed(2)}`;
+                if (usdDisplay) {
+                    usdDisplay.textContent = `$${usdValue.toFixed(2)}`;
+                    setVisibility(usdDisplay, true);
+                }
             }
             
             this.updateCreateButtonState();
@@ -2259,13 +2276,13 @@ export class CreateOrder extends BaseComponent {
                             <input type="number" id="sellAmount" placeholder="0.0" />
                             <button id="sellAmountMax" class="max-button">MAX</button>
                         </div>
-                        <div class="amount-usd" id="sellAmountUSD">≈ $0.00</div>
+                        <div class="amount-usd is-hidden" id="sellAmountUSD" aria-hidden="true">≈ $0.00</div>
                         <div id="sellTokenSelector" class="token-selector">
                             <div class="token-selector-content">
                                 <span>Select Token</span>
                             </div>
                         </div>
-                        <div id="sellTokenBalanceDisplay" class="token-balance-display" style="display: none;">
+                        <div id="sellTokenBalanceDisplay" class="token-balance-display is-hidden" aria-hidden="true">
                             <button id="sellTokenBalanceBtn" class="balance-clickable" aria-label="Click to fill sell amount with available balance">
                                 <span class="balance-amount" id="sellTokenBalanceAmount">0.00</span>
                                 <span class="balance-usd" id="sellTokenBalanceUSD">• $0.00</span>
@@ -2285,13 +2302,13 @@ export class CreateOrder extends BaseComponent {
                         <div class="amount-input-wrapper">
                             <input type="number" id="buyAmount" placeholder="0.0" />
                         </div>
-                        <div class="amount-usd" id="buyAmountUSD">≈ $0.00</div>
+                        <div class="amount-usd is-hidden" id="buyAmountUSD" aria-hidden="true">≈ $0.00</div>
                         <div id="buyTokenSelector" class="token-selector">
                             <div class="token-selector-content">
                                 <span>Select Token</span>
                             </div>
                         </div>
-                        <div id="buyTokenBalanceDisplay" class="token-balance-display" style="display: none;">
+                        <div id="buyTokenBalanceDisplay" class="token-balance-display is-hidden" aria-hidden="true">
                             <button id="buyTokenBalanceBtn" class="balance-clickable" aria-label="Click to fill buy amount with available balance">
                                 <span class="balance-amount" id="buyTokenBalanceAmount">0.00</span>
                                 <span class="balance-usd" id="buyTokenBalanceUSD">• $0.00</span>
