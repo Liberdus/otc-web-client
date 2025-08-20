@@ -11,16 +11,20 @@ const error = logger.error.bind(logger);
 const warn = logger.warn.bind(logger);
 
 // Rate limiting constants
-const BASE_DELAY = 200; // Base delay between requests
+const BASE_DELAY = 500; // Increased base delay between requests (500ms)
 const MAX_RETRIES = 3; // Maximum retries for rate limited requests
 const BACKOFF_MULTIPLIER = 2; // Exponential backoff multiplier
+const MAX_CONSECUTIVE_ERRORS = 5; // Maximum consecutive errors before aggressive backoff
+const BATCH_SIZE = 3; // Process tokens in smaller batches
 
 // Global rate limiting state
 let lastRequestTime = 0;
 let consecutiveRateLimitErrors = 0;
+let requestQueue = [];
+let isProcessingQueue = false;
 
 /**
- * Rate limiting utility function
+ * Enhanced rate limiting utility function with adaptive delays
  * @param {number} minDelay - Minimum delay in milliseconds
  * @returns {Promise<void>}
  */
@@ -28,13 +32,60 @@ async function enforceRateLimit(minDelay = BASE_DELAY) {
     const now = Date.now();
     const timeSinceLastRequest = now - lastRequestTime;
     
-    if (timeSinceLastRequest < minDelay) {
-        const delay = minDelay - timeSinceLastRequest;
-        debug(`Rate limiting: waiting ${delay}ms`);
+    // Adaptive delay based on consecutive errors
+    let adaptiveDelay = minDelay;
+    if (consecutiveRateLimitErrors > 0) {
+        adaptiveDelay = Math.max(minDelay, BASE_DELAY * Math.pow(BACKOFF_MULTIPLIER, consecutiveRateLimitErrors));
+        // Cap the maximum delay to prevent excessive waiting
+        adaptiveDelay = Math.min(adaptiveDelay, 10000); // Max 10 seconds
+    }
+    
+    if (timeSinceLastRequest < adaptiveDelay) {
+        const delay = adaptiveDelay - timeSinceLastRequest;
+        debug(`Rate limiting: waiting ${delay}ms (consecutive errors: ${consecutiveRateLimitErrors})`);
         await new Promise(resolve => setTimeout(resolve, delay));
     }
     
     lastRequestTime = Date.now();
+}
+
+/**
+ * Process tokens in batches to reduce rate limiting
+ * @param {Array} tokens - Array of token addresses
+ * @param {Function} processFunction - Function to process each token
+ * @returns {Promise<Array>} Array of processed results
+ */
+async function processTokensInBatches(tokens, processFunction) {
+    const results = [];
+    
+    for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
+        const batch = tokens.slice(i, i + BATCH_SIZE);
+        debug(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(tokens.length / BATCH_SIZE)}`);
+        
+        // Process batch in parallel with rate limiting
+        const batchPromises = batch.map(async (token, index) => {
+            try {
+                // Stagger requests within the batch
+                if (index > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 100 * index));
+                }
+                return await processFunction(token);
+            } catch (err) {
+                error(`Error processing token ${token}:`, err);
+                return null;
+            }
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults.filter(result => result !== null));
+        
+        // Add delay between batches
+        if (i + BATCH_SIZE < tokens.length) {
+            await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second between batches
+        }
+    }
+    
+    return results;
 }
 
 /**
@@ -54,27 +105,25 @@ export async function getContractAllowedTokens() {
             return [];
         }
 
-        // Get metadata and balances for each token
-        const tokensWithData = [];
-        
         // Reset rate limiting state for new batch
         consecutiveRateLimitErrors = 0;
         
-        for (const address of allowedTokenAddresses) {
+        // Process tokens in batches to reduce rate limiting
+        const processToken = async (address) => {
             try {
-                // Enforce rate limiting with exponential backoff
-                const currentDelay = BASE_DELAY * Math.pow(BACKOFF_MULTIPLIER, consecutiveRateLimitErrors);
-                await enforceRateLimit(currentDelay);
+                await enforceRateLimit();
                 
                 const [metadata, balance] = await Promise.all([
                     getTokenMetadata(address),
                     getUserTokenBalance(address)
                 ]);
 
-                // Get icon URL for the token
+                // Get icon URL for the token (with reduced priority to avoid rate limits)
                 let iconUrl = null;
                 try {
-                    // Get current network chain ID dynamically
+                    // Add small delay before icon request
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
                     const networkConfig = getNetworkConfig();
                     const chainId = parseInt(networkConfig.chainId, 16);
                     debug(`Fetching icon for token ${address} (${metadata.symbol}) on chain ${chainId}`);
@@ -82,6 +131,7 @@ export async function getContractAllowedTokens() {
                     debug(`Icon result for ${metadata.symbol}: ${iconUrl}`);
                 } catch (err) {
                     debug(`Failed to get icon for token ${address} (${metadata.symbol}):`, err);
+                    // Don't fail the entire token processing for icon errors
                 }
                 
                 debug(`Token ${metadata.symbol} final object:`, {
@@ -92,15 +142,15 @@ export async function getContractAllowedTokens() {
                     iconUrl: iconUrl
                 });
 
-                tokensWithData.push({
+                // Reset consecutive errors on success
+                consecutiveRateLimitErrors = 0;
+                
+                return {
                     address,
                     ...metadata,
                     balance: balance || '0',
                     iconUrl: iconUrl
-                });
-                
-                // Reset consecutive errors on success
-                consecutiveRateLimitErrors = 0;
+                };
                 
             } catch (err) {
                 error(`Error processing token ${address}:`, err);
@@ -108,19 +158,28 @@ export async function getContractAllowedTokens() {
                 // Increment consecutive errors for rate limiting
                 if (err.code === -32005 || err.message?.includes('rate limit')) {
                     consecutiveRateLimitErrors++;
-                    warn(`Rate limit error ${consecutiveRateLimitErrors}/${MAX_RETRIES} for token ${address}`);
+                    warn(`Rate limit error ${consecutiveRateLimitErrors}/${MAX_CONSECUTIVE_ERRORS} for token ${address}`);
+                    
+                    // If too many consecutive errors, add longer delay
+                    if (consecutiveRateLimitErrors >= MAX_CONSECUTIVE_ERRORS) {
+                        debug(`Too many consecutive errors, adding 5 second delay`);
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        consecutiveRateLimitErrors = 0; // Reset after long delay
+                    }
                 }
                 
                 // Return basic token info even if metadata/balance fails
-                tokensWithData.push({
+                return {
                     address,
                     symbol: 'UNKNOWN',
                     name: 'Unknown Token',
                     decimals: 18,
                     balance: '0'
-                });
+                };
             }
-        }
+        };
+        
+        const tokensWithData = await processTokensInBatches(allowedTokenAddresses, processToken);
 
         debug(`Successfully processed ${tokensWithData.length} tokens`);
         return tokensWithData;
@@ -177,23 +236,24 @@ async function getTokenMetadata(tokenAddress) {
                 name: 'Wrapped Polygon Ecosystem Token',
                 decimals: 18
             },
-            // Amoy Testnet tokens
-            '0x224708430f2FF85E32cd77e986eE558Eb8cC77D9': {
-                symbol: 'FEE',
-                name: 'Fee Token',
-                decimals: 18
-            },
-            '0xB93D55595796D8c59beFC0C9045415B4d567f27c': {
-                symbol: 'TT1',
-                name: 'Trading Token 1',
-                decimals: 18
-            },
-            '0x963322CC131A072F333A76ac321Bb80b6cb5375C': {
-                symbol: 'TT2',
-                name: 'Trading Token 2',
-                decimals: 18
-            }
         };
+
+                    /* // Amoy Testnet tokens
+                    '0x224708430f2FF85E32cd77e986eE558Eb8cC77D9': {
+                        symbol: 'FEE',
+                        name: 'Fee Token',
+                        decimals: 18
+                    },
+                    '0xB93D55595796D8c59beFC0C9045415B4d567f27c': {
+                        symbol: 'TT1',
+                        name: 'Trading Token 1',
+                        decimals: 18
+                    },
+                    '0x963322CC131A072F333A76ac321Bb80b6cb5375C': {
+                        symbol: 'TT2',
+                        name: 'Trading Token 2',
+                        decimals: 18
+                    } */
 
         // Check if we have known metadata for this token
         const normalizedAddress = tokenAddress.toLowerCase();
@@ -328,7 +388,25 @@ export function clearTokenCaches() {
 export function resetRateLimiting() {
     lastRequestTime = 0;
     consecutiveRateLimitErrors = 0;
+    requestQueue = [];
+    isProcessingQueue = false;
     debug('Rate limiting state reset');
+}
+
+/**
+ * Get current rate limiting status for debugging
+ * @returns {Object} Current rate limiting state
+ */
+export function getRateLimitingStatus() {
+    return {
+        lastRequestTime,
+        consecutiveRateLimitErrors,
+        queueLength: requestQueue.length,
+        isProcessingQueue,
+        baseDelay: BASE_DELAY,
+        maxConsecutiveErrors: MAX_CONSECUTIVE_ERRORS,
+        batchSize: BATCH_SIZE
+    };
 }
 
 /**
