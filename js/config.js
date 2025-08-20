@@ -95,6 +95,7 @@ export const TOKEN_ICON_CONFIG = {
     CHAIN_ID_MAP: {
         '1': 'ethereum',
         '137': 'polygon-pos',
+        '80002': 'polygon-amoy',
         '56': 'binance-smart-chain',
         '42161': 'arbitrum-one',
         '10': 'optimistic-ethereum',
@@ -348,7 +349,7 @@ export class WalletManager {
             const decimalChainId = parseInt(chainId, 16).toString();
             this.debug('Decimal Chain ID:', decimalChainId);
             
-            if (decimalChainId !== "137") {
+            if (decimalChainId !== "137") { //TODO: need to not hardcode this
                 await this.switchToDefaultNetwork();
             }
 
