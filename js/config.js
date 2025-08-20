@@ -27,6 +27,8 @@ const networkConfig = {
             symbol: "MATIC",
             decimals: 18
         },
+        // Multicall2 contract (Uniswap) deployed on Polygon mainnet
+        multicallAddress: "0x275617327c958bD06b5D6b871E7f491D76113dd8",
         wsUrl: "wss://polygon.gateway.tenderly.co",
         fallbackWsUrls: [
             "wss://polygon-bor.publicnode.com",
@@ -36,20 +38,48 @@ const networkConfig = {
     },
 };
 
+// replace above with this when testing amoy
+/* "80002": {
+    name: "Amoy",
+    displayName: "Polygon Amoy Testnet",
+    isDefault: true,
+    contractAddress: "0x0BE723F88aDb867022fA0a71EB82365556cb3c8C",
+    contractABI: CONTRACT_ABI,
+    explorer: "https://www.oklink.com/amoy",
+    rpcUrl: "https://rpc-amoy.polygon.technology",
+    fallbackRpcUrls: [
+        "https://rpc.ankr.com/polygon_amoy",
+        "https://polygon-amoy.blockpi.network/v1/rpc/public",
+        "https://polygon-amoy.public.blastapi.io"
+    ],
+    chainId: "0x13882",
+    nativeCurrency: {
+        name: "POL",
+        symbol: "POL",
+        decimals: 18
+    },
+    // multicall address amoy testnet
+    multicallAddress: "0xca11bde05977b3631167028862be2a173976ca11",
+    wsUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
+    fallbackWsUrls: [
+        "wss://polygon-amoy.public.blastapi.io"
+    ]
+}, */
+
 
 export const DEBUG_CONFIG = {
-    APP: false,
-    WEBSOCKET: false,
-    WALLET: false,
-    VIEW_ORDERS: false,
-    CREATE_ORDER: false,
-    MY_ORDERS: false,
-    TAKER_ORDERS: false,
-    CLEANUP_ORDERS: false,
-    WALLET_UI: false,
-    BASE_COMPONENT: false,
-    PRICING: false,
-    TOKENS: false,
+    APP: true,
+    WEBSOCKET: true,
+    WALLET: true,
+    VIEW_ORDERS: true,
+    CREATE_ORDER: true,
+    MY_ORDERS: true,
+    TAKER_ORDERS: true,
+    CLEANUP_ORDERS: true,
+    WALLET_UI: true,
+    BASE_COMPONENT: true,
+    PRICING: true,
+    TOKENS: true,
     TOKEN_ICON_SERVICE: true, // Add token icon service debugging
     TOAST: true, // Enable toast debugging for testing
     // Add more specific flags as needed

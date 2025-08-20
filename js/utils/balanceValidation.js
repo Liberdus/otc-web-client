@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { contractService } from '../services/ContractService.js';
+import { getTokenBalanceInfo as getTokenBalanceInfoFromTokens } from './contractTokens.js';
 import { createLogger } from '../services/LogService.js';
 
 // Initialize logger
@@ -40,23 +41,11 @@ export async function validateSellBalance(tokenAddress, sellAmount, decimals = 1
             throw new Error('Provider not available');
         }
 
-        // Create token contract instance
-        const tokenContract = new ethers.Contract(
-            tokenAddress,
-            [
-                'function balanceOf(address) view returns (uint256)',
-                'function decimals() view returns (uint8)',
-                'function symbol() view returns (string)'
-            ],
-            provider
-        );
-
-        // Get token details and user balance
-        const [rawBalance, tokenDecimals, symbol] = await Promise.all([
-            tokenContract.balanceOf(userAddress),
-            tokenContract.decimals(),
-            tokenContract.symbol()
-        ]);
+        // Use optimized path from contractTokens (multicall + caching)
+        const info = await getTokenBalanceInfoFromTokens(tokenAddress);
+        const tokenDecimals = info.decimals ?? 18;
+        const symbol = info.symbol ?? 'N/A';
+        const rawBalance = ethers.utils.parseUnits(info.balance ?? '0', tokenDecimals);
 
         // Convert sell amount to wei for comparison
         const sellAmountWei = ethers.utils.parseUnits(sellAmount, tokenDecimals);
@@ -121,29 +110,8 @@ export async function getTokenBalanceInfo(tokenAddress) {
             return { balance: '0', symbol: 'N/A', decimals: 18 };
         }
 
-        const tokenContract = new ethers.Contract(
-            tokenAddress,
-            [
-                'function balanceOf(address) view returns (uint256)',
-                'function decimals() view returns (uint8)',
-                'function symbol() view returns (string)'
-            ],
-            provider
-        );
-
-        const [rawBalance, decimals, symbol] = await Promise.all([
-            tokenContract.balanceOf(userAddress),
-            tokenContract.decimals(),
-            tokenContract.symbol()
-        ]);
-
-        const balance = ethers.utils.formatUnits(rawBalance, decimals);
-
-        return {
-            balance,
-            symbol,
-            decimals
-        };
+        const info = await getTokenBalanceInfoFromTokens(tokenAddress);
+        return info;
 
     } catch (err) {
         // Check if it's a rate limit error
