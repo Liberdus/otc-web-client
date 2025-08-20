@@ -1788,17 +1788,19 @@ export class CreateOrder extends BaseComponent {
                 usdPrice = window.pricingService.getPrice(token.address) || 0;
                 isPriceEstimated = window.pricingService.isPriceEstimated(token.address);
                 
-                // If price is estimated, try to fetch it
+                // If price is estimated, fetch it in the background (non-blocking)
                 if (isPriceEstimated) {
-                    this.debug(`Price for ${token.symbol} is estimated, attempting to fetch...`);
-                    try {
-                        await window.pricingService.fetchPricesForTokens([token.address]);
-                        usdPrice = window.pricingService.getPrice(token.address) || 0;
-                        isPriceEstimated = window.pricingService.isPriceEstimated(token.address);
-                        this.debug(`Updated price for ${token.symbol}: $${usdPrice} (estimated: ${isPriceEstimated})`);
-                    } catch (error) {
-                        this.debug(`Failed to fetch price for ${token.symbol}:`, error);
-                    }
+                    this.debug(`Price for ${token.symbol} is estimated, fetching in background...`);
+                    window.pricingService.fetchPricesForTokens([token.address])
+                        .then(() => {
+                            // Update price display after fetching
+                            const updatedPrice = window.pricingService.getPrice(token.address) || 0;
+                            this.updateTokenAmounts(type);
+                            this.debug(`Updated price for ${token.symbol}: $${updatedPrice}`);
+                        })
+                        .catch(error => {
+                            this.debug(`Failed to fetch price for ${token.symbol}:`, error);
+                        });
                 }
             }
             // Handle zero balance case
@@ -1917,15 +1919,12 @@ export class CreateOrder extends BaseComponent {
                     }
                 }
                 
-                // Validate that the token is allowed in the contract
+                // Add loading state to token item
+                tokenItem.style.opacity = '0.6';
+                tokenItem.style.pointerEvents = 'none';
+                
                 try {
-                    const isAllowed = await contractService.isTokenAllowed(address);
-                    
-                    if (!isAllowed) {
-                        this.showError(`Token ${token.symbol} is not allowed for trading. Please select an allowed token.`);
-                        return;
-                    }
-                    
+                    // Token is already validated since it's in the allowed tokens list
                     await this.handleTokenSelect(type, token);
                     
                     // Close the modal after selection
@@ -1933,9 +1932,10 @@ export class CreateOrder extends BaseComponent {
                     if (modal) {
                         modal.style.display = 'none';
                     }
-                } catch (validationError) {
-                    this.debug('Token validation error:', validationError);
-                    this.showError('Unable to validate token. Please try again.');
+                } finally {
+                    // Remove loading state
+                    tokenItem.style.opacity = '1';
+                    tokenItem.style.pointerEvents = 'auto';
                 }
             }
         } catch (error) {
@@ -2037,8 +2037,20 @@ export class CreateOrder extends BaseComponent {
                 }
 
                 // Create new listener for opening modal
-                this.tokenSelectorListeners[type] = () => {
+                this.tokenSelectorListeners[type] = async () => {
                     modal.style.display = 'block';
+                    
+                    // Pre-fetch prices for all allowed tokens in background
+                    if (window.pricingService && this.tokens?.length > 0) {
+                        const tokenAddresses = this.tokens.map(t => t.address);
+                        window.pricingService.fetchPricesForTokens(tokenAddresses)
+                            .then(() => {
+                                this.debug('Pre-fetched prices for all tokens');
+                            })
+                            .catch(error => {
+                                this.debug('Failed to pre-fetch prices:', error);
+                            });
+                    }
                 };
 
                 // Add new listener
