@@ -85,6 +85,13 @@ export const DEBUG_CONFIG = {
     // Add more specific flags as needed
 };
 
+// Centralized order-related constants
+export const ORDER_CONSTANTS = {
+    STATUS_MAP: ['Active', 'Filled', 'Canceled'],
+    DEFAULT_ORDER_EXPIRY_SECS: 7 * 24 * 60 * 60, // 7 days
+    DEFAULT_GRACE_PERIOD_SECS: 7 * 24 * 60 * 60 // 7 days
+};
+
 // Token Icon Service Configuration
 export const TOKEN_ICON_CONFIG = {
     // CoinGecko API configuration

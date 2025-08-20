@@ -364,6 +364,16 @@ class App {
 				this.debug('WebSocket order sync complete, showing content');
 			});
 
+			// Subscribe to order sync progress updates for UX
+			window.webSocket.subscribe('orderSyncProgress', ({ fetched, total, batch, totalBatches }) => {
+				try {
+					const textEl = this.loadingOverlay?.querySelector?.('.loading-text');
+					if (textEl && typeof fetched === 'number' && typeof total === 'number') {
+						textEl.textContent = `Loading orders ${Math.min(fetched, total)}/${total} (batch ${batch}/${totalBatches})`;
+					}
+				} catch (_) {}
+			});
+
 			const wsInitialized = await window.webSocket.initialize();
 			if (!wsInitialized) {
 				this.debug('WebSocket initialization failed, falling back to HTTP');

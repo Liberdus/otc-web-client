@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
-import { getNetworkConfig } from '../config.js';
+import { getNetworkConfig, ORDER_CONSTANTS } from '../config.js';
+import { tryAggregate as multicallTryAggregate, isMulticallAvailable } from './MulticallService.js';
 import { erc20Abi } from '../abi/erc20.js';
 import { createLogger } from './LogService.js';
 import { tokenIconService } from './TokenIconService.js';
@@ -28,6 +29,9 @@ export class WebSocketService {
         // Add contract constants
         this.orderExpiry = null;
         this.gracePeriod = null;
+
+        // Throttle state for block logs
+        this.lastBlockLogTime = 0;
         
 
         const logger = createLogger('WEBSOCKET');
@@ -202,12 +206,16 @@ export class WebSocketService {
             const filter = contract.filters.OrderCreated();
             this.debug('Created filter:', filter);
             
-            // Listen for new blocks to ensure connection is alive
+            // Listen for new blocks to ensure connection is alive (throttled logging)
             this.provider.on("block", async (blockNumber) => {
                 try {
-                    await this.queueRequest(async () => {
-                        this.debug('New block received:', blockNumber);
-                    });
+                    const now = Date.now();
+                    if (now - this.lastBlockLogTime >= 5000) { // log at most every 5s
+                        this.lastBlockLogTime = now;
+                        await this.queueRequest(async () => {
+                            this.debug('New block received:', blockNumber);
+                        });
+                    }
                 } catch (error) {
                     this.debug('Error processing block event:', error);
                     // Don't let block processing errors crash the app
@@ -336,6 +344,187 @@ export class WebSocketService {
         }
     }
 
+    /**
+     * Build Interface for decoding the orders(uint256) response
+     */
+    static getOrdersInterface() {
+        if (!this._ordersInterface) {
+            this._ordersInterface = new ethers.utils.Interface([
+                'function orders(uint256) view returns (address maker, address taker, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 timestamp, uint8 status, address feeToken, uint256 orderCreationFee, uint256 tries)'
+            ]);
+        }
+        return this._ordersInterface;
+    }
+
+    /**
+     * Fetch a contiguous range of orders via Multicall2.
+     * Returns an array of decoded order objects (filtered for non-zero maker).
+     * If multicall is unavailable, returns null to signal fallback.
+     */
+    async fetchOrdersViaMulticall(startIndex, endIndex) {
+        try {
+            if (!isMulticallAvailable()) {
+                this.debug('Multicall not available, skipping multicall path');
+                return null;
+            }
+
+            const iface = WebSocketService.getOrdersInterface();
+            const calls = [];
+            for (let i = startIndex; i < endIndex; i++) {
+                calls.push({
+                    target: this.contract.address,
+                    callData: iface.encodeFunctionData('orders', [i])
+                });
+            }
+
+            // Try once, then retry once on failure before falling back
+            // Apply a simple timeout wrapper to multicall
+            const withTimeout = (p, ms) => Promise.race([
+                p,
+                new Promise((_, rej) => setTimeout(() => rej(new Error('multicall timeout')), ms))
+            ]);
+
+            let results = await withTimeout(multicallTryAggregate(calls, { requireSuccess: false }), 5000);
+            if (!results) {
+                this.debug('Multicall returned null, retrying once after short delay...');
+                await new Promise(r => setTimeout(r, 150));
+                try {
+                    results = await withTimeout(multicallTryAggregate(calls, { requireSuccess: false }), 5000);
+                } catch (_) {
+                    results = null;
+                }
+                if (!results) {
+                    this.debug('Multicall retry failed');
+                    return null;
+                }
+            }
+
+            const orders = [];
+            for (let i = 0; i < results.length; i++) {
+                const result = results[i];
+                const orderId = startIndex + i;
+                if (!result || result.success !== true) {
+                    continue;
+                }
+                try {
+                    const decoded = iface.decodeFunctionResult('orders', result.returnData);
+                    const [maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, status, feeToken, orderCreationFee, tries] = decoded;
+                    if (maker === ethers.constants.AddressZero) {
+                        continue;
+                    }
+                    orders.push({
+                        id: orderId,
+                        maker,
+                        taker,
+                        sellToken,
+                        sellAmount,
+                        buyToken,
+                        buyAmount,
+                        timestamp: timestamp.toNumber(),
+                        status: ORDER_CONSTANTS.STATUS_MAP[Number(status)],
+                        feeToken,
+                        orderCreationFee,
+                        tries: (tries && tries.toNumber) ? tries.toNumber() : Number(tries)
+                    });
+                } catch (e) {
+                    this.debug(`Failed to decode order ${orderId} from multicall`, e);
+                }
+            }
+            return orders;
+        } catch (error) {
+            this.debug('fetchOrdersViaMulticall error:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Fallback: fetch orders individually with small concurrency.
+     */
+    async fetchOrdersIndividually(startIndex, endIndex, concurrency = 3) {
+        const indices = [];
+        for (let i = startIndex; i < endIndex; i++) indices.push(i);
+        const results = [];
+
+        let cursor = 0;
+        const worker = async () => {
+            const iface = WebSocketService.getOrdersInterface();
+            while (true) {
+                const idx = cursor++;
+                if (idx >= indices.length) break;
+                const orderId = indices[idx];
+                try {
+                    const order = await this.contract.orders(orderId);
+                    if (order.maker === ethers.constants.AddressZero) {
+                        continue;
+                    }
+                    results.push({
+                        id: orderId,
+                        maker: order.maker,
+                        taker: order.taker,
+                        sellToken: order.sellToken,
+                        sellAmount: order.sellAmount,
+                        buyToken: order.buyToken,
+                        buyAmount: order.buyAmount,
+                        timestamp: order.timestamp.toNumber(),
+                        status: ORDER_CONSTANTS.STATUS_MAP[Number(order.status)],
+                        feeToken: order.feeToken,
+                        orderCreationFee: order.orderCreationFee,
+                        tries: (order.tries && order.tries.toNumber) ? order.tries.toNumber() : Number(order.tries)
+                    });
+                } catch (e) {
+                    this.debug(`Failed to read order ${orderId} via fallback`, e);
+                }
+            }
+        };
+
+        const workers = Array.from({ length: Math.min(concurrency, indices.length) }, () => worker());
+        await Promise.all(workers);
+        // Keep results sorted by id
+        results.sort((a, b) => a.id - b.id);
+        return results;
+    }
+
+    /**
+     * High-level helper: fetch orders in batches using multicall with fallback.
+     * Returns an array of decoded orders (without timing expansion).
+     */
+    async fetchOrdersBatched(totalOrders, batchSize = 50) {
+        const all = [];
+        if (!this.contract) {
+            throw new Error('Contract not initialized. Call initialize() first.');
+        }
+        const totalBatches = Math.ceil(totalOrders / batchSize);
+        this.debug(`Batched order fetch: ${totalOrders} orders in ${totalBatches} batches of ${batchSize}`);
+        let fetchedSoFar = 0;
+
+        for (let batch = 0; batch < totalBatches; batch++) {
+            const startIndex = batch * batchSize;
+            const endIndex = Math.min(startIndex + batchSize, totalOrders);
+            this.debug(`Fetching batch ${batch + 1}/${totalBatches} (orders ${startIndex}-${endIndex - 1})`);
+            let batchOrders = await this.fetchOrdersViaMulticall(startIndex, endIndex);
+            if (!batchOrders) {
+                batchOrders = await this.fetchOrdersIndividually(startIndex, endIndex, 3);
+            }
+            all.push(...batchOrders);
+            fetchedSoFar += batchOrders.length;
+            // Emit progress for UI consumers
+            try {
+                this.notifySubscribers('orderSyncProgress', {
+                    fetched: fetchedSoFar,
+                    total: totalOrders,
+                    batch: batch + 1,
+                    totalBatches
+                });
+            } catch (_) {}
+            if (batch < totalBatches - 1) {
+                // Short delay between batches
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
+        this.debug(`Batched order fetch complete: ${all.length} orders retrieved`);
+        return all;
+    }
+
     cleanup() {
         try {
             this.debug('Cleaning up WebSocket service...');
@@ -384,92 +573,61 @@ export class WebSocketService {
 
             // Clear existing cache before sync
             this.orderCache.clear();
-            
-            // Process orders in smaller batches to avoid rate limiting
-            const batchSize = 3; // Process only 3 orders at a time
-            const totalBatches = Math.ceil(nextOrderId / batchSize);
-            
-            this.debug(`Processing ${nextOrderId} orders in ${totalBatches} batches of ${batchSize}`);
-            
-            for (let batch = 0; batch < totalBatches; batch++) {
-                const startIndex = batch * batchSize;
-                const endIndex = Math.min(startIndex + batchSize, nextOrderId);
-                
-                this.debug(`Processing batch ${batch + 1}/${totalBatches} (orders ${startIndex}-${endIndex - 1})`);
-                
-                                // Process current batch
-                for (let i = startIndex; i < endIndex; i++) {
-                    try {
-                        // Add longer delay to avoid rate limiting
-                        if (i > startIndex) {
-                            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
-                        }
-                        
-                        const order = await this.contract.orders(i);
-                        this.debug(`Order ${i} data:`, {
-                            maker: order.maker,
-                            taker: order.taker,
-                            sellToken: order.sellToken,
-                            buyToken: order.buyToken,
-                            status: order.status.toString(),
-                            isZeroMaker: order.maker === ethers.constants.AddressZero
-                        });
-                        
-                        // Only filter out zero-address makers (non-existent orders)
-                        if (order.maker !== ethers.constants.AddressZero) {
-                            const orderData = {
-                                id: i,
-                                maker: order.maker,
-                                taker: order.taker,
-                                sellToken: order.sellToken,
-                                sellAmount: order.sellAmount,
-                                buyToken: order.buyToken,
-                                buyAmount: order.buyAmount,
-                                timestamp: order.timestamp.toNumber(),
-                                status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
-                                orderCreationFee: order.orderCreationFee,
-                                tries: order.tries,
-                                timings: {
-                                    createdAt: order.timestamp.toNumber(),
-                                    expiresAt: order.timestamp.toNumber() + (this.orderExpiry ? this.orderExpiry.toNumber() : 604800), // Default 7 days
-                                    graceEndsAt: order.timestamp.toNumber() +
-                                        (this.orderExpiry ? this.orderExpiry.toNumber() : 604800) +
-                                        (this.gracePeriod ? this.gracePeriod.toNumber() : 604800) // Default 7 + 7 days
-                                }
-                            };
-                            this.orderCache.set(i, orderData);
-                            this.debug('Added order to cache:', orderData);
-                        }
-                    } catch (error) {
-                        this.debug(`Failed to read order ${i}:`, error);
-                        
-                        // If it's a rate limit error, add extra delay
-                        if (error.code === 'CALL_EXCEPTION' && error.error?.code === -32005) {
-                            this.debug(`Rate limit hit for order ${i}, waiting 2 seconds...`);
-                            await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
-                        }
-                        
-                        continue;
+
+            // Use optimized batched fetch (multicall with fallback)
+            const fetchedOrders = await this.fetchOrdersBatched(Number(nextOrderId), 50);
+
+            // Enrich with timings and populate cache
+            for (const o of fetchedOrders) {
+                const orderData = {
+                    ...o,
+                    timings: {
+                        createdAt: o.timestamp,
+                        expiresAt: o.timestamp + (this.orderExpiry ? this.orderExpiry.toNumber() : ORDER_CONSTANTS.DEFAULT_ORDER_EXPIRY_SECS),
+                        graceEndsAt: o.timestamp +
+                            (this.orderExpiry ? this.orderExpiry.toNumber() : ORDER_CONSTANTS.DEFAULT_ORDER_EXPIRY_SECS) +
+                            (this.gracePeriod ? this.gracePeriod.toNumber() : ORDER_CONSTANTS.DEFAULT_GRACE_PERIOD_SECS)
                     }
-                }
-                
-                // Add delay between batches
-                if (batch < totalBatches - 1) {
-                    this.debug(`Batch ${batch + 1} complete, waiting 1 second before next batch...`);
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second between batches
-                }
+                };
+                this.orderCache.set(o.id, orderData);
+                this.debug('Added order to cache:', orderData);
             }
-            
+
+            // Validate and summarize order cache
+            try {
+                this.validateOrderCache();
+            } catch (_) {}
+
             this.debug('Order sync complete. Cache size:', this.orderCache.size);
             this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
             this.debug('Setting up event listeners...');
-            // TODO move this where needed (after sync)
             await this.setupEventListeners(this.contract);
-            
+
         } catch (error) {
             this.debug('Order sync failed:', error);
             this.orderCache.clear();
             this.notifySubscribers('orderSyncComplete', {});
+        }
+    }
+
+    // Basic validation and summary for testing/diagnostics
+    validateOrderCache() {
+        const orders = Array.from(this.orderCache.values());
+        const summary = orders.reduce((acc, o) => {
+            const s = o.status || 'Unknown';
+            acc[s] = (acc[s] || 0) + 1;
+            return acc;
+        }, {});
+        this.debug('Order cache validation:', {
+            total: orders.length,
+            byStatus: summary
+        });
+        // Spot-check required fields on a few entries
+        for (let i = 0; i < Math.min(3, orders.length); i++) {
+            const o = orders[i];
+            if (!o.maker || !o.sellToken || !o.buyToken) {
+                this.warn('Order missing critical fields:', o.id);
+            }
         }
     }
 

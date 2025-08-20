@@ -3,6 +3,7 @@ import { getNetworkConfig } from '../config.js';
 import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
 import { tokenIconService } from '../services/TokenIconService.js';
+import { tryAggregate as multicallTryAggregate } from '../services/MulticallService.js';
 
 // Initialize logger
 const logger = createLogger('CONTRACT_TOKENS');
@@ -14,28 +15,6 @@ const warn = logger.warn.bind(logger);
 const CONCURRENCY_LIMIT = 5; // Max concurrent metadata/icon tasks
 
 // No global rate limiting state needed with multicall + caching
-
-// Multicall2 ABI and helper
-const MULTICALL2_ABI = [
-    'function tryAggregate(bool requireSuccess, tuple(address target, bytes callData)[] calls) view returns (tuple(bool success, bytes returnData)[])'
-];
-
-/**
- * Execute a batch of read-only ERC20 calls via Multicall2 if configured for the network
- * Falls back to individual calls if multicall is not available
- */
-async function multicallTryAggregate(calls) {
-    const networkCfg = getNetworkConfig();
-    const multicallAddress = networkCfg.multicallAddress;
-    const provider = contractService.getProvider();
-
-    if (!provider || !multicallAddress) {
-        return null; // Signal to fallback
-    }
-
-    const multicall = new ethers.Contract(multicallAddress, MULTICALL2_ABI, provider);
-    return await multicall.tryAggregate(false, calls);
-}
 
 // Simple in-memory caches
 const TOKEN_METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -60,7 +39,6 @@ async function getBatchTokenBalances(tokenAddresses, userAddress) {
     ]);
 
     const calls = [];
-    const normalized = tokenAddresses.map(a => a.toLowerCase());
     for (const token of tokenAddresses) {
         calls.push({ target: token, callData: iface.encodeFunctionData('balanceOf', [userAddress]) });
         calls.push({ target: token, callData: iface.encodeFunctionData('decimals') });
