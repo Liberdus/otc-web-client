@@ -2,7 +2,7 @@ import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, walletManager } from '../config.js';
 import { erc20Abi } from '../abi/erc20.js';
-import { getContractAllowedTokens, getAllWalletTokens } from '../utils/contractTokens.js';
+import { getContractAllowedTokens, getAllWalletTokens, clearTokenCaches } from '../utils/contractTokens.js';
 import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
 import { validateSellBalance } from '../utils/balanceValidation.js';
@@ -649,6 +649,14 @@ export class CreateOrder extends BaseComponent {
 
                     this.showInfo('Waiting for confirmation...');
                     await tx.wait();
+                    
+                    // After success: clear cached balances and refresh any open token modals
+                    try {
+                        clearTokenCaches();
+                        this.refreshOpenTokenModals();
+                    } catch (e) {
+                        this.debug('Post-order cache clear/refresh failed:', e);
+                    }
                     
                     // Force a sync of all orders after successful creation
                     if (window.webSocket) {
@@ -2291,6 +2299,23 @@ export class CreateOrder extends BaseComponent {
                 </div>
             </div>
         `;
+    }
+
+    // Refresh token modal lists if open (balances/icons may have changed)
+    refreshOpenTokenModals() {
+        try {
+            ['sell', 'buy'].forEach(type => {
+                const modal = document.getElementById(`${type}TokenModal`);
+                if (modal && modal.style.display === 'block') {
+                    const allowedTokensList = modal.querySelector(`#${type}AllowedTokenList`);
+                    if (allowedTokensList && Array.isArray(this.allowedTokens)) {
+                        this.displayTokens(this.allowedTokens, allowedTokensList, type);
+                    }
+                }
+            });
+        } catch (error) {
+            this.debug('Error refreshing open token modals:', error);
+        }
     }
 }
 
