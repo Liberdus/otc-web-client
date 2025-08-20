@@ -204,13 +204,38 @@ export class WebSocketService {
             
             // Listen for new blocks to ensure connection is alive
             this.provider.on("block", async (blockNumber) => {
-                await this.queueRequest(async () => {
-                    this.debug('New block received:', blockNumber);
-                });
+                try {
+                    await this.queueRequest(async () => {
+                        this.debug('New block received:', blockNumber);
+                    });
+                } catch (error) {
+                    this.debug('Error processing block event:', error);
+                    // Don't let block processing errors crash the app
+                }
             });
+
+            // Add error handling for WebSocket connection
+            this.provider._websocket.onerror = (error) => {
+                this.debug('WebSocket error:', error);
+            };
+
+            this.provider._websocket.onclose = (event) => {
+                this.debug('WebSocket closed:', event);
+                // Attempt to reconnect if not manually closed
+                if (event.code !== 1000) {
+                    this.debug('WebSocket closed unexpectedly, attempting to reconnect...');
+                    setTimeout(() => {
+                        this.reconnect();
+                    }, 5000);
+                }
+            };
 
             contract.on("OrderCreated", async (...args) => {
                 try {
+                    if (!args || args.length < 9) {
+                        this.debug('Invalid OrderCreated event args:', args);
+                        return;
+                    }
                     const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee, event] = args;
                     
                     let orderData = {
@@ -743,5 +768,43 @@ export class WebSocketService {
 
         this.debug('Order status: Active');
         return 'Active';
+    }
+
+    // Reconnect method for handling WebSocket disconnections
+    async reconnect() {
+        try {
+            this.debug('Attempting to reconnect WebSocket...');
+            
+            // Clean up existing connection
+            if (this.provider) {
+                try {
+                    this.provider.removeAllListeners();
+                    if (this.provider._websocket) {
+                        this.provider._websocket.close();
+                    }
+                } catch (error) {
+                    this.debug('Error cleaning up old connection:', error);
+                }
+            }
+
+            // Reset state
+            this.isInitialized = false;
+            this.provider = null;
+            this.contract = null;
+
+            // Wait a bit before reconnecting
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Reinitialize
+            await this.initialize();
+            
+            this.debug('WebSocket reconnection successful');
+        } catch (error) {
+            this.error('WebSocket reconnection failed:', error);
+            // Try again after a longer delay
+            setTimeout(() => {
+                this.reconnect();
+            }, 10000);
+        }
     }
 }

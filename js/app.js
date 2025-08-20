@@ -617,10 +617,11 @@ class App {
 				}
 			}
 			
-			// Create and initialize CreateOrder component when wallet is connected
-			const createOrderComponent = new CreateOrder();
-			this.components['create-order'] = createOrderComponent;
-			await createOrderComponent.initialize(false);
+			// Reinitialize existing CreateOrder component when wallet is connected
+			const createOrderComponent = this.components['create-order'];
+			if (createOrderComponent) {
+				await createOrderComponent.initialize(false);
+			}
 			
 			// Reinitialize all components in connected mode
 			await this.initializeComponents(false);
@@ -696,6 +697,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 	try {
 		// Check version first, before anything else happens
 		await versionService.initialize();
+		
+		// Add global error handler for WebSocket issues
+		window.addEventListener('error', (event) => {
+			if (event.error && event.error.message && event.error.message.includes('callback')) {
+				console.warn('WebSocket callback error detected, attempting to reconnect...');
+				if (window.webSocket && window.webSocket.reconnect) {
+					window.webSocket.reconnect();
+				}
+			}
+		});
 		
 		window.app.load();
 		

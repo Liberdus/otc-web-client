@@ -338,7 +338,8 @@ export class ViewOrders extends BaseComponent {
             }
 
             // Apply pagination
-            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+            const pageSizeSelect = this.container.querySelector('#page-size-select');
+            const pageSize = pageSizeSelect ? parseInt(pageSizeSelect.value) : 25; // Default to 25 if element doesn't exist
             const startIndex = (this.currentPage - 1) * pageSize;
             const endIndex = pageSize === -1 ? ordersToDisplay.length : startIndex + pageSize;
             const paginatedOrders = pageSize === -1 ? 
@@ -347,6 +348,10 @@ export class ViewOrders extends BaseComponent {
 
             // Update the table
             const tbody = this.container.querySelector('tbody');
+            if (!tbody) {
+                this.debug('No tbody found, skipping table update');
+                return;
+            }
             tbody.innerHTML = '';
             
             for (const order of paginatedOrders) {

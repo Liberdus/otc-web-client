@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { getNetworkConfig } from '../config.js';
 import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
 import { tokenIconService } from '../services/TokenIconService.js';
@@ -73,8 +74,10 @@ export async function getContractAllowedTokens() {
                 // Get icon URL for the token
                 let iconUrl = null;
                 try {
-                    const chainId = 137; // Polygon - you might want to get this dynamically
-                    debug(`Fetching icon for token ${address} (${metadata.symbol})`);
+                    // Get current network chain ID dynamically
+                    const networkConfig = getNetworkConfig();
+                    const chainId = parseInt(networkConfig.chainId, 16);
+                    debug(`Fetching icon for token ${address} (${metadata.symbol}) on chain ${chainId}`);
                     iconUrl = await tokenIconService.getIconUrl(address, chainId);
                     debug(`Icon result for ${metadata.symbol}: ${iconUrl}`);
                 } catch (err) {
@@ -143,6 +146,7 @@ async function getTokenMetadata(tokenAddress) {
     try {
         // Known token fallbacks for common tokens
         const knownTokens = {
+            // Polygon Mainnet tokens
             '0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6': {
                 symbol: 'WBTC',
                 name: 'Wrapped Bitcoin',
@@ -171,6 +175,22 @@ async function getTokenMetadata(tokenAddress) {
             '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270': {
                 symbol: 'WPOL',
                 name: 'Wrapped Polygon Ecosystem Token',
+                decimals: 18
+            },
+            // Amoy Testnet tokens
+            '0x224708430f2FF85E32cd77e986eE558Eb8cC77D9': {
+                symbol: 'FEE',
+                name: 'Fee Token',
+                decimals: 18
+            },
+            '0xB93D55595796D8c59beFC0C9045415B4d567f27c': {
+                symbol: 'TT1',
+                name: 'Trading Token 1',
+                decimals: 18
+            },
+            '0x963322CC131A072F333A76ac321Bb80b6cb5375C': {
+                symbol: 'TT2',
+                name: 'Trading Token 2',
                 decimals: 18
             }
         };
