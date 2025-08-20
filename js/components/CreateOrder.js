@@ -127,21 +127,9 @@ export class CreateOrder extends BaseComponent {
 
             // Rest of the initialization code for connected mode...
             if (window.webSocket) {
-                window.webSocket.subscribe("OrderCreated", (order) => {
-                    this.debug('New order created:', order);
-                    // Use refreshActiveComponent instead of loadOrders
-                    if (window.app?.refreshActiveComponent) {
-                        window.app.refreshActiveComponent();
-                    }
-                });
-
-                window.webSocket.subscribe("ordersUpdated", (orders) => {
-                    this.debug('Orders updated:', orders);
-                    // Use refreshActiveComponent instead of loadOrders
-                    if (window.app?.refreshActiveComponent) {
-                        window.app.refreshActiveComponent();
-                    }
-                });
+                // Remove all order update subscriptions - CreateOrder shouldn't refresh itself
+                // when orders are created or updated, only other components should refresh
+                // CreateOrder only creates orders, it doesn't need to listen to order events
             }
 
             // Wait for WebSocket to be fully initialized
@@ -520,13 +508,13 @@ export class CreateOrder extends BaseComponent {
             }
 
             // Validate that one of the tokens must be Liberdus (LIB)
-            const sellTokenIsLiberdus = this.isLiberdusToken(this.sellToken.address);
+            /* const sellTokenIsLiberdus = this.isLiberdusToken(this.sellToken.address);
             const buyTokenIsLiberdus = this.isLiberdusToken(this.buyToken.address);
             
             if (!sellTokenIsLiberdus && !buyTokenIsLiberdus) {
                 this.showError('One of the tokens must be Liberdus (LIB). Please select Liberdus as either the buy or sell token.');
                 return;
-            }
+            } */
 
             // Validate that both tokens are allowed in the contract
             try {
