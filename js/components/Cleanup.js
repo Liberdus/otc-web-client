@@ -10,6 +10,7 @@ export class Cleanup extends BaseComponent {
         this.contract = null;
         this.isInitializing = false;
         this.isInitialized = false;
+        this.currentMode = null; // track readOnly/connected mode to allow re-init on change
         
         // Initialize logger
         const logger = createLogger('CLEANUP');
@@ -24,8 +25,9 @@ export class Cleanup extends BaseComponent {
             return;
         }
 
-        if (this.isInitialized) {
-            this.debug('Already initialized, skipping...');
+        // Allow re-initialization when mode changes (read-only -> connected or vice versa)
+        if (this.isInitialized && this.currentMode === readOnlyMode) {
+            this.debug('Already initialized for this mode, skipping...');
             return;
         }
 
@@ -34,6 +36,7 @@ export class Cleanup extends BaseComponent {
         try {
             this.debug('Starting Cleanup initialization...');
             this.debug('ReadOnly mode:', readOnlyMode);
+            this.currentMode = readOnlyMode;
             
             // Wait for WebSocket to be fully initialized
             if (!window.webSocket?.isInitialized) {
@@ -95,10 +98,14 @@ export class Cleanup extends BaseComponent {
                 this.cleanupButton = document.getElementById('cleanup-button');
                 if (this.cleanupButton) {
                     this.cleanupButton.addEventListener('click', () => {
+                        this.debug('Cleanup button clicked (read-only): attempting wallet connect');
                         if (window.walletManager) {
                             window.walletManager.connect().catch(error => {
+                                this.error('Wallet connect failed from cleanup (read-only):', error);
                                 this.showError('Failed to connect wallet: ' + error.message);
                             });
+                        } else {
+                            this.warn('WalletManager not available on cleanup button click (read-only)');
                         }
                     });
                 }
@@ -108,7 +115,13 @@ export class Cleanup extends BaseComponent {
                     window.walletManager.addListener((event, data) => {
                         if (event === 'connect') {
                             this.debug('Wallet connected in read-only mode, reinitializing...');
-                            this.initialize(false); // Reinitialize in connected mode
+                            // Force re-init in connected mode
+                            this.isInitialized = false;
+                            if (this.intervalId) {
+                                clearInterval(this.intervalId);
+                                this.intervalId = null;
+                            }
+                            this.initialize(false);
                         }
                     });
                 }
@@ -149,7 +162,10 @@ export class Cleanup extends BaseComponent {
             // Only set up the cleanup button event listener
             this.cleanupButton = document.getElementById('cleanup-button');
             if (this.cleanupButton) {
-                this.cleanupButton.addEventListener('click', () => this.performCleanup());
+                this.cleanupButton.addEventListener('click', () => {
+                    this.debug('Cleanup button clicked (connected): starting performCleanup');
+                    this.performCleanup();
+                });
             }
 
             this.debug('Starting cleanup opportunities check');

@@ -139,10 +139,8 @@ class App {
 		walletManager.addListener(async (event, data) => {
 			switch (event) {
 				case 'connect': {
-					this.debug('Wallet connected, reinitializing components...');
+					this.debug('Wallet connected, reinitializing components (preserving current tab)...');
 					this.updateTabVisibility(true);
-					// When connected, default to create-order to avoid flicker between tabs
-					this.currentTab = 'create-order';
 					// Preserve WebSocket order cache to avoid clearing orders on connect
 					await this.reinitializeComponents(true);
 					break;
