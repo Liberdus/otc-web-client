@@ -9,6 +9,7 @@ import { createLogger } from '../services/LogService.js';
 import { validateSellBalance } from '../utils/balanceValidation.js';
 import { tokenIconService } from '../services/TokenIconService.js';
 import { generateTokenIconHTML, getFallbackIconData } from '../utils/tokenIcons.js';
+import { handleTransactionError } from '../utils/ui.js';
 
 export class CreateOrder extends BaseComponent {
     // Liberdus token address constant
@@ -745,8 +746,8 @@ export class CreateOrder extends BaseComponent {
             }
         } catch (error) {
             this.debug('Create order error:', error);
-            const userMessage = this.getUserFriendlyError(error);
-            this.showError(userMessage);
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'order creation');
         } finally {
             this.isSubmitting = false;
             createOrderBtn.disabled = false;
@@ -1741,8 +1742,8 @@ export class CreateOrder extends BaseComponent {
             return true;
         } catch (error) {
             this.debug('Token approval error:', error);
-            const userMessage = this.getUserFriendlyError(error);
-            this.showError(userMessage);
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'token approval');
             return false;
         }
     }

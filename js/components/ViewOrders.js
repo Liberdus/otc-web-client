@@ -7,6 +7,7 @@ import { walletManager } from '../config.js';
 import { createLogger } from '../services/LogService.js';
 import { tokenIconService } from '../services/TokenIconService.js';
 import { generateTokenIconHTML } from '../utils/tokenIcons.js';
+import { handleTransactionError } from '../utils/ui.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -849,12 +850,8 @@ For Buyers:
         } catch (error) {
             this.debug('Fill order error details:', error);
             
-            // Handle specific error cases
-            if (error.code === 4001) {
-                this.showError('Transaction rejected by user');
-            } else {
-                this.showError(this.getReadableError(error));
-            }
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'fill order');
         } finally {
             if (button) {
                 button.disabled = false;

@@ -1,6 +1,7 @@
 import { ViewOrders } from './ViewOrders.js';
 import { createLogger } from '../services/LogService.js';
 import { ethers } from 'ethers';
+import { handleTransactionError } from '../utils/ui.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
@@ -673,11 +674,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                         this.debouncedRefresh();
                     } catch (error) {
                         this.debug('Error cancelling order:', error);
-                        if (error.code === 4001) {
-                            this.showError('Transaction rejected by user');
-                        } else {
-                            this.showError(this.getReadableError(error));
-                        }
+                        handleTransactionError(error, this, 'order cancellation');
                     } finally {
                         cancelButton.disabled = false;
                         cancelButton.textContent = 'Cancel';
