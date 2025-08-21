@@ -231,9 +231,12 @@ class App {
 				}
 			});
 			
-			// If disconnected and not on view-orders tab, switch to it
-			if (!isConnected && this.currentTab !== 'view-orders') {
-				this.showTab('view-orders');
+			// If disconnected, only switch to view-orders if current tab is not visible
+			if (!isConnected) {
+				const visibleWhenDisconnected = new Set(['intro', 'view-orders', 'cleanup-orders', 'contract-params']);
+				if (!visibleWhenDisconnected.has(this.currentTab)) {
+					this.showTab('view-orders');
+				}
 			}
 		};
 
