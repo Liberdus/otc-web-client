@@ -1339,7 +1339,7 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-item-content">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.iconUrl ? `
+                            ${token.iconUrl && token.iconUrl !== 'fallback' ? `
                                 <img src="${token.iconUrl}" 
                                     alt="${token.symbol}" 
                                     class="token-icon-image"
@@ -1467,7 +1467,7 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-item-content">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.iconUrl ? `
+                            ${token.iconUrl && token.iconUrl !== 'fallback' ? `
                                 <img src="${token.iconUrl}" 
                                     alt="${token.symbol}" 
                                     class="token-icon-image"
@@ -1913,7 +1913,7 @@ export class CreateOrder extends BaseComponent {
                     <div class="token-selector-content">
                         <div class="token-selector-left">
                             <div class="token-icon small">
-                                ${token.iconUrl ? `
+                                ${token.iconUrl && token.iconUrl !== 'fallback' ? `
                                     <img src="${token.iconUrl}" 
                                         alt="${token.symbol}" 
                                         class="token-icon-image"
@@ -2156,7 +2156,7 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-item" data-address="${token.address}">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.iconUrl ? 
+                            ${token.iconUrl && token.iconUrl !== 'fallback' ? 
                                 `<img src="${token.iconUrl}" alt="${token.symbol}" class="token-icon-image">` :
                                 `<div class="token-icon-fallback">${token.symbol.charAt(0)}</div>`
                             }
