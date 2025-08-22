@@ -8,6 +8,7 @@
   padding: 0.5rem;
   min-width: 48rem;
   background: var(--bg-secondary);
+  position: relative;
 }
 
 /* Table base styles */
@@ -16,6 +17,7 @@
   border-collapse: collapse;
   background: var(--bg-secondary);
   table-layout: fixed;
+  position: relative;
 }
 
 .orders-table thead {
@@ -63,9 +65,121 @@
   color: var(--text-primary);
 }
 
+/* Ensure status column doesn't clip tooltips */
+.orders-table td.order-status {
+  overflow: visible;
+  position: relative;
+}
+
 /* Status column specific styles */
 .order-status {
   font-weight: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+  position: relative;
+  overflow: visible;
+}
+
+.status-main {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.counterparty-address {
+  font-family: "Courier New", monospace;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: help;
+  opacity: 0.8;
+  transition: opacity 0.2s ease, color 0.2s ease;
+  position: relative;
+}
+
+.counterparty-address:hover {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+/* Click-to-copy styles */
+.counterparty-address.clickable {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--text-secondary);
+  text-underline-offset: 2px;
+}
+
+.counterparty-address.clickable:hover {
+  color: var(--accent-color, #3b82f6);
+  text-decoration-color: var(--accent-color, #3b82f6);
+}
+
+.counterparty-address.clickable:active {
+  transform: scale(0.98);
+}
+
+/* Copy feedback animation */
+.counterparty-address.copied {
+  color: var(--success-color, #10b981) !important;
+  text-decoration-color: var(--success-color, #10b981) !important;
+}
+
+.counterparty-address.copied::after {
+  content: " ✓ Copied!";
+  font-size: 0.7rem;
+  animation: fadeOut 2s ease-in-out forwards;
+}
+
+@keyframes fadeOut {
+  0% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Tooltip for full address on hover */
+.counterparty-address[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  z-index: 9999;
+  box-shadow: var(--card-shadow);
+  border: 1px solid var(--border-color);
+  margin-bottom: 0.25rem;
+  pointer-events: none;
+  max-width: 320px;
+  word-wrap: break-word;
+  /* have text inside wrap */
+  text-wrap: wrap;
+}
+
+/* Ensure tooltip doesn't overflow container */
+.counterparty-address[data-tooltip]:hover::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 0.25rem solid transparent;
+  border-top-color: var(--border-color);
+  margin-bottom: 0.125rem;
+  pointer-events: none;
+  z-index: 9998;
 }
 
 /* Action column specific styles */

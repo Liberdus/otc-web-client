@@ -964,8 +964,8 @@ For Buyers:
             const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
 
             const orderStatus = window.webSocket.getOrderStatus(order);
-                            const expiryEpoch = order?.timings?.expiresAt;
-                            const expiryText = typeof expiryEpoch === 'number' ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) : 'Unknown';
+            const expiryEpoch = order?.timings?.expiresAt;
+            const expiryText = typeof expiryEpoch === 'number' ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) : 'Unknown';
 
             tr.innerHTML = `
                 <td>${order.id}</td>
@@ -1091,7 +1091,12 @@ For Buyers:
 
             // Update status column to show current status
             const currentStatus = window.webSocket.getOrderStatus(order);
-            if (statusCell.textContent !== currentStatus) {
+            const statusMainElement = statusCell.querySelector('.status-main');
+            if (statusMainElement && statusMainElement.textContent !== currentStatus) {
+                statusMainElement.textContent = currentStatus;
+                this.debug(`Updated status for order ${order.id}: ${currentStatus}`);
+            } else if (!statusMainElement && statusCell.textContent !== currentStatus) {
+                // Fallback for old structure
                 statusCell.textContent = currentStatus;
                 this.debug(`Updated status for order ${order.id}: ${currentStatus}`);
             }

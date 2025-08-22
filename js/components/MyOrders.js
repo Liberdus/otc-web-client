@@ -1,7 +1,7 @@
 import { ViewOrders } from './ViewOrders.js';
 import { createLogger } from '../services/LogService.js';
 import { ethers } from 'ethers';
-import { handleTransactionError } from '../utils/ui.js';
+import { handleTransactionError, processOrderAddress, generateStatusCellHTML, setupClickToCopy } from '../utils/ui.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
@@ -595,6 +595,9 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
             // Get order status from WebSocket cache
             const orderStatus = window.webSocket.getOrderStatus(order);
 
+            // Get counterparty address for display
+            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            const { counterpartyAddress, isZeroAddr, formattedAddress } = processOrderAddress(order, userAddress);
             tr.innerHTML = `
                 <td>${order.id}</td>
                 <td>
@@ -619,12 +622,13 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 <td>${safeFormattedBuyAmount}</td>
                 <td>${(deal || 0).toFixed(6)}</td>
                 <td>${expiryText}</td>
-                <td class="order-status">${orderStatus}</td>
+                <td class="order-status">
+                    ${generateStatusCellHTML(orderStatus, counterpartyAddress, isZeroAddr, formattedAddress)}
+                </td>
                 <td class="action-column"></td>`;
 
             // Add cancel button logic to action column
             const actionCell = tr.querySelector('.action-column');
-            const userAddress = window.walletManager.getAccount()?.toLowerCase();
             
             // Use WebSocket helper to determine if order can be cancelled
             if (window.webSocket.canCancelOrder(order, userAddress)) {
@@ -694,6 +698,10 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
             } else {
                 actionCell.textContent = '-';
             }
+
+            // Add click-to-copy functionality for counterparty address
+            const addressElement = tr.querySelector('.counterparty-address.clickable');
+            setupClickToCopy(addressElement);
 
             // Render token icons asynchronously (match column positions)
             const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
