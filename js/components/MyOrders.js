@@ -830,7 +830,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                     actionCell.appendChild(cancelButton);
                 }
             } else if (order.maker?.toLowerCase() === currentAccount) {
-                actionCell.innerHTML = '<span class="your-order">Your Order</span>';
+                actionCell.innerHTML = '<span class="your-order">Mine</span>';
             } else if (order.timings?.expiresAt && currentTime > order.timings.expiresAt) {
                 actionCell.innerHTML = '<span class="expired-order">Expired</span>';
             } else {
