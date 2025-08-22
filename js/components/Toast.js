@@ -63,25 +63,43 @@ export class Toast {
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
         
-        // Create toast content
-        const content = document.createElement('div');
-        content.className = 'toast-content';
+        // Create toast header
+        const header = document.createElement('div');
+        header.className = 'toast-header';
+        
+        // Create header content (icon + title)
+        const headerContent = document.createElement('div');
+        headerContent.className = 'toast-header-content';
         
         // Add icon based on type
         const icon = this.createIcon(type);
-        content.appendChild(icon);
+        headerContent.appendChild(icon);
+        
+        // Add title based on type
+        const title = document.createElement('span');
+        title.className = 'toast-title';
+        title.textContent = this.getTypeTitle(type);
+        headerContent.appendChild(title);
+        
+        header.appendChild(headerContent);
+        
+        // Add close button to header
+        const closeButton = this.createCloseButton();
+        header.appendChild(closeButton);
+        
+        toast.appendChild(header);
+        
+        // Create toast body for message
+        const body = document.createElement('div');
+        body.className = 'toast-body';
         
         // Add message
-        const messageElement = document.createElement('span');
+        const messageElement = document.createElement('div');
         messageElement.className = 'toast-message';
         messageElement.textContent = message;
-        content.appendChild(messageElement);
+        body.appendChild(messageElement);
         
-        // Add close button
-        const closeButton = this.createCloseButton();
-        content.appendChild(closeButton);
-        
-        toast.appendChild(content);
+        toast.appendChild(body);
         
         // Add click handler for close button
         closeButton.addEventListener('click', () => {
@@ -119,6 +137,25 @@ export class Toast {
         }
         
         return icon;
+    }
+
+    /**
+     * Get title text for the toast type
+     * @param {string} type - The type of toast
+     * @returns {string} The title text
+     */
+    getTypeTitle(type) {
+        switch (type) {
+            case 'error':
+                return 'Error';
+            case 'success':
+                return 'Success';
+            case 'warning':
+                return 'Warning';
+            case 'info':
+            default:
+                return 'Information';
+        }
     }
 
     /**
