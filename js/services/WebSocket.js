@@ -915,16 +915,18 @@ export class WebSocketService {
         // Then check timing using cached timings
         const currentTime = Math.floor(Date.now() / 1000);
 
-                    if (order.timings?.graceEndsAt && currentTime > order.timings.graceEndsAt) {
-            this.debug('Order not active: Past grace period');
-            return '';
+        this.debug(`Checking order ${order.id} status: currentTime=${currentTime}, expiresAt=${order.timings?.expiresAt}, graceEndsAt=${order.timings?.graceEndsAt}`);
+
+        if (order.timings?.graceEndsAt && currentTime > order.timings.graceEndsAt) {
+            this.debug(`Order ${order.id} status: Expired (past grace period)`);
+            return 'Expired';
         }
-                    if (order.timings?.expiresAt && currentTime > order.timings.expiresAt) {
-            this.debug('Order status: Awaiting Clean');
+        if (order.timings?.expiresAt && currentTime > order.timings.expiresAt) {
+            this.debug(`Order ${order.id} status: Expired (past expiry time)`);
             return 'Expired';
         }
 
-        this.debug('Order status: Active');
+        this.debug(`Order ${order.id} status: Active`);
         return 'Active';
     }
 
