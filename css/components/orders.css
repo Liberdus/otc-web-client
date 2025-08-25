@@ -267,6 +267,11 @@
 
   .token-price {
     font-size: 0.75em;
+    font-weight: 500;
+    color: var(--text-primary);
+    text-align: right;
+    min-width: 80px;
+    font-family: "Courier New", monospace;
     letter-spacing: 0.3px;
   }
 }
@@ -431,6 +436,27 @@
   background-color: var(--bg-tertiary);
 }
 
+/* Remove any potential conflicting styles */
+.orders-table tr,
+.orders-table td,
+.orders-table th {
+  border: none;
+  margin: 0;
+  padding: 0.75rem;
+}
+
+/* Ensure the table container spans full width */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin-bottom: 1.25rem;
+  border-radius: 0.75rem;
+  box-shadow: var(--card-shadow);
+  padding: 0.5rem;
+  min-width: 42rem; /* Reduced from 48rem due to condensed layout */
+  background: var(--bg-secondary);
+}
+
 /* Hover effect for rows */
 .orders-table tbody tr:hover {
   background-color: var(--hover-bg);
@@ -536,6 +562,11 @@
 
   .token-price {
     font-size: 0.7em;
+    font-weight: 500;
+    color: var(--text-primary);
+    text-align: right;
+    min-width: 70px;
+    font-family: "Courier New", monospace;
     letter-spacing: 0.2px;
   }
 
@@ -590,6 +621,11 @@
 
   .token-price {
     font-size: 0.65em;
+    font-weight: 500;
+    color: var(--text-primary);
+    text-align: right;
+    min-width: 60px;
+    font-family: "Courier New", monospace;
     letter-spacing: 0.1px;
   }
 
@@ -605,27 +641,27 @@
   }
 }
 
-/* MyOrders specific column widths */
+/* MyOrders specific column widths - Updated for 7-column layout */
 #my-orders .orders-table th:nth-child(1) {
-  width: 8%;
+  width: 5%;
 } /* ID */
 #my-orders .orders-table th:nth-child(2) {
-  width: 12%;
+  width: 22%;
 } /* Buy Token */
 #my-orders .orders-table th:nth-child(3) {
-  width: 12%;
-} /* Buy Amount */
-#my-orders .orders-table th:nth-child(4) {
-  width: 20%;
+  width: 22%;
 } /* Sell Token */
+#my-orders .orders-table th:nth-child(4) {
+  width: 14%;
+} /* Deal */
 #my-orders .orders-table th:nth-child(5) {
-  width: 15%;
+  width: 14%;
 } /* Expires */
 #my-orders .orders-table th:nth-child(6) {
   width: 10%;
 } /* Status */
 #my-orders .orders-table th:nth-child(7) {
-  width: 15%;
+  width: 13%;
 } /* Action */
 
 /* Token display styles */

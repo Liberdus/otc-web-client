@@ -216,9 +216,7 @@ export class TakerOrders extends ViewOrders {
             thead.innerHTML = `
                 <th>ID</th>
                 <th>Buy</th>
-                <th>Amount</th>
                 <th>Sell</th>
-                <th>Amount</th>
                 <th>
                     Deal
                     <span class="info-icon" title="Deal = Price × Market Rate
@@ -285,6 +283,15 @@ Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
                 return `$${price.toFixed(4)}`;
             };
 
+            // Calculate total values (price × amount)
+            const calculateTotalValue = (price, amount) => {
+                if (!price || !amount) return '';
+                const total = price * parseFloat(amount);
+                if (total >= 100) return `$${total.toFixed(0)}`;
+                if (total >= 1) return `$${total.toFixed(2)}`;
+                return `$${total.toFixed(4)}`;
+            };
+
             // Determine prices with fallback to current pricing service map
             const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
                 ? sellTokenUsdPrice 
@@ -313,24 +320,28 @@ Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
                             <div class="loading-spinner"></div>
                         </div>
                         <div class="token-details">
-                            <span>${sellTokenInfo.symbol}</span>
-                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(resolvedSellPrice)}</span>
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${sellTokenInfo.symbol}</span>
+                                <span class="token-price ${sellPriceClass}">${calculateTotalValue(resolvedSellPrice, safeFormattedSellAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedSellAmount}</span>
                         </div>
                     </div>
                 </td>
-                <td>${safeFormattedSellAmount}</td>
                 <td>
                     <div class="token-info">
                         <div class="token-icon">
                             <div class="loading-spinner"></div>
                         </div>
                         <div class="token-details">
-                            <span>${buyTokenInfo.symbol}</span>
-                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(resolvedBuyPrice)}</span>
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${buyTokenInfo.symbol}</span>
+                                <span class="token-price ${buyPriceClass}">${calculateTotalValue(resolvedBuyPrice, safeFormattedBuyAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedBuyAmount}</span>
                         </div>
                     </div>
                 </td>
-                <td>${safeFormattedBuyAmount}</td>
                 <td>${(deal || 0).toFixed(6)}</td>
                 <td>${expiryText}</td>
                 <td class="order-status">
