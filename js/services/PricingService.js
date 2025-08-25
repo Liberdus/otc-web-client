@@ -1,4 +1,4 @@
-import { getNetworkConfig } from '../config.js';
+import { getNetworkConfig, isDebugEnabled } from '../config.js';
 import { createLogger } from './LogService.js';
 import { contractService } from './ContractService.js';
 
@@ -220,13 +220,21 @@ export class PricingService {
     }
 
     getPrice(tokenAddress) {
+        console.log('🔍 [DEAL DEBUG] PricingService.getPrice called for:', tokenAddress);
         const price = this.prices.get(tokenAddress.toLowerCase());
-        this.debug('Getting price for token:', {
-            address: tokenAddress,
-            price: price || 1,
-            allPrices: Object.fromEntries(this.prices)
-        });
-        return price || 1;
+        console.log('🔍 [DEAL DEBUG] PricingService.getPrice result:', price, 'for token:', tokenAddress);
+        
+        if (price === undefined) {
+            // Check if we should default to 1 for testing
+            if (isDebugEnabled('PRICING_DEFAULT_TO_ONE')) {
+                console.log('🔍 [DEAL DEBUG] Price not found, defaulting to 1 for testing');
+                return 1; // Default to 1 for testing
+            }
+            console.log('🔍 [DEAL DEBUG] Price not found, returning undefined for production');
+            return undefined; // Return undefined for production
+        }
+        
+        return price;
     }
 
     isPriceEstimated(tokenAddress) {
