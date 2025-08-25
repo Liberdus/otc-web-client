@@ -951,7 +951,7 @@ For Buyers:
 
             // Calculate total values (price × amount)
             const calculateTotalValue = (price, amount) => {
-                if (!price || !amount) return '';
+                if (!price || !amount) return 'N/A';
                 const total = price * parseFloat(amount);
                 if (total >= 100) return `$${total.toFixed(0)}`;
                 if (total >= 1) return `$${total.toFixed(2)}`;
@@ -1004,7 +1004,7 @@ For Buyers:
                         </div>
                     </div>
                 </td>
-                <td>${(deal || 0).toFixed(6)}</td>
+                <td>${deal !== undefined ? (deal || 0).toFixed(6) : 'N/A'}</td>
                 <td>${expiryText}</td>
                 <td class="order-status">${orderStatus}</td>
                 <td class="action-column"></td>`;

@@ -167,7 +167,7 @@ export class VersionService {
 			'js/utils/tokenIcons.js',
 			'js/utils/ui.js',
 			// CSS files
-			/* 'css/components/cleanup.css',
+			'css/components/cleanup.css',
 			'css/components/contract-params.css',
 			'css/components/debug.css',
 			'css/components/footer.css',
@@ -175,7 +175,7 @@ export class VersionService {
 			'css/components/orders.css',
 			'css/components/tabs.css',
 			'css/components/toast.css',
-			'css/components/wallet.css', */
+			'css/components/wallet.css',
 		];
 		
 		this.debug('Force reloading critical files...');

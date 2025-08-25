@@ -1088,14 +1088,14 @@ export class CreateOrder extends BaseComponent {
                         };
 
                         // Get USD price and calculate USD value
-                        const usdPrice = window.pricingService?.getPrice(token.address) || 0;
-                        const usdValue = Number(token.balance) * usdPrice;
-                        const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                        const usdPrice = window.pricingService?.getPrice(token.address);
+                        const usdValue = usdPrice !== undefined ? Number(token.balance) * usdPrice : 0;
+                        const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                             style: 'currency',
                             currency: 'USD',
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2
-                        });
+                        }) : 'N/A';
 
                         // Format balance
                         const formattedBalance = Number(token.balance).toLocaleString(undefined, { 
@@ -1188,14 +1188,14 @@ export class CreateOrder extends BaseComponent {
                                         maximumFractionDigits: 4,
                                         useGrouping: true
                                     });
-                                    const usdPrice = window.pricingService?.getPrice(token.address) || 0;
-                                    const usdValue = balance * usdPrice;
-                                    const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                                    const usdPrice = window.pricingService?.getPrice(token.address);
+                                    const usdValue = usdPrice !== undefined ? balance * usdPrice : 0;
+                                    const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                                         style: 'currency',
                                         currency: 'USD',
                                         minimumFractionDigits: 2,
                                         maximumFractionDigits: 2
-                                    });
+                                    }) : 'N/A';
 
                                     return `
                                         <div class="token-item token-allowed" data-address="${token.address}">
@@ -1316,14 +1316,14 @@ export class CreateOrder extends BaseComponent {
             });
             
             // Get USD price and calculate USD value
-            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
-            const usdValue = balance * usdPrice;
-            const formattedUsdValue = usdValue.toLocaleString(undefined, {
+            const usdPrice = window.pricingService?.getPrice(token.address);
+            const usdValue = usdPrice !== undefined ? balance * usdPrice : 0;
+            const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                 style: 'currency',
                 currency: 'USD',
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
-            });
+            }) : 'N/A';
 
             // Generate background color for fallback icon
             const colors = [
@@ -1444,14 +1444,14 @@ export class CreateOrder extends BaseComponent {
             });
             
             // Get USD price and calculate USD value
-            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
-            const usdValue = balance * usdPrice;
-            const formattedUsdValue = usdValue.toLocaleString(undefined, {
+            const usdPrice = window.pricingService?.getPrice(token.address);
+            const usdValue = usdPrice !== undefined ? balance * usdPrice : 0;
+            const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                 style: 'currency',
                 currency: 'USD',
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
-            });
+            }) : 'N/A';
 
             // Generate background color for fallback icon
             const colors = [
@@ -1860,7 +1860,7 @@ export class CreateOrder extends BaseComponent {
             let isPriceEstimated = true;
             
             if (window.pricingService) {
-                usdPrice = window.pricingService.getPrice(token.address) || 0;
+                usdPrice = window.pricingService.getPrice(token.address);
                 isPriceEstimated = window.pricingService.isPriceEstimated(token.address);
                 
                 // If price is estimated, fetch it in the background (non-blocking)
@@ -1869,7 +1869,7 @@ export class CreateOrder extends BaseComponent {
                     window.pricingService.fetchPricesForTokens([token.address])
                         .then(() => {
                             // Update price display after fetching
-                            const updatedPrice = window.pricingService.getPrice(token.address) || 0;
+                            const updatedPrice = window.pricingService.getPrice(token.address);
                             this.updateTokenAmounts(type);
                             this.debug(`Updated price for ${token.symbol}: $${updatedPrice}`);
                         })
@@ -1880,7 +1880,7 @@ export class CreateOrder extends BaseComponent {
             }
             // Handle zero balance case
             const balance = parseFloat(token.balance) || 0;
-            const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
+            const balanceUSD = (balance > 0 && usdPrice !== undefined) ? (balance * usdPrice).toFixed(2) : (usdPrice !== undefined ? '0.00' : 'N/A');
             const formattedBalance = balance.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 4,
@@ -2086,13 +2086,13 @@ export class CreateOrder extends BaseComponent {
             }
             
             if (token && amount) {
-                const usdValue = Number(amount) * token.usdPrice;
+                const usdValue = token.usdPrice !== undefined ? Number(amount) * token.usdPrice : 0;
                 // Ensure USD display element exists (in template) and update it
                 if (!usdDisplay) {
                     usdDisplay = document.getElementById(`${type}AmountUSD`);
                 }
                 if (usdDisplay) {
-                    usdDisplay.textContent = `$${usdValue.toFixed(2)}`;
+                    usdDisplay.textContent = token.usdPrice !== undefined ? `$${usdValue.toFixed(2)}` : 'N/A';
                     setVisibility(usdDisplay, true);
                 }
             }
@@ -2148,9 +2148,9 @@ export class CreateOrder extends BaseComponent {
         if (!modalContent) return;
 
         modalContent.innerHTML = tokens.map(token => {
-            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+            const usdPrice = window.pricingService?.getPrice(token.address);
             const balance = parseFloat(token.balance) || 0;
-            const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
+            const balanceUSD = (balance > 0 && usdPrice !== undefined) ? (balance * usdPrice).toFixed(2) : (usdPrice !== undefined ? '0.00' : 'N/A');
             
             return `
                 <div class="token-item" data-address="${token.address}">

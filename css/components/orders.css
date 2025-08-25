@@ -873,7 +873,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1; /* Take available space */
-  min-width: 0; /* Allow shrinking */
+  min-width: 30px; /* Allow shrinking */
   max-width: 60%; /* Prevent symbol from taking too much space */
 }
 

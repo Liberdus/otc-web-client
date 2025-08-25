@@ -576,7 +576,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
 
             // Calculate total values (price × amount)
             const calculateTotalValue = (price, amount) => {
-                if (!price || !amount) return '';
+                if (!price || !amount) return 'N/A';
                 const total = price * parseFloat(amount);
                 if (total >= 100) return `$${total.toFixed(0)}`;
                 if (total >= 1) return `$${total.toFixed(2)}`;
@@ -631,7 +631,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                         </div>
                     </div>
                 </td>
-                <td>${(deal || 0).toFixed(6)}</td>
+                <td>${deal !== undefined ? (deal || 0).toFixed(6) : 'N/A'}</td>
                 <td>${expiryText}</td>
                 <td class="order-status">
                     ${generateStatusCellHTML(orderStatus, counterpartyAddress, isZeroAddr, formattedAddress)}
