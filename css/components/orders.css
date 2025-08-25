@@ -6,7 +6,7 @@
   border-radius: 0.75rem;
   box-shadow: var(--card-shadow);
   padding: 0.5rem;
-  min-width: 48rem;
+  min-width: 42rem; /* Reduced from 48rem due to condensed layout */
   background: var(--bg-secondary);
   position: relative;
 }
@@ -18,39 +18,34 @@
   background: var(--bg-secondary);
   table-layout: fixed;
   position: relative;
+  will-change: scroll-position; /* Optimize for scrolling */
 }
 
 .orders-table thead {
   background-color: var(--bg-tertiary);
 }
 
-/* Column widths */
+/* Column widths - Updated for condensed layout */
 .orders-table th:nth-child(1) {
   width: 5%;
 } /* ID */
 .orders-table th:nth-child(2) {
-  width: 15%;
-} /* Buy Token (increased to accommodate price) */
+  width: 22%;
+} /* Buy Token (increased to accommodate amount + symbol + price) */
 .orders-table th:nth-child(3) {
-  width: 10%;
-} /* Buy Amount */
+  width: 22%;
+} /* Sell Token (increased to accommodate amount + symbol + price) */
 .orders-table th:nth-child(4) {
-  width: 15%;
-} /* Sell Token (increased to accommodate price) */
+  width: 14%;
+} /* Deal */
 .orders-table th:nth-child(5) {
-  width: 10%;
-} /* Sell Amount */
+  width: 14%;
+} /* Expires */
 .orders-table th:nth-child(6) {
   width: 10%;
-} /* Deal */
-.orders-table th:nth-child(7) {
-  width: 15%;
-} /* Expires */
-.orders-table th:nth-child(8) {
-  width: 10%;
 } /* Status */
-.orders-table th:nth-child(9) {
-  width: 10%;
+.orders-table th:nth-child(7) {
+  width: 13%;
 } /* Action */
 
 /* Cell styles */
@@ -63,6 +58,7 @@
   text-overflow: ellipsis;
   font-size: 0.875rem;
   color: var(--text-primary);
+  vertical-align: top; /* Align content to top for better readability */
 }
 
 /* Ensure status column doesn't clip tooltips */
@@ -246,6 +242,33 @@
   .orders-table {
     font-size: 0.9em;
   }
+
+  /* Adjust token info layout for medium screens */
+  .token-info {
+    gap: 6px;
+  }
+
+  .token-icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .token-symbol-row {
+    gap: 6px;
+  }
+
+  .token-symbol {
+    font-size: 0.9em;
+  }
+
+  .token-amount {
+    font-size: 0.85em;
+  }
+
+  .token-price {
+    font-size: 0.75em;
+    letter-spacing: 0.3px;
+  }
 }
 
 /* Filter and Pagination Controls */
@@ -408,30 +431,37 @@
   background-color: var(--bg-tertiary);
 }
 
-/* Remove any potential conflicting styles */
-.orders-table tr,
-.orders-table td,
-.orders-table th {
-  border: none;
-  margin: 0;
-  padding: 0.75rem;
-}
-
-/* Ensure the table container spans full width */
-.table-container {
-  width: 100%;
-  overflow-x: auto;
-  margin-bottom: 1.25rem;
-  border-radius: 0.75rem;
-  box-shadow: var(--card-shadow);
-  padding: 0.5rem;
-  min-width: 48rem;
-  background: var(--bg-secondary);
-}
-
 /* Hover effect for rows */
 .orders-table tbody tr:hover {
   background-color: var(--hover-bg);
+  transition: background-color 0.2s ease;
+}
+
+/* Enhanced token info hover effects */
+.token-info:hover .token-symbol {
+  color: var(--accent-color, #10b981);
+}
+
+.token-info:hover .token-amount {
+  color: var(--text-primary);
+}
+
+.token-info:hover .token-price {
+  color: var(--accent-color, #10b981);
+  font-weight: 600;
+  transform: scale(1.05);
+}
+
+/* Focus states for accessibility */
+.orders-table tbody tr:focus-within {
+  outline: 2px solid var(--accent-color, #10b981);
+  outline-offset: -2px;
+}
+
+.token-info:focus-within {
+  outline: 1px solid var(--accent-color, #10b981);
+  border-radius: 4px;
+  outline-offset: 2px;
 }
 
 /* Loading State Styles */
@@ -471,6 +501,108 @@
     width: 2rem;
     height: 2rem;
   }
+
+  /* Adjust table container for mobile */
+  .table-container {
+    min-width: 36rem; /* Further reduced for mobile */
+    padding: 0.25rem;
+  }
+
+  /* Compact token info for mobile */
+  .token-info {
+    gap: 4px;
+  }
+
+  .token-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .token-details {
+    gap: 1px;
+  }
+
+  .token-symbol-row {
+    gap: 4px;
+  }
+
+  .token-symbol {
+    font-size: 0.85em;
+  }
+
+  .token-amount {
+    font-size: 0.8em;
+  }
+
+  .token-price {
+    font-size: 0.7em;
+    letter-spacing: 0.2px;
+  }
+
+  /* Reduce cell padding for mobile */
+  .orders-table th,
+  .orders-table td {
+    padding: 0.5rem 0.25rem;
+  }
+
+  .orders-table td:nth-child(2),
+  .orders-table td:nth-child(3) {
+    padding: 0.25rem 0.25rem;
+  }
+}
+
+/* Extra small screens */
+@media (max-width: 480px) {
+  .table-container {
+    min-width: 32rem; /* Minimum width for very small screens */
+    padding: 0.125rem;
+  }
+
+  .orders-table {
+    font-size: 0.8em;
+  }
+
+  /* Ultra-compact token info */
+  .token-info {
+    gap: 2px;
+  }
+
+  .token-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .token-details {
+    gap: 0px;
+  }
+
+  .token-symbol-row {
+    gap: 2px;
+  }
+
+  .token-symbol {
+    font-size: 0.8em;
+  }
+
+  .token-amount {
+    font-size: 0.75em;
+  }
+
+  .token-price {
+    font-size: 0.65em;
+    letter-spacing: 0.1px;
+  }
+
+  /* Minimal cell padding */
+  .orders-table th,
+  .orders-table td {
+    padding: 0.25rem 0.125rem;
+  }
+
+  .orders-table td:nth-child(2),
+  .orders-table td:nth-child(3) {
+    padding: 0.125rem 0.125rem;
+  }
 }
 
 /* MyOrders specific column widths */
@@ -484,22 +616,16 @@
   width: 12%;
 } /* Buy Amount */
 #my-orders .orders-table th:nth-child(4) {
-  width: 12%;
+  width: 20%;
 } /* Sell Token */
 #my-orders .orders-table th:nth-child(5) {
-  width: 12%;
-} /* Sell Amount */
+  width: 15%;
+} /* Expires */
 #my-orders .orders-table th:nth-child(6) {
   width: 10%;
-} /* Expires */
-#my-orders .orders-table th:nth-child(7) {
-  width: 10%;
 } /* Status */
-#my-orders .orders-table th:nth-child(8) {
-  width: 12%;
-} /* Taker */
-#my-orders .orders-table th:nth-child(9) {
-  width: 12%;
+#my-orders .orders-table th:nth-child(7) {
+  width: 15%;
 } /* Action */
 
 /* Token display styles */
@@ -510,6 +636,7 @@
   max-width: 100%;
   flex-direction: row;
   background: transparent;
+  transition: all 0.2s ease;
 }
 
 .token-icon {
@@ -579,7 +706,7 @@
 
 /* Adjust table cell padding for token info */
 .orders-table td:nth-child(2),
-.orders-table td:nth-child(4) {
+.orders-table td:nth-child(3) {
   padding: 0.5rem 0.75rem; /* Slightly reduce vertical padding to accommodate token info */
 }
 
@@ -690,13 +817,52 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  gap: 2px;
+  min-width: 0; /* Allow flex items to shrink below content size */
+  flex: 1; /* Take available space */
+}
+
+/* Create a horizontal row for symbol and price */
+.token-symbol-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.token-symbol {
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1; /* Take available space */
+  min-width: 0; /* Allow shrinking */
+  max-width: 60%; /* Prevent symbol from taking too much space */
+}
+
+.token-amount {
+  font-size: 0.9em;
+  color: var(--text-secondary);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .token-price {
-  font-size: 0.8em;
-  color: #666;
-  margin-top: 2px;
-  transition: background-color 0.3s;
+  font-size: 1em;
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0; /* Prevent price from shrinking */
+  font-weight: 500; /* Make total value more prominent */
+  text-align: right; /* Align dollar signs vertically */
+  font-family: "Courier New", monospace; /* Use monospace font for consistent character width */
+  letter-spacing: 0.5px; /* Slight spacing for better readability */
 }
 
 .price-estimate {

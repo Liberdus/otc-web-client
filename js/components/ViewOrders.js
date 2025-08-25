@@ -365,7 +365,7 @@ export class ViewOrders extends BaseComponent {
             if (paginatedOrders.length === 0) {
                 tbody.innerHTML = `
                     <tr class="empty-message">
-                        <td colspan="8" class="no-orders-message">
+                        <td colspan="7" class="no-orders-message">
                             <div class="placeholder-text">
                                 ${showOnlyActive ? 
                                     'No fillable orders found' : 
@@ -506,9 +506,7 @@ export class ViewOrders extends BaseComponent {
             <tr>
                 <th>ID</th>
                 <th>Buy</th>
-                <th>Amount</th>
                 <th>Sell</th>
-                <th>Amount</th>
                 <th>
                     Deal
                     <span class="info-icon" title="Deal = Price × Market Rate
@@ -951,6 +949,15 @@ For Buyers:
                 return `$${price.toFixed(4)}`;
             };
 
+            // Calculate total values (price × amount)
+            const calculateTotalValue = (price, amount) => {
+                if (!price || !amount) return '';
+                const total = price * parseFloat(amount);
+                if (total >= 100) return `$${total.toFixed(0)}`;
+                if (total >= 1) return `$${total.toFixed(2)}`;
+                return `$${total.toFixed(4)}`;
+            };
+
             // Determine prices with fallback to current pricing service map
             const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
                 ? sellTokenUsdPrice 
@@ -975,24 +982,28 @@ For Buyers:
                             <div class="loading-spinner"></div>
                         </div>
                         <div class="token-details">
-                            <span>${sellTokenInfo.symbol}</span>
-                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(resolvedSellPrice)}</span>
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${sellTokenInfo.symbol}</span>
+                                <span class="token-price ${sellPriceClass}">${calculateTotalValue(resolvedSellPrice, safeFormattedSellAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedSellAmount}</span>
                         </div>
                     </div>
                 </td>
-                <td>${safeFormattedSellAmount}</td>
                 <td>
                     <div class="token-info">
                         <div class="token-icon">
                             <div class="loading-spinner"></div>
                         </div>
                         <div class="token-details">
-                            <span>${buyTokenInfo.symbol}</span>
-                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(resolvedBuyPrice)}</span>
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${buyTokenInfo.symbol}</span>
+                                <span class="token-price ${buyPriceClass}">${calculateTotalValue(resolvedBuyPrice, safeFormattedBuyAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedBuyAmount}</span>
                         </div>
                     </div>
                 </td>
-                <td>${safeFormattedBuyAmount}</td>
                 <td>${(deal || 0).toFixed(6)}</td>
                 <td>${expiryText}</td>
                 <td class="order-status">${orderStatus}</td>
@@ -1000,7 +1011,7 @@ For Buyers:
 
             // Render token icons asynchronously (target explicit columns)
             const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
-            const buyTokenIconContainer = tr.querySelector('td:nth-child(4) .token-icon');
+            const buyTokenIconContainer = tr.querySelector('td:nth-child(3) .token-icon');
             
             if (sellTokenIconContainer) {
                 this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
@@ -1067,7 +1078,7 @@ For Buyers:
         }
 
         const updateExpiryAndButton = async () => {
-            const expiresCell = row.querySelector('td:nth-child(7)');
+            const expiresCell = row.querySelector('td:nth-child(5)');
             const statusCell = row.querySelector('.order-status');
             const actionCell = row.querySelector('.action-column');
             if (!expiresCell || !statusCell || !actionCell) return;

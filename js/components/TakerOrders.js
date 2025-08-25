@@ -33,7 +33,7 @@ export class TakerOrders extends ViewOrders {
                 if (tbody) {
                     tbody.innerHTML = `
                         <tr class="empty-message">
-                            <td colspan="8" class="no-orders-message">
+                            <td colspan="7" class="no-orders-message">
                                 <div class="placeholder-text">
                                     Please connect your wallet to view your taker orders
                                 </div>
@@ -135,7 +135,7 @@ export class TakerOrders extends ViewOrders {
                 this.debug('No orders to display');
                 tbody.innerHTML = `
                     <tr class="empty-message">
-                        <td colspan="8" class="no-orders-message">
+                        <td colspan="7" class="no-orders-message">
                             <div class="placeholder-text">
                                 ${showOnlyActive ? 
                                     'No active orders where you are the taker' : 
@@ -344,7 +344,7 @@ Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
 
             // Render token icons asynchronously (target explicit columns)
             const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
-            const buyTokenIconContainer = tr.querySelector('td:nth-child(4) .token-icon');
+            const buyTokenIconContainer = tr.querySelector('td:nth-child(3) .token-icon');
             
             if (sellTokenIconContainer) {
                 this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);

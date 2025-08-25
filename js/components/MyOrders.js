@@ -174,7 +174,7 @@ export class MyOrders extends ViewOrders {
             if (ordersToDisplay.length === 0) {
                 tbody.innerHTML = `
                     <tr class="empty-message">
-                        <td colspan="9" class="no-orders-message">
+                        <td colspan="7" class="no-orders-message">
                             <div class="placeholder-text">
                                 ${showOnlyCancellable ? 
                                     'No cancellable orders found' : 
@@ -705,7 +705,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
 
             // Render token icons asynchronously (match column positions)
             const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
-            const buyTokenIconContainer = tr.querySelector('td:nth-child(4) .token-icon');
+            const buyTokenIconContainer = tr.querySelector('td:nth-child(3) .token-icon');
             if (sellTokenIconContainer) {
                 this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
             }
@@ -776,7 +776,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
         }
 
         const updateExpiryAndButton = async () => {
-            const expiresCell = row.querySelector('td:nth-child(7)');
+            const expiresCell = row.querySelector('td:nth-child(5)');
             const actionCell = row.querySelector('.action-column');
             if (!expiresCell || !actionCell) return;
 
