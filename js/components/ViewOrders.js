@@ -914,7 +914,7 @@ For Buyers:
         try {
             const tr = document.createElement('tr');
             tr.dataset.orderId = order.id.toString();
-                            tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
+            tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
 
             // Get token info from WebSocket cache
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);

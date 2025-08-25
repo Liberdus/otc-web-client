@@ -220,17 +220,13 @@ export class PricingService {
     }
 
     getPrice(tokenAddress) {
-        console.log('🔍 [DEAL DEBUG] PricingService.getPrice called for:', tokenAddress);
         const price = this.prices.get(tokenAddress.toLowerCase());
-        console.log('🔍 [DEAL DEBUG] PricingService.getPrice result:', price, 'for token:', tokenAddress);
         
         if (price === undefined) {
             // Check if we should default to 1 for testing
             if (isDebugEnabled('PRICING_DEFAULT_TO_ONE')) {
-                console.log('🔍 [DEAL DEBUG] Price not found, defaulting to 1 for testing');
                 return 1; // Default to 1 for testing
             }
-            console.log('🔍 [DEAL DEBUG] Price not found, returning undefined for production');
             return undefined; // Return undefined for production
         }
         

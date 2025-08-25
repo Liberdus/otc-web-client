@@ -783,9 +783,25 @@ export class WebSocketService {
             const buyTokenUsdPrice = window.pricingService.getPrice(orderData.buyToken);
             const sellTokenUsdPrice = window.pricingService.getPrice(orderData.sellToken);
 
+            // Check if we have valid price data
+            if (buyTokenUsdPrice === undefined || sellTokenUsdPrice === undefined) {
+                this.debug('Missing price data, skipping deal calculation for order:', orderData.id);
+                return orderData; // Return order without deal metrics
+            }
+
             // Format amounts using correct decimals
             const sellAmount = ethers.utils.formatUnits(orderData.sellAmount, sellTokenInfo.decimals);
             const buyAmount = ethers.utils.formatUnits(orderData.buyAmount, buyTokenInfo.decimals);
+
+            if (sellAmount === 0) {
+                this.debug('Division by zero: sellAmount is 0 for order:', orderData.id);
+                return orderData;
+            }
+            
+            if (buyTokenUsdPrice === 0) {
+                this.debug('Division by zero: buyTokenUsdPrice is 0 for order:', orderData.id);
+                return orderData;
+            }
 
             // Calculate Price (what you get / what you give from taker perspective)
             const price = Number(buyAmount) / Number(sellAmount);
@@ -795,8 +811,18 @@ export class WebSocketService {
             
             // Calculate Deal (Price * Rate)
             const deal = price * rate;
+            
+            // Validate calculations
+            if (isNaN(price) || isNaN(rate) || isNaN(deal)) {
+                this.debug('Invalid calculation result for order:', orderData.id, {
+                    price, rate, deal,
+                    buyAmount, sellAmount,
+                    buyTokenUsdPrice, sellTokenUsdPrice
+                });
+                return orderData;
+            }
 
-            return {
+            const result = {
                 ...orderData,
                 dealMetrics: {
                     price,
@@ -809,8 +835,10 @@ export class WebSocketService {
                     lastUpdated: Date.now()
                 }
             };
+            
+            return result;
         } catch (error) {
-            this.debug('Error calculating deal metrics:', error);
+            this.debug('Error calculating deal metrics for order', orderData.id, ':', error);
             return orderData;
         }
     }
