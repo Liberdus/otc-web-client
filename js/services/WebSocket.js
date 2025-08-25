@@ -589,8 +589,17 @@ export class WebSocketService {
                             (this.gracePeriod ? this.gracePeriod.toNumber() : ORDER_CONSTANTS.DEFAULT_GRACE_PERIOD_SECS)
                     }
                 };
-                this.orderCache.set(o.id, orderData);
-                this.debug('Added order to cache:', orderData);
+                // Calculate deal metrics for the order
+                try {
+                    const enrichedOrderData = await this.calculateDealMetrics(orderData);
+                    this.orderCache.set(o.id, enrichedOrderData);
+                    this.debug('Added order to cache with deal metrics:', enrichedOrderData);
+                } catch (error) {
+                    this.debug('Failed to calculate deal metrics for order', o.id, ':', error);
+                    // Still add the order without deal metrics as fallback
+                    this.orderCache.set(o.id, orderData);
+                    this.debug('Added order to cache without deal metrics:', orderData);
+                }
             }
 
             // Validate and summarize order cache
