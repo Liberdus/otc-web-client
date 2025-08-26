@@ -110,6 +110,7 @@ export const DEBUG_CONFIG = {
     TOKEN_ICON_SERVICE: false, // Add token icon service debugging
     TOAST: false, // Enable toast debugging for testing
     PRICING_DEFAULT_TO_ONE: false, // Default missing prices to 1 for testing, false for production
+    LIBERDUS_VALIDATION: true, // Enable frontend Liberdus token validation
     // Add more specific flags as needed
 };
 
