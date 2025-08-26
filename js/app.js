@@ -1,6 +1,6 @@
 import { BaseComponent } from './components/BaseComponent.js';
 import { CreateOrder } from './components/CreateOrder.js';
-import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled, getNetworkById, APP_BRAND, APP_LOGO } from './config.js';
+import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled, getNetworkById, APP_BRAND, APP_LOGO, DEBUG_CONFIG } from './config.js';
 import { WalletUI } from './components/WalletUI.js';
 import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
@@ -718,6 +718,9 @@ window.showSuccess = showSuccess;
 window.showWarning = showWarning;
 window.showInfo = showInfo;
 window.getToast = getToast;
+
+// Make DEBUG_CONFIG globally available for debug panel
+window.DEBUG_CONFIG = DEBUG_CONFIG;
 
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
