@@ -458,13 +458,13 @@ export class ViewOrders extends BaseComponent {
             <div class="filter-row">
                 <div class="token-filters">
                     <select id="sell-token-filter" class="token-filter">
-                        <option value="">All Sell Tokens</option>
+                        <option value="">All Buy Tokens</option>
                         ${tokens.map(token => 
                             `<option value="${token.address}">${token.symbol}</option>`
                         ).join('')}
                     </select>
                     <select id="buy-token-filter" class="token-filter">
-                        <option value="">All Buy Tokens</option>
+                        <option value="">All Sell Tokens</option>
                         ${tokens.map(token => 
                             `<option value="${token.address}">${token.symbol}</option>`
                         ).join('')}
