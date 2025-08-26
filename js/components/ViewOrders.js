@@ -972,7 +972,9 @@ For Buyers:
 
             const orderStatus = window.webSocket.getOrderStatus(order);
             const expiryEpoch = order?.timings?.expiresAt;
-            const expiryText = typeof expiryEpoch === 'number' ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) : 'Unknown';
+            const expiryText = orderStatus === 'Active' && typeof expiryEpoch === 'number' 
+                ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
+                : '';
 
             tr.innerHTML = `
                 <td>${order.id}</td>
@@ -1094,8 +1096,9 @@ For Buyers:
             const currentAccount = walletManager.getAccount()?.toLowerCase();
             const isUserOrder = order.maker?.toLowerCase() === currentAccount;
 
-            // Update expiry text
-            const newExpiryText = this.formatTimeDiff(timeDiff);
+            // Update expiry text - only calculate for active orders
+            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
@@ -1159,18 +1162,16 @@ For Buyers:
     }
 
     formatTimeDiff(seconds) {
-        const days = Math.floor(Math.abs(seconds) / 86400);
-        const hours = Math.floor((Math.abs(seconds) % 86400) / 3600);
-        const minutes = Math.floor((Math.abs(seconds) % 3600) / 60);
-        
-        const prefix = seconds < 0 ? '-' : '';
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
         
         if (days > 0) {
-            return `${prefix}${days}D ${hours}H ${minutes}M`;
+            return `${days}D ${hours}H ${minutes}M`;
         } else if (hours > 0) {
-            return `${prefix}${hours}H ${minutes}M`;
+            return `${hours}H ${minutes}M`;
         } else {
-            return `${prefix}${minutes}M`;
+            return `${minutes}M`;
         }
     }
 }

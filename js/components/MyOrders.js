@@ -597,7 +597,8 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
 
             const currentTime = Math.floor(Date.now() / 1000);
             const timeUntilExpiry = order?.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
-            const expiryText = this.formatTimeDiff(timeUntilExpiry);
+            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const expiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeUntilExpiry) : '';
 
             // Get order status from WebSocket cache
             const orderStatus = window.webSocket.getOrderStatus(order);
@@ -799,8 +800,9 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                             const timeDiff = order.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
             const currentAccount = window.walletManager.getAccount()?.toLowerCase();
 
-            // Update expiry text
-            const newExpiryText = this.formatTimeDiff(timeDiff);
+            // Update expiry text - only calculate for active orders
+            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
@@ -858,8 +860,6 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 }
             } else if (order.maker?.toLowerCase() === currentAccount) {
                 actionCell.innerHTML = '<span class="your-order">Mine</span>';
-            } else if (order.timings?.expiresAt && currentTime > order.timings.expiresAt) {
-                actionCell.innerHTML = '<span class="expired-order">Expired</span>';
             } else {
                 actionCell.textContent = '-';
             }

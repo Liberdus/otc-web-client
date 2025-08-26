@@ -306,7 +306,9 @@ Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
 
             const orderStatus = window.webSocket.getOrderStatus(order);
             const expiryEpoch = order?.timings?.expiresAt;
-            const expiryText = typeof expiryEpoch === 'number' ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) : 'Unknown';
+            const expiryText = orderStatus === 'Active' && typeof expiryEpoch === 'number' 
+                ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
+                : '';
 
             // Get counterparty address for display
             const userAddress = window.walletManager.getAccount()?.toLowerCase();
