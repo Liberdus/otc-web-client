@@ -30,15 +30,33 @@ export function handleTransactionError(error, component, action = 'transaction')
         component.debug(`User rejected ${action}`);
         return true; // Indicates user rejection was handled
     } else {
+        // Extract the most meaningful error message
+        let errorMessage = error.message || 'Unknown error occurred';
+        
+        // For contract revert errors, try to extract the actual revert message
+        if (error.code === 'UNPREDICTABLE_GAS_LIMIT' && error.error?.data?.message) {
+            // This is a contract revert - use the actual revert message
+            errorMessage = error.error.data.message;
+        } else if (error.reason) {
+            // Use the reason if available (often contains the actual error)
+            errorMessage = error.reason;
+        } else if (error.error?.data?.message) {
+            // Fallback to nested error message
+            errorMessage = error.error.data.message;
+        }
+        
         // Show error for actual failures
         component.error(`${action} failed:`, {
             message: error.message,
             code: error.code,
             error: error.error,
             reason: error.reason,
-            transaction: error.transaction
+            transaction: error.transaction,
+            extractedMessage: errorMessage
         });
-        component.showError(`${action} failed: ${error.message}`);
+        
+        // Show the extracted error message to the user
+        component.showError(errorMessage);
         return false; // Indicates error was shown to user
     }
 }

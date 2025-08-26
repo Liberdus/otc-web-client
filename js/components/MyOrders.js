@@ -843,8 +843,8 @@ export class MyOrders extends ViewOrders {
                             actionCell.textContent = '-';
                             this.debouncedRefresh();
                         } catch (error) {
-                            console.error('Error cancelling order:', error);
-                            this.showError(this.getReadableError(error));
+                            this.debug('Error cancelling order:', error);
+                            handleTransactionError(error, this, 'order cancellation');
                             cancelButton.disabled = false;
                             cancelButton.textContent = 'Cancel';
                         }

@@ -880,6 +880,12 @@ export class ViewOrders extends BaseComponent {
             case -32603:
                 return 'Transaction would fail. Check order status and approvals.';
             case 'UNPREDICTABLE_GAS_LIMIT':
+                // For contract revert errors, extract the actual revert message
+                if (error.error?.data?.message) {
+                    return error.error.data.message;
+                } else if (error.reason) {
+                    return error.reason;
+                }
                 return 'Error estimating gas. The transaction may fail.';
             default:
                 return error.reason || error.message || 'Unknown error occurred';
