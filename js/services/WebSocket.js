@@ -774,8 +774,29 @@ export class WebSocketService {
         return order.timestamp + this.orderExpiry.toNumber();
     }
 
-    // Add this helper method to WebSocketService class
+    //TODO: calculate deal metric based on buy value / sell value where buy value is the amount of buy tokens * token price and sell value is the amount of sell tokens * token price
     async calculateDealMetrics(orderData) {
+        const buyTokenInfo = await this.getTokenInfo(orderData.buyToken); // person who created order set this
+        const sellTokenInfo = await this.getTokenInfo(orderData.sellToken);// person who created order set this
+        const buyTokenUsdPrice = window.pricingService.getPrice(orderData.buyToken);
+        const sellTokenUsdPrice = window.pricingService.getPrice(orderData.sellToken);
+        if (buyTokenUsdPrice === undefined || sellTokenUsdPrice === undefined || buyTokenUsdPrice === 0 || sellTokenUsdPrice === 0) {
+            this.debug('Missing price data, skipping deal calculation for order:', orderData.id);
+            return orderData;
+        }
+        const buyValue = Number(orderData.buyAmount) * buyTokenUsdPrice;
+        const sellValue = Number(orderData.sellAmount) * sellTokenUsdPrice;
+        const deal = buyValue / sellValue;
+        return {
+            ...orderData,
+            dealMetrics: {
+                deal
+            }
+        };
+    }
+
+    // Add this helper method to WebSocketService class
+    async calculateDealMetrics_old(orderData) {
         try {
             const buyTokenInfo = await this.getTokenInfo(orderData.buyToken);
             const sellTokenInfo = await this.getTokenInfo(orderData.sellToken);

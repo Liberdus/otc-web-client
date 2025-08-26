@@ -509,17 +509,11 @@ export class ViewOrders extends BaseComponent {
                 <th>Sell</th>
                 <th>
                     Deal
-                    <span class="info-icon" title="Deal = Price × Market Rate
+                    <span class="info-icon" title="Deal = Buy Value / Sell Value
                     
-For Sellers:
 • Higher deal number is better
-• Deal > 1: Getting more than market value
-• Deal < 1: Getting less than market value
-
-For Buyers:
-• Lower deal number is better
-• Deal > 1: Paying more than market value
-• Deal < 1: Paying less than market value">ⓘ</span>
+• Deal > 1: better deal based on market prices
+• Deal < 1: worse deal based on market prices">ⓘ</span>
                 </th>
                 <th>Expires</th>
                 <th>Status</th>
@@ -919,12 +913,11 @@ For Buyers:
             // Get token info from WebSocket cache
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
             const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
-
+            const deal = order.dealMetrics?.deal > 0 ? 1 / order.dealMetrics?.deal : undefined; // view as buyer/taker
             // Use pre-formatted values from dealMetrics
             const { 
                 formattedSellAmount,
                 formattedBuyAmount,
-                deal,
                 sellTokenUsdPrice,
                 buyTokenUsdPrice 
             } = order.dealMetrics || {};
