@@ -331,10 +331,11 @@ export class ViewOrders extends BaseComponent {
             if (orderSort === 'newest') {
                 ordersToDisplay.sort((a, b) => b.id - a.id);
             } else if (orderSort === 'best-deal') {
-                ordersToDisplay.sort((a, b) => 
-                    Number(a.dealMetrics?.deal || Infinity) - 
-                    Number(b.dealMetrics?.deal || Infinity)
-                );
+                ordersToDisplay.sort((a, b) => {
+                    const dealA = a.dealMetrics?.deal > 0 ? 1 / a.dealMetrics.deal : Infinity;
+                    const dealB = b.dealMetrics?.deal > 0 ? 1 / b.dealMetrics.deal : Infinity;
+                    return dealB - dealA; // Higher deal is better for buyer perspective
+                });
             }
 
             // Apply pagination

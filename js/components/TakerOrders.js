@@ -99,10 +99,11 @@ export class TakerOrders extends ViewOrders {
             if (orderSort === 'newest') {
                 ordersToDisplay.sort((a, b) => b.id - a.id);
             } else if (orderSort === 'best-deal') {
-                ordersToDisplay.sort((a, b) => 
-                    Number(a.dealMetrics?.deal || Infinity) - 
-                    Number(b.dealMetrics?.deal || Infinity)
-                );
+                ordersToDisplay.sort((a, b) => {
+                    const dealA = a.dealMetrics?.deal > 0 ? 1 / a.dealMetrics.deal : Infinity;
+                    const dealB = b.dealMetrics?.deal > 0 ? 1 / b.dealMetrics.deal : Infinity;
+                    return dealB - dealA; // Higher deal is better for buyer perspective
+                });
             }
 
             // Apply pagination
@@ -219,16 +220,11 @@ export class TakerOrders extends ViewOrders {
                 <th>Sell</th>
                 <th>
                     Deal
-                    <span class="info-icon" title="Deal = Price × Market Rate
+                    <span class="info-icon" title="Deal = Buy Value / Sell Value
 
-For You as Taker (Buyer):
-• Lower deal number is better
-• Deal > 1: You're paying more than market value
-• Deal < 1: You're paying less than market value
-
-Example:
-Deal = 1.2 means you're paying 20% above market rate
-Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
+• Higher deal number is better
+• Deal > 1: better deal based on market prices
+• Deal < 1: worse deal based on market prices">ⓘ</span>
                 </th>
                 <th>Expires</th>
                 <th>Status</th>
@@ -258,10 +254,11 @@ Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
             const { 
                 formattedSellAmount,
                 formattedBuyAmount,
-                deal,
                 sellTokenUsdPrice,
                 buyTokenUsdPrice 
             } = order.dealMetrics || {};
+            
+            const deal = order.dealMetrics?.deal > 0 ? 1 / order.dealMetrics?.deal : undefined; // view as buyer/taker
 
             // Fallback amount formatting if dealMetrics not yet populated
             const safeFormattedSellAmount = typeof formattedSellAmount !== 'undefined'

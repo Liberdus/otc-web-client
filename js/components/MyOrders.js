@@ -301,20 +301,15 @@ export class MyOrders extends ViewOrders {
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Buy</th>
                             <th>Sell</th>
+                            <th>Buy</th>
                             <th>
                                 Deal
-                                <span class="info-icon" title="Deal = Price × Market Rate
+                                <span class="info-icon" title="Deal = Buy Value / Sell Value
 
-For Your Orders (as Seller):
 • Higher deal number is better
-• Deal > 1: You're getting more than market value
-• Deal < 1: You're getting less than market value
-
-Example:
-Deal = 1.2 means you're selling at 20% above market rate
-Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
+• Deal > 1: better deal based on market prices
+• Deal < 1: worse deal based on market prices">ⓘ</span>
                             </th>
                             <th>Expires</th>
                             <th>Status</th>
