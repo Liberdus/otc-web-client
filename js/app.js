@@ -365,7 +365,6 @@ class App {
 	async initializeWalletManager() {
 		try {
 			this.debug('Initializing wallet manager...');
-			window.walletManager = walletManager;
 			await walletManager.init(true);
 			
 			// Add to context
@@ -382,7 +381,6 @@ class App {
 			this.debug('Initializing pricing service...');
 			// Initialize PricingService first (before WebSocket since WS needs it)
 			const pricingService = new PricingService();
-			window.pricingService = pricingService; // Keep for backward compatibility
 			
 			// Defer allowed token fetch until WebSocket/contract is ready
 			// The pricing service will refresh later when WebSocket finishes init
@@ -406,7 +404,6 @@ class App {
 			const webSocketService = new WebSocketService({
 				pricingService: pricingService
 			});
-			window.webSocket = webSocketService; // Keep for backward compatibility
 
 			// Subscribe to orderSyncComplete event before initialization
 			webSocketService.subscribe('orderSyncComplete', () => {
@@ -850,8 +847,8 @@ const populateNetworkOptions = () => {
 					networkDropdown.classList.add('hidden');
 				}
 				
-				// Access wallet via app context if available
-				const wallet = window.app?.ctx?.getWallet() || window.walletManager;
+				// Access wallet via app context
+				const wallet = window.app?.ctx?.getWallet();
 				if (wallet && wallet.isConnected()) {
 					const chainId = option.dataset.chainId;
 					await window.ethereum.request({

@@ -141,7 +141,7 @@ export class WebSocketService {
                 });
                 
                 // Subscribe to pricing service after everything else is ready
-                const pricing = this.pricingService || window.pricingService;
+                const pricing = this.pricingService;
                 if (pricing) {
                     this.debug('Subscribing to pricing service...');
                     pricing.subscribe(() => {
@@ -782,7 +782,7 @@ export class WebSocketService {
     async calculateDealMetrics(orderData) {
         const buyTokenInfo = await this.getTokenInfo(orderData.buyToken); // person who created order set this
         const sellTokenInfo = await this.getTokenInfo(orderData.sellToken);// person who created order set this
-        const pricing = this.pricingService || window.pricingService;
+        const pricing = this.pricingService;
         if (!pricing) {
             this.debug('PricingService not available for deal calculation');
             return orderData;
@@ -810,7 +810,7 @@ export class WebSocketService {
             const buyTokenInfo = await this.getTokenInfo(orderData.buyToken);
             const sellTokenInfo = await this.getTokenInfo(orderData.sellToken);
 
-            const pricing = this.pricingService || window.pricingService;
+            const pricing = this.pricingService;
             if (!pricing) {
                 this.debug('PricingService not available for deal update');
                 return orderData;
@@ -940,7 +940,7 @@ export class WebSocketService {
     // Update all deals when prices change
     // Will be used with refresh button in the UI 
     async updateAllDeals() {
-        const pricing = this.pricingService || window.pricingService;
+        const pricing = this.pricingService;
         if (!pricing) {
             this.debug('Cannot update deals: PricingService not available');
             return;

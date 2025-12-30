@@ -34,7 +34,7 @@ class ContractService {
         if (!this.initialized) {
             throw new Error('Contract service not initialized');
         }
-        const ws = this.webSocket || window.webSocket;
+        const ws = this.webSocket;
         if (!ws?.contract) {
             throw new Error('WebSocket contract not available');
         }
@@ -49,7 +49,7 @@ class ContractService {
         if (!this.initialized) {
             throw new Error('Contract service not initialized');
         }
-        const ws = this.webSocket || window.webSocket;
+        const ws = this.webSocket;
         if (!ws?.provider) {
             throw new Error('WebSocket provider not available');
         }

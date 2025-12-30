@@ -200,7 +200,7 @@ export class PricingService {
                     this.prices.set(address, data.price);
                 }
                 
-                const ws = this.webSocket || window.webSocket;
+                const ws = this.webSocket;
                 if (ws) {
                     await ws.updateAllDeals();
                 }
@@ -394,7 +394,7 @@ export class PricingService {
         try {
             this.debug('Fetching allowed tokens from contract...');
             // If WebSocket/contract not ready yet, return empty list gracefully
-            const ws = this.webSocket || window.webSocket;
+            const ws = this.webSocket;
             if (!ws?.contract) {
                 this.warn('Contract not available yet; skipping allowed tokens fetch');
                 this.allowedTokens.clear();
