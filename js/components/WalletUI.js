@@ -11,17 +11,74 @@ export class WalletUI extends BaseComponent {
         this.error = logger.error.bind(logger);
         this.warn = logger.warn.bind(logger);
         
-        try {
-            this.debug('Constructor starting...');
-            if (!this.initialized) {
-                this.initializeElements();
-                this.init();
-                this.initialized = true;
-            }
-            this.debug('Constructor completed');
-        } catch (error) {
-            this.error('Error in constructor:', error);
+        // Store bound handlers for cleanup
+        this._boundConnectHandler = null;
+        this._boundDisconnectHandler = null;
+        this._boundWalletListener = null;
+        
+        this.debug('Constructor completed (no side effects)');
+    }
+
+    /**
+     * Initialize the WalletUI component
+     * Sets up DOM references, event listeners, and checks connection state
+     */
+    async initialize(readOnlyMode = true) {
+        if (this.initializing) {
+            this.debug('Already initializing, skipping...');
+            return;
         }
+        
+        if (this.initialized) {
+            this.debug('Already initialized, skipping...');
+            return;
+        }
+        
+        this.initializing = true;
+        
+        try {
+            this.debug('Initializing WalletUI...');
+            
+            // Initialize DOM elements
+            this.initializeElements();
+            
+            // Setup event listeners
+            this.setupEventListeners();
+            
+            // Check connection state
+            await this.checkInitialConnectionState();
+            
+            this.initialized = true;
+            this.debug('WalletUI initialization complete');
+        } catch (error) {
+            this.error('Error in initialize:', error);
+        } finally {
+            this.initializing = false;
+        }
+    }
+
+    /**
+     * Cleanup event listeners and subscriptions
+     */
+    cleanup() {
+        this.debug('Cleaning up WalletUI...');
+        
+        // Remove connect button listener
+        if (this.connectButton && this._boundConnectHandler) {
+            this.connectButton.removeEventListener('click', this._boundConnectHandler);
+        }
+        
+        // Remove disconnect button listener
+        if (this.disconnectButton && this._boundDisconnectHandler) {
+            this.disconnectButton.removeEventListener('click', this._boundDisconnectHandler);
+        }
+        
+        // Remove wallet manager listener
+        if (this._boundWalletListener) {
+            walletManager.removeListener(this._boundWalletListener);
+        }
+        
+        this.debug('WalletUI cleanup complete');
     }
 
     initializeElements() {
@@ -39,18 +96,112 @@ export class WalletUI extends BaseComponent {
                 throw new Error('Required wallet UI elements not found');
             }
 
-            // Add click listener with explicit binding
-            const handleClick = (e) => {
-                this.debug('Connect button clicked!', e);
-                this.handleConnectClick(e);
-            };
-
-            this.connectButton.addEventListener('click', handleClick);
-            this.debug('Click listener added to connect button');
-
+            this.debug('DOM elements initialized');
         } catch (error) {
             this.error('Error in initializeElements:', error);
             throw error;
+        }
+    }
+
+    setupEventListeners() {
+        // Create bound handler for connect button
+        this._boundConnectHandler = (e) => {
+            this.debug('Connect button clicked!', e);
+            this.handleConnectClick(e);
+        };
+        this.connectButton.addEventListener('click', this._boundConnectHandler);
+        this.debug('Click listener added to connect button');
+
+        // Create bound handler for disconnect button
+        this._boundDisconnectHandler = async (e) => {
+            e.preventDefault();
+            this.debug('Disconnect button clicked');
+            try {
+                // Clean up CreateOrder component before disconnecting
+                if (window.app?.components['create-order']?.cleanup) {
+                    window.app.components['create-order'].cleanup();
+                }
+                
+                // Update create order button
+                const createOrderBtn = document.getElementById('createOrderBtn');
+                if (createOrderBtn) {
+                    createOrderBtn.disabled = true;
+                    createOrderBtn.textContent = 'Connect Wallet to Create Order';
+                }
+                
+                // Use the new disconnect method that saves user preference
+                walletManager.disconnect();
+                
+                // Reset UI
+                this.showConnectButton();
+                this.accountAddress.textContent = '';
+                
+                // Update tab visibility
+                if (window.app?.updateTabVisibility) {
+                    window.app.updateTabVisibility(false);
+                }
+                
+                // Only trigger app-level disconnect handler (which will show the message)
+                if (window.app?.handleWalletDisconnect) {
+                    window.app.handleWalletDisconnect();
+                }
+            } catch (error) {
+                console.error('[WalletUI] Error disconnecting:', error);
+            }
+        };
+        this.disconnectButton.addEventListener('click', this._boundDisconnectHandler);
+
+        // Setup wallet manager listener
+        this._boundWalletListener = (event, data) => {
+            this.debug('Wallet event:', event, data);
+            switch (event) {
+                case 'connect':
+                    this.debug('Connect event received');
+                    this.updateUI(data.account);
+                    break;
+                case 'disconnect':
+                    this.debug('Disconnect event received');
+                    this.showConnectButton();
+                    break;
+                case 'accountsChanged':
+                    this.debug('Account change event received');
+                    this.updateUI(data.account);
+                    break;
+                case 'chainChanged':
+                    this.debug('Chain change event received');
+                    this.updateNetworkBadge(data.chainId);
+                    break;
+            }
+        };
+        walletManager.addListener(this._boundWalletListener);
+    }
+
+    async checkInitialConnectionState() {
+        try {
+            this.debug('Checking initial connection state...');
+            
+            if (typeof window.ethereum === 'undefined') {
+                this.debug('MetaMask is not installed, initializing in read-only mode');
+                return;
+            }
+            
+            // Check if user has manually disconnected
+            if (walletManager.hasUserDisconnected()) {
+                this.debug('User has manually disconnected, showing connect button');
+                this.showConnectButton();
+                return;
+            }
+            
+            // Check if already connected, but only if not already connecting
+            if (!walletManager.isConnecting) {
+                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                if (accounts && accounts.length > 0) {
+                    this.debug('Found existing connection, connecting...');
+                    await this.connectWallet();
+                }
+            }
+        } catch (error) {
+            this.error('Error checking initial connection state:', error);
         }
     }
 
@@ -100,104 +251,6 @@ export class WalletUI extends BaseComponent {
             this.showError("Failed to connect wallet: " + error.message);
             return null;
         }
-    }
-
-    async init() {
-        try {
-            this.debug('Starting init...');
-            
-            if (typeof window.ethereum === 'undefined') {
-                this.debug('MetaMask is not installed, initializing in read-only mode');
-                return true;
-            }
-
-            // Setup event listeners
-            this.setupEventListeners();
-            
-            // Check if user has manually disconnected
-            if (walletManager.hasUserDisconnected()) {
-                this.debug('User has manually disconnected, showing connect button');
-                this.showConnectButton();
-                return true;
-            }
-            
-            // Check if already connected, but only if not already connecting and user hasn't manually disconnected
-            if (!walletManager.isConnecting) {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                if (accounts && accounts.length > 0) {
-                    this.debug('Found existing connection, connecting...');
-                    await this.connectWallet();
-                }
-            }
-            
-            return true;
-        } catch (error) {
-            this.error('Error in init:', error);
-            throw error;
-        }
-    }
-
-    setupEventListeners() {
-        // Update disconnect button handler
-        this.disconnectButton.addEventListener('click', async (e) => {
-            e.preventDefault();
-            this.debug('Disconnect button clicked');
-            try {
-                // Clean up CreateOrder component before disconnecting
-                if (window.app?.components['create-order']?.cleanup) {
-                    window.app.components['create-order'].cleanup();
-                }
-                
-                // Update create order button
-                const createOrderBtn = document.getElementById('createOrderBtn');
-                if (createOrderBtn) {
-                    createOrderBtn.disabled = true;
-                    createOrderBtn.textContent = 'Connect Wallet to Create Order';
-                }
-                
-                // Use the new disconnect method that saves user preference
-                walletManager.disconnect();
-                
-                // Reset UI
-                this.showConnectButton();
-                this.accountAddress.textContent = '';
-                
-                // Update tab visibility
-                if (window.app?.updateTabVisibility) {
-                    window.app.updateTabVisibility(false);
-                }
-                
-                // Only trigger app-level disconnect handler (which will show the message)
-                if (window.app?.handleWalletDisconnect) {
-                    window.app.handleWalletDisconnect();
-                }
-            } catch (error) {
-                console.error('[WalletUI] Error disconnecting:', error);
-            }
-        });
-
-        // Setup wallet manager listeners
-        walletManager.addListener((event, data) => {
-            this.debug('Wallet event:', event, data);
-            switch (event) {
-                case 'connect':
-                    this.debug('Connect event received');
-                    this.updateUI(data.account);
-                    break;
-                case 'disconnect':
-                    this.debug('Disconnect event received');
-                    this.showConnectButton();
-                    break;
-                case 'accountsChanged':
-                    this.debug('Account change event received');
-                    this.updateUI(data.account);
-                    break;
-                case 'chainChanged':
-                    this.debug('Chain change event received');
-                    this.updateNetworkBadge(data.chainId);
-                    break;
-            }
-        });
     }
 
     updateUI(account) {
@@ -269,4 +322,4 @@ export class WalletUI extends BaseComponent {
             console.error('[WalletUI] Error updating network badge:', error);
         }
     }
-} 
+}

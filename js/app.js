@@ -86,6 +86,13 @@ class App {
 		// Initialize wallet UI and store reference
 		this.walletUI = new WalletUI();
 		this.components['wallet-info'] = this.walletUI;
+		
+		// Initialize wallet UI early (it's always visible, not a tab)
+		try {
+			await this.walletUI.initialize();
+		} catch (e) {
+			this.warn('WalletUI failed to initialize', e);
+		}
 
 		// Initialize footer (persists across tabs)
 		try {

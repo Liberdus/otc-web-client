@@ -3,6 +3,33 @@ import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { createLogger } from '../services/LogService.js';
 
+/**
+ * BaseComponent - Base class for all UI components
+ * 
+ * LIFECYCLE CONTRACT:
+ * 
+ * 1. constructor(containerId)
+ *    - MUST be side-effect free (no network calls, no event subscriptions)
+ *    - Sets up container reference and default state
+ *    - Initializes logger
+ * 
+ * 2. initialize(readOnlyMode = true)
+ *    - Called by App when component should set up
+ *    - Handles rendering, event subscriptions, data loading
+ *    - readOnlyMode=true means no wallet connected
+ *    - Should be idempotent (safe to call multiple times)
+ * 
+ * 3. cleanup()
+ *    - Called by App before switching away from component
+ *    - Removes event listeners, clears timers, unsubscribes from services
+ *    - Should NOT clear rendered content (preserve for quick tab switches)
+ * 
+ * INITIALIZATION FLAGS:
+ * - this.initialized: true after first successful initialize()
+ * - this.initializing: true while initialize() is running (prevents concurrent calls)
+ * 
+ * For backward compatibility, isInitialized/isInitializing getters are provided.
+ */
 export class BaseComponent {
     constructor(containerId) {
         // Initialize logger
@@ -18,10 +45,31 @@ export class BaseComponent {
             throw new Error(`Container with id or class ${containerId} not found`);
         }
         
+        // Standardized initialization flags
+        this.initialized = false;
+        this.initializing = false;
+        
         // Initialize the token cache
         this.tokenCache = new Map();
         // Initialize provider from window.walletManager if available
         this.provider = window.walletManager?.provider || null;
+    }
+
+    // Backward compatibility getters for components using isInitialized/isInitializing
+    get isInitialized() {
+        return this.initialized;
+    }
+    
+    set isInitialized(value) {
+        this.initialized = value;
+    }
+    
+    get isInitializing() {
+        return this.initializing;
+    }
+    
+    set isInitializing(value) {
+        this.initializing = value;
     }
 
     createElement(tag, className = '', textContent = '') {
@@ -71,7 +119,27 @@ export class BaseComponent {
         }
     }
 
-    // Add default render method
+    /**
+     * Default initialize method - subclasses should override
+     * @param {boolean} readOnlyMode - true if no wallet connected
+     */
+    async initialize(readOnlyMode = true) {
+        // Default implementation - subclasses override
+        if (!this.initialized) {
+            this.initialized = true;
+        }
+    }
+
+    /**
+     * Default cleanup method - subclasses should override
+     * Cleans up event listeners, timers, subscriptions
+     */
+    cleanup() {
+        // Default implementation - subclasses override
+        this.debug('Base cleanup called');
+    }
+
+    // Legacy render method - deprecated, use initialize() instead
     render() {
         if (!this.initialized) {
             this.initialized = true;

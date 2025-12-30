@@ -12,24 +12,30 @@ import { handleTransactionError } from '../utils/ui.js';
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
         super(containerId);
-        this.provider = typeof window.ethereum !== 'undefined' ? 
-            new ethers.providers.Web3Provider(window.ethereum) : null;
-        this.currentPage = 1;
-        this.totalOrders = 0;
-        this.setupErrorHandling();
-        this.eventSubscriptions = new Set();
-        this.expiryTimers = new Map();
-        this.tokenList = [];
-        this.currentAccount = null;
         
-        // Initialize logger
+        // Initialize logger first
         const logger = createLogger('VIEW_ORDERS');
         this.debug = logger.debug.bind(logger);
         this.error = logger.error.bind(logger);
         this.warn = logger.warn.bind(logger);
-
-        // Add debounce mechanism
+        
+        // Initialize state (no side effects)
+        this.provider = null;
+        this.currentPage = 1;
+        this.totalOrders = 0;
+        this.eventSubscriptions = new Set();
+        this.expiryTimers = new Map();
+        this.tokenList = [];
+        this.currentAccount = null;
+        this.isLoading = false;
+        this.pricingService = null;
+        
+        // Bound handlers for cleanup
+        this._boundPricingHandler = null;
+        this._boundOrdersUpdatedHandler = null;
         this._refreshTimeout = null;
+        
+        // Debounce mechanism
         this.debouncedRefresh = () => {
             clearTimeout(this._refreshTimeout);
             this._refreshTimeout = setTimeout(() => {
@@ -38,33 +44,48 @@ export class ViewOrders extends BaseComponent {
                 });
             }, 100);
         };
-
-        // Add loading state
-        this.isLoading = false;
-
-        // Use global pricing service instead of local instance
+        
+        this.debug('Constructor completed (no side effects)');
+    }
+    
+    /**
+     * Setup provider, services, and subscriptions
+     * Called once during first initialize()
+     */
+    setupServices() {
+        // Initialize provider if available
+        if (typeof window.ethereum !== 'undefined' && !this.provider) {
+            this.provider = new ethers.providers.Web3Provider(window.ethereum);
+        }
+        
+        // Use global pricing service
         this.pricingService = window.pricingService;
-
+        
+        // Setup error handling
+        this.setupErrorHandling();
+        
         // Subscribe to pricing updates from global service
-        if (window.pricingService) {
-            window.pricingService.subscribe((event) => {
+        if (window.pricingService && !this._boundPricingHandler) {
+            this._boundPricingHandler = (event) => {
                 if (event === 'refreshComplete') {
                     this.debug('Prices updated, refreshing orders view');
                     this.refreshOrdersView().catch(error => {
                         this.error('Error refreshing orders after price update:', error);
                     });
                 }
-            });
+            };
+            window.pricingService.subscribe(this._boundPricingHandler);
         }
 
         // Subscribe to WebSocket updates
-        if (window.webSocket) {
-            window.webSocket.subscribe("ordersUpdated", () => {
+        if (window.webSocket && !this._boundOrdersUpdatedHandler) {
+            this._boundOrdersUpdatedHandler = () => {
                 this.debug('Orders updated via WebSocket, refreshing view');
                 this.refreshOrdersView().catch(error => {
                     this.error('Error refreshing orders after WebSocket update:', error);
                 });
-            });
+            };
+            window.webSocket.subscribe("ordersUpdated", this._boundOrdersUpdatedHandler);
         }
     }
 
@@ -216,14 +237,28 @@ export class ViewOrders extends BaseComponent {
     }
 
     async initialize(readOnlyMode = true) {
-        if (!this.initialized) {
-            // First time setup - create table structure and setup WebSocket
-            await this.setupTable();
-            await this.setupWebSocket();
-            this.initialized = true;
+        if (this.initializing) {
+            this.debug('Already initializing, skipping...');
+            return;
         }
-        // Just refresh the view with current cache
-        await this.refreshOrdersView();
+        
+        this.initializing = true;
+        
+        try {
+            if (!this.initialized) {
+                // First time setup - initialize services, create table, setup WebSocket
+                this.setupServices();
+                await this.setupTable();
+                await this.setupWebSocket();
+                this.initialized = true;
+            }
+            // Just refresh the view with current cache
+            await this.refreshOrdersView();
+        } catch (error) {
+            this.error('Error in initialize:', error);
+        } finally {
+            this.initializing = false;
+        }
     }
 
     async setupWebSocket() {
@@ -893,13 +928,33 @@ export class ViewOrders extends BaseComponent {
     }
 
     cleanup() {
+        this.debug('Cleaning up ViewOrders...');
+        
         // Remove wallet listener
         if (this.walletListener) {
             walletManager.removeListener(this.walletListener);
             this.walletListener = null;
         }
         
-        // Only clear timers, keep table structure
+        // Unsubscribe from pricing service
+        if (this._boundPricingHandler && window.pricingService) {
+            window.pricingService.unsubscribe(this._boundPricingHandler);
+            this._boundPricingHandler = null;
+        }
+        
+        // Unsubscribe from WebSocket
+        if (this._boundOrdersUpdatedHandler && window.webSocket) {
+            window.webSocket.unsubscribe("ordersUpdated", this._boundOrdersUpdatedHandler);
+            this._boundOrdersUpdatedHandler = null;
+        }
+        
+        // Clear refresh timeout
+        if (this._refreshTimeout) {
+            clearTimeout(this._refreshTimeout);
+            this._refreshTimeout = null;
+        }
+        
+        // Clear expiry timers
         if (this.expiryTimers) {
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
             this.expiryTimers.clear();
@@ -908,7 +963,7 @@ export class ViewOrders extends BaseComponent {
         // Reset table setup flag to allow re-initialization if needed
         this._tableSetup = false;
         
-        // Don't clear the table
+        this.debug('ViewOrders cleanup complete');
     }
 
     async createOrderRow(order) {
