@@ -187,24 +187,19 @@ export class BaseComponent {
         this.debug('Base cleanup called');
     }
 
-    // Legacy render method - deprecated, use initialize() instead
-    render() {
-        if (!this.initialized) {
-            this.initialized = true;
-        }
-    }
 
     // Add method to get contract (used by CreateOrder)
     async getContract() {
         try {
             // If we're in read-only mode, return null without throwing
-            if (!window.walletManager?.provider) {
+            const wallet = this.ctx.getWallet();
+            if (!wallet?.provider) {
                 this.debug('No wallet connected - running in read-only mode');
                 return null;
             }
 
             await window.walletInitialized;
-            const contract = await walletManager.getContract();
+            const contract = await wallet.getContract();
             if (!contract) {
                 this.warn('Contract not initialized');
                 return null;
@@ -219,11 +214,12 @@ export class BaseComponent {
     // Add method to get signer (used by CreateOrder)
     async getSigner() {
         try {
-            if (!window.walletManager?.provider) {
+            const wallet = this.ctx.getWallet();
+            if (!wallet?.provider) {
                 this.error('No wallet provider available');
                 throw new Error('Please connect your wallet first');
             }
-            this.signer = await window.walletManager.provider.getSigner();
+            this.signer = await wallet.provider.getSigner();
             return this.signer;
         } catch (error) {
             this.error('Error getting signer:', error);
@@ -270,30 +266,16 @@ export class BaseComponent {
             const results = await Promise.all(validAddresses.map(async (tokenAddress) => {
                 try {
                     // Use WebSocket's centralized token cache for symbol/decimals/name
-                    let tokenInfo = null;
-                    if (ws && typeof ws.getTokenInfo === 'function') {
-                        tokenInfo = await ws.getTokenInfo(tokenAddress);
+                    // WebSocket is always available via context
+                    if (!ws || typeof ws.getTokenInfo !== 'function') {
+                        this.warn('WebSocket service not available for token info');
+                        return null;
                     }
                     
-                    // Fallback if WebSocket not available
+                    const tokenInfo = await ws.getTokenInfo(tokenAddress);
                     if (!tokenInfo) {
-                        const tokenContract = new ethers.Contract(
-                            tokenAddress,
-                            erc20Abi,
-                            this.provider
-                        );
-                        const [name, symbol, decimals] = await Promise.all([
-                            tokenContract.name().catch(() => null),
-                            tokenContract.symbol().catch(() => null),
-                            tokenContract.decimals().catch(() => 18)
-                        ]);
-                        const shortAddr = `${tokenAddress.slice(0, 6)}...${tokenAddress.slice(-4)}`;
-                        tokenInfo = {
-                            address: tokenAddress,
-                            name: name || shortAddr,
-                            symbol: symbol || 'UNK',
-                            decimals
-                        };
+                        this.warn(`Token info not found for: ${tokenAddress}`);
+                        return null;
                     }
                     
                     // Fetch balance if user is connected

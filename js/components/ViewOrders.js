@@ -64,14 +64,14 @@ export class ViewOrders extends BaseComponent {
             }
         }
         
-        // Use global pricing service
-        this.pricingService = this.ctx.getPricing() || window.pricingService;
+        // Use pricing service from context
+        this.pricingService = this.ctx.getPricing();
         
         // Setup error handling
         this.setupErrorHandling();
         
-        // Subscribe to pricing updates from global service
-        if (window.pricingService && !this._boundPricingHandler) {
+        // Subscribe to pricing updates from pricing service
+        if (this.pricingService && !this._boundPricingHandler) {
             this._boundPricingHandler = (event) => {
                 if (event === 'refreshComplete') {
                     this.debug('Prices updated, refreshing orders view');
@@ -80,18 +80,19 @@ export class ViewOrders extends BaseComponent {
                     });
                 }
             };
-            window.pricingService.subscribe(this._boundPricingHandler);
+            this.pricingService.subscribe(this._boundPricingHandler);
         }
 
         // Subscribe to WebSocket updates
-        if (window.webSocket && !this._boundOrdersUpdatedHandler) {
+        const ws = this.ctx.getWebSocket();
+        if (ws && !this._boundOrdersUpdatedHandler) {
             this._boundOrdersUpdatedHandler = () => {
                 this.debug('Orders updated via WebSocket, refreshing view');
                 this.refreshOrdersView().catch(error => {
                     this.error('Error refreshing orders after WebSocket update:', error);
                 });
             };
-            window.webSocket.subscribe("ordersUpdated", this._boundOrdersUpdatedHandler);
+            ws.subscribe("ordersUpdated", this._boundOrdersUpdatedHandler);
         }
     }
 
@@ -100,7 +101,8 @@ export class ViewOrders extends BaseComponent {
             this.debug('Initializing ViewOrders...');
             
             // Wait for WebSocket initialization first
-            if (!window.webSocket) {
+            const ws = this.ctx.getWebSocket();
+            if (!ws) {
                 this.debug('WebSocket not available, showing loading state...');
                 this.showLoadingState();
                 await new Promise(resolve => setTimeout(resolve, 1000));
@@ -108,10 +110,11 @@ export class ViewOrders extends BaseComponent {
             }
 
             // Wait for WebSocket to be fully initialized
-            await window.webSocket.waitForInitialization();
+            await ws.waitForInitialization();
             
             // Get current account
-            this.currentAccount = walletManager.getAccount()?.toLowerCase();
+            const wallet = this.ctx.getWallet();
+            this.currentAccount = wallet?.getAccount()?.toLowerCase();
             this.debug('Current account:', this.currentAccount);
             
             // Add wallet state listener to refresh UI when wallet state changes
@@ -119,13 +122,13 @@ export class ViewOrders extends BaseComponent {
                 this.debug('Wallet event received:', event, data);
                 if (event === 'connect' || event === 'disconnect' || event === 'accountsChanged') {
                     this.debug('Wallet state changed, refreshing orders view');
-                    this.currentAccount = walletManager.getAccount()?.toLowerCase();
+                    this.currentAccount = wallet?.getAccount()?.toLowerCase();
                     this.refreshOrdersView().catch(error => {
                         this.error('Error refreshing orders after wallet state change:', error);
                     });
                 }
             };
-            walletManager.addListener(this.walletListener);
+            wallet?.addListener(this.walletListener);
             
             // Setup WebSocket subscriptions
             await this.setupWebSocket();
@@ -159,7 +162,8 @@ export class ViewOrders extends BaseComponent {
             }
             
             // Otherwise, get icon URL from token icon service
-            const chainId = walletManager.chainId ? parseInt(walletManager.chainId, 16) : 137; // Default to Polygon
+            const wallet = this.ctx.getWallet();
+            const chainId = wallet?.chainId ? parseInt(wallet.chainId, 16) : 137; // Default to Polygon
             const iconUrl = await tokenIconService.getIconUrl(token.address, chainId);
             
             // Generate HTML using the utility function
@@ -201,7 +205,8 @@ export class ViewOrders extends BaseComponent {
     }
 
     setupErrorHandling() {
-        if (!window.webSocket) {
+        const ws = this.ctx.getWebSocket();
+        if (!ws) {
             if (!this._retryAttempt) {
                 this.warn('WebSocket not available, waiting for initialization...');
                 this._retryAttempt = true;
@@ -211,7 +216,7 @@ export class ViewOrders extends BaseComponent {
         }
         this._retryAttempt = false;
 
-        window.webSocket.subscribe('error', (error) => {
+        ws.subscribe('error', (error) => {
             let userMessage = 'An error occurred';
             
             if (error instanceof ContractError) {
@@ -270,20 +275,21 @@ export class ViewOrders extends BaseComponent {
     async setupWebSocket() {
         this.debug('Setting up WebSocket subscriptions');
         
-        if (!window.webSocket?.provider) {
+        const ws = this.ctx.getWebSocket();
+        if (!ws?.provider) {
             this.debug('WebSocket provider not available, waiting for reconnection...');
             return;
         }
 
         // Add provider state logging
         this.debug('WebSocket provider state:', {
-            connected: window.webSocket.provider._websocket?.connected,
-            readyState: window.webSocket.provider._websocket?.readyState
+            connected: ws.provider._websocket?.connected,
+            readyState: ws.provider._websocket?.readyState
         });
         
         // Clear existing subscriptions
         this.eventSubscriptions.forEach(sub => {
-            window.webSocket.unsubscribe(sub.event, sub.callback);
+            ws.unsubscribe(sub.event, sub.callback);
         });
         this.eventSubscriptions.clear();
 
@@ -298,7 +304,7 @@ export class ViewOrders extends BaseComponent {
                 }
             };
             this.eventSubscriptions.add({ event, callback: wrappedCallback });
-            window.webSocket.subscribe(event, wrappedCallback);
+            ws.subscribe(event, wrappedCallback);
         };
 
         // Add subscriptions with error handling
@@ -322,7 +328,9 @@ export class ViewOrders extends BaseComponent {
         
         try {
             // Get all orders first
-            let ordersToDisplay = Array.from(window.webSocket.orderCache.values());
+            const ws = this.ctx.getWebSocket();
+            const wallet = this.ctx.getWallet();
+            let ordersToDisplay = Array.from(ws.orderCache.values());
             
             // Apply token filters
             const sellTokenFilter = this.container.querySelector('#sell-token-filter')?.value;
@@ -350,8 +358,8 @@ export class ViewOrders extends BaseComponent {
                 const expiresAt = order?.timings?.expiresAt;
                 const isExpired = typeof expiresAt === 'number' ? currentTime > expiresAt : false;
                 const isActive = order.status === 'Active' && !isExpired;
-                const canFill = window.webSocket.canFillOrder(order, walletManager.getAccount());
-                const isUserOrder = order.maker?.toLowerCase() === walletManager.getAccount()?.toLowerCase();
+                const canFill = ws.canFillOrder(order, wallet?.getAccount());
+                const isUserOrder = order.maker?.toLowerCase() === wallet?.getAccount()?.toLowerCase();
 
                 // Apply token filters
                 if (sellTokenFilter && order.sellToken.toLowerCase() !== sellTokenFilter.toLowerCase()) return false;
@@ -487,7 +495,8 @@ export class ViewOrders extends BaseComponent {
             </div>
         `;
         // Get tokens from WebSocket's tokenCache
-        const tokens = Array.from(window.webSocket.tokenCache.values())
+        const ws = this.ctx.getWebSocket();
+        const tokens = Array.from(ws.tokenCache.values())
             .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
         
         this.debug('Available tokens:', tokens);
@@ -734,7 +743,8 @@ export class ViewOrders extends BaseComponent {
             }
 
             // Check if wallet is connected and has an account
-            const connectedAccount = walletManager.getAccount();
+            const wallet = this.ctx.getWallet();
+            const connectedAccount = wallet?.getAccount();
             if (!connectedAccount) {
                 throw new Error('Please sign in to fill order');
             }
@@ -755,7 +765,8 @@ export class ViewOrders extends BaseComponent {
 
             this.debug('Starting fill order process for orderId:', orderId);
             
-            const order = window.webSocket.orderCache.get(Number(orderId));
+            const ws = this.ctx.getWebSocket();
+            const order = ws.orderCache.get(Number(orderId));
             this.debug('Order details:', order);
 
             if (!order) {
@@ -938,19 +949,21 @@ export class ViewOrders extends BaseComponent {
         
         // Remove wallet listener
         if (this.walletListener) {
-            walletManager.removeListener(this.walletListener);
+            const wallet = this.ctx.getWallet();
+            wallet?.removeListener(this.walletListener);
             this.walletListener = null;
         }
         
         // Unsubscribe from pricing service
-        if (this._boundPricingHandler && window.pricingService) {
-            window.pricingService.unsubscribe(this._boundPricingHandler);
+        if (this._boundPricingHandler && this.pricingService) {
+            this.pricingService.unsubscribe(this._boundPricingHandler);
             this._boundPricingHandler = null;
         }
         
         // Unsubscribe from WebSocket
-        if (this._boundOrdersUpdatedHandler && window.webSocket) {
-            window.webSocket.unsubscribe("ordersUpdated", this._boundOrdersUpdatedHandler);
+        if (this._boundOrdersUpdatedHandler) {
+            const ws = this.ctx.getWebSocket();
+            ws?.unsubscribe("ordersUpdated", this._boundOrdersUpdatedHandler);
             this._boundOrdersUpdatedHandler = null;
         }
         
@@ -979,8 +992,9 @@ export class ViewOrders extends BaseComponent {
             tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
 
             // Get token info from WebSocket cache
-            const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
-            const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
+            const ws = this.ctx.getWebSocket();
+            const sellTokenInfo = await ws.getTokenInfo(order.sellToken);
+            const buyTokenInfo = await ws.getTokenInfo(order.buyToken);
             const deal = order.dealMetrics?.deal > 0 ? 1 / order.dealMetrics?.deal : undefined; // view as buyer/taker
             // Use pre-formatted values from dealMetrics
             const { 
@@ -1020,18 +1034,19 @@ export class ViewOrders extends BaseComponent {
             };
 
             // Determine prices with fallback to current pricing service map
+            const pricing = this.ctx.getPricing();
             const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
                 ? sellTokenUsdPrice 
-                : (window.pricingService ? window.pricingService.getPrice(order.sellToken) : undefined);
+                : (pricing ? pricing.getPrice(order.sellToken) : undefined);
             const resolvedBuyPrice = typeof buyTokenUsdPrice !== 'undefined' 
                 ? buyTokenUsdPrice 
-                : (window.pricingService ? window.pricingService.getPrice(order.buyToken) : undefined);
+                : (pricing ? pricing.getPrice(order.buyToken) : undefined);
 
             // Mark as estimate if not explicitly present in pricing map
-            const sellPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
-            const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
+            const sellPriceClass = (pricing && pricing.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
+            const buyPriceClass = (pricing && pricing.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
 
-            const orderStatus = window.webSocket.getOrderStatus(order);
+            const orderStatus = ws.getOrderStatus(order);
             const expiryEpoch = order?.timings?.expiresAt;
             const expiryText = orderStatus === 'Active' && typeof expiryEpoch === 'number' 
                 ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
@@ -1147,25 +1162,27 @@ export class ViewOrders extends BaseComponent {
             if (!expiresCell || !statusCell || !actionCell) return;
 
             const orderId = row.dataset.orderId;
-            const order = window.webSocket.orderCache.get(Number(orderId));
+            const ws = this.ctx.getWebSocket();
+            const wallet = this.ctx.getWallet();
+            const order = ws.orderCache.get(Number(orderId));
             if (!order) return;
 
             const currentTime = Math.floor(Date.now() / 1000);
             const expiresAt = order?.timings?.expiresAt;
             const isExpired = typeof expiresAt === 'number' ? currentTime > expiresAt : false;
             const timeDiff = typeof expiresAt === 'number' ? expiresAt - currentTime : 0;
-            const currentAccount = walletManager.getAccount()?.toLowerCase();
+            const currentAccount = wallet?.getAccount()?.toLowerCase();
             const isUserOrder = order.maker?.toLowerCase() === currentAccount;
 
             // Update expiry text - only calculate for active orders
-            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const orderStatusForExpiry = ws.getOrderStatus(order);
             const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
 
             // Update status column to show current status
-            const currentStatus = window.webSocket.getOrderStatus(order);
+            const currentStatus = ws.getOrderStatus(order);
             const statusMainElement = statusCell.querySelector('.status-main');
             if (statusMainElement && statusMainElement.textContent !== currentStatus) {
                 statusMainElement.textContent = currentStatus;
@@ -1179,7 +1196,7 @@ export class ViewOrders extends BaseComponent {
             // Update action column content - no status text here, only actions
             if (isUserOrder) {
                 actionCell.innerHTML = '<span class="mine-label">Mine</span>';
-            } else if (!isUserOrder && window.webSocket.canFillOrder(order, currentAccount)) {
+            } else if (!isUserOrder && ws.canFillOrder(order, currentAccount)) {
                 actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill</button>`;
                 const fillButton = actionCell.querySelector('.fill-button');
                 if (fillButton) {
@@ -1216,10 +1233,11 @@ export class ViewOrders extends BaseComponent {
     }
 
     async getContract() {
-        if (!window.webSocket?.contract) {
+        const ws = this.ctx.getWebSocket();
+        if (!ws?.contract) {
             throw new Error('WebSocket contract not initialized');
         }
-        return window.webSocket.contract;
+        return ws.contract;
     }
 
     formatTimeDiff(seconds) {

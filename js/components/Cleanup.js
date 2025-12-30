@@ -6,7 +6,6 @@ import { handleTransactionError, isUserRejection } from '../utils/ui.js';
 export class Cleanup extends BaseComponent {
     constructor(containerId) {
         super('cleanup-container');
-        this.webSocket = window.webSocket;
         this.contract = null;
         this.isInitializing = false;
         this.isInitialized = false;
@@ -39,11 +38,12 @@ export class Cleanup extends BaseComponent {
             this.currentMode = readOnlyMode;
             
             // Wait for WebSocket to be fully initialized
-            if (!window.webSocket?.isInitialized) {
+            const ws = this.ctx.getWebSocket();
+            if (!ws?.isInitialized) {
                 this.debug('Waiting for WebSocket initialization...');
                 await new Promise(resolve => {
                     const checkInterval = setInterval(() => {
-                        if (window.webSocket?.isInitialized) {
+                        if (ws?.isInitialized) {
                             clearInterval(checkInterval);
                             resolve();
                         }
@@ -51,9 +51,9 @@ export class Cleanup extends BaseComponent {
                 });
             }
 
-            // Update WebSocket reference and get contract
-            this.webSocket = window.webSocket;
-            this.contract = this.webSocket.contract;
+            // Get WebSocket and contract from context
+            this.webSocket = ws;
+            this.contract = ws.contract;
 
             // Verify contract is available
             if (!this.contract) {
@@ -99,8 +99,9 @@ export class Cleanup extends BaseComponent {
                 if (this.cleanupButton) {
                     this.cleanupButton.addEventListener('click', () => {
                         this.debug('Cleanup button clicked (read-only): attempting wallet connect');
-                        if (window.walletManager) {
-                            window.walletManager.connect().catch(error => {
+                        const wallet = this.ctx.getWallet();
+                        if (wallet) {
+                            wallet.connect().catch(error => {
                                 this.error('Wallet connect failed from cleanup (read-only):', error);
                                 this.showError('Failed to connect wallet: ' + error.message);
                             });
@@ -111,8 +112,9 @@ export class Cleanup extends BaseComponent {
                 }
 
                 // Add wallet connection listener to reinitialize when wallet connects
-                if (window.walletManager) {
-                    window.walletManager.addListener((event, data) => {
+                const wallet = this.ctx.getWallet();
+                if (wallet) {
+                    wallet.addListener((event, data) => {
                         if (event === 'connect') {
                             this.debug('Wallet connected in read-only mode, reinitializing...');
                             // Force re-init in connected mode
@@ -286,7 +288,8 @@ export class Cleanup extends BaseComponent {
 
             if (elements.cleanupButton) {
                 // Check if wallet is connected
-                const isWalletConnected = window.walletManager?.isWalletConnected();
+                const wallet = this.ctx.getWallet();
+                const isWalletConnected = wallet?.isWalletConnected();
                 
                 if (!isWalletConnected) {
                     elements.cleanupButton.disabled = false; // Enable button to connect wallet
@@ -354,8 +357,9 @@ export class Cleanup extends BaseComponent {
         });
 
         // Add wallet connection event listeners
-        if (window.walletManager) {
-            window.walletManager.addListener((event, data) => {
+        const wallet = this.ctx.getWallet();
+        if (wallet) {
+            wallet.addListener((event, data) => {
                 if (event === 'connect') {
                     this.debug('Wallet connected, updating cleanup button state');
                     this.checkCleanupOpportunities();
@@ -370,10 +374,11 @@ export class Cleanup extends BaseComponent {
     async performCleanup() {
         try {
             // Check if wallet is connected first
-            if (!window.walletManager?.isWalletConnected()) {
+            const wallet = this.ctx.getWallet();
+            if (!wallet?.isWalletConnected()) {
                 this.debug('Wallet not connected, attempting to connect...');
                 try {
-                    await window.walletManager.connect();
+                    await wallet.connect();
                     // After successful connection, refresh the button state
                     await this.checkCleanupOpportunities();
                     return;
@@ -390,7 +395,7 @@ export class Cleanup extends BaseComponent {
                 throw new Error('Contract not initialized');
             }
 
-            const signer = await window.walletManager.getSigner();
+            const signer = await wallet.getSigner();
             if (!signer) {
                 throw new Error('No signer available');
             }
@@ -653,7 +658,8 @@ export class Cleanup extends BaseComponent {
             }
 
             // Get signer from wallet manager
-            const signer = await window.walletManager.getSigner();
+            const wallet = this.ctx.getWallet();
+            const signer = await wallet.getSigner();
             if (!signer) {
                 throw new Error('No signer available');
             }
@@ -685,7 +691,8 @@ export class Cleanup extends BaseComponent {
         }
         
         // Remove wallet listeners
-        if (window.walletManager) {
+        const wallet = this.ctx.getWallet();
+        if (wallet) {
             // Note: We can't easily remove specific listeners, but the component will be recreated
             // when needed, so this is acceptable for now
             this.debug('Wallet listeners will be cleaned up on component recreation');
@@ -704,7 +711,8 @@ export class Cleanup extends BaseComponent {
                 throw new Error('Contract not initialized');
             }
 
-            const signer = await window.walletManager.getSigner();
+            const wallet = this.ctx.getWallet();
+            const signer = await wallet.getSigner();
             if (!signer) {
                 throw new Error('No signer available');
             }

@@ -25,7 +25,8 @@ export class TakerOrders extends ViewOrders {
             this.debug('Refreshing taker orders view');
             
             // Get current user address
-            const userAddress = await window.walletManager.getAccount();
+            const wallet = this.ctx.getWallet();
+            const userAddress = await wallet?.getAccount();
             if (!userAddress) {
                 this.debug('No wallet connected, showing empty state');
                 // Show empty state for taker orders when no wallet is connected
@@ -44,7 +45,8 @@ export class TakerOrders extends ViewOrders {
             }
 
             // Get all orders and filter for taker
-            let ordersToDisplay = Array.from(window.webSocket.orderCache.values())
+            const ws = this.ctx.getWebSocket();
+            let ordersToDisplay = Array.from(ws.orderCache.values())
                 .filter(order => 
                     order?.taker && 
                     order.taker.toLowerCase() === userAddress.toLowerCase()
@@ -88,7 +90,7 @@ export class TakerOrders extends ViewOrders {
             // Filter active orders if needed
             if (showOnlyActive) {
                 ordersToDisplay = ordersToDisplay.filter(order => 
-                    window.webSocket.canFillOrder(order, userAddress)
+                    ws.canFillOrder(order, userAddress)
                 );
             }
 
@@ -168,7 +170,8 @@ export class TakerOrders extends ViewOrders {
                         return;
                     }
                     
-                    const userAddress = await window.walletManager.getAccount();
+                    const wallet = this.ctx.getWallet();
+                    const userAddress = await wallet?.getAccount();
                     this.orders.clear();
                     
                     const takerOrders = Object.values(orders)
@@ -247,8 +250,9 @@ export class TakerOrders extends ViewOrders {
             tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
 
             // Get token info from WebSocket cache
-            const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
-            const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
+            const ws = this.ctx.getWebSocket();
+            const sellTokenInfo = await ws.getTokenInfo(order.sellToken);
+            const buyTokenInfo = await ws.getTokenInfo(order.buyToken);
 
             // Use pre-formatted values from dealMetrics
             const { 
@@ -290,25 +294,27 @@ export class TakerOrders extends ViewOrders {
             };
 
             // Determine prices with fallback to current pricing service map
+            const pricing = this.ctx.getPricing();
             const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
                 ? sellTokenUsdPrice 
-                : (window.pricingService ? window.pricingService.getPrice(order.sellToken) : undefined);
+                : (pricing ? pricing.getPrice(order.sellToken) : undefined);
             const resolvedBuyPrice = typeof buyTokenUsdPrice !== 'undefined' 
                 ? buyTokenUsdPrice 
-                : (window.pricingService ? window.pricingService.getPrice(order.buyToken) : undefined);
+                : (pricing ? pricing.getPrice(order.buyToken) : undefined);
 
             // Mark as estimate if not explicitly present in pricing map
-            const sellPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
-            const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
+            const sellPriceClass = (pricing && pricing.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
+            const buyPriceClass = (pricing && pricing.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
 
-            const orderStatus = window.webSocket.getOrderStatus(order);
+            const orderStatus = ws.getOrderStatus(order);
             const expiryEpoch = order?.timings?.expiresAt;
             const expiryText = orderStatus === 'Active' && typeof expiryEpoch === 'number' 
                 ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
                 : '';
 
             // Get counterparty address for display
-            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            const wallet = this.ctx.getWallet();
+            const userAddress = wallet?.getAccount()?.toLowerCase();
             const { counterpartyAddress, isZeroAddr, formattedAddress } = processOrderAddress(order, userAddress);
 
             tr.innerHTML = `

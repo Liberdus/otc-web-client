@@ -40,9 +40,10 @@ export class ContractParams extends BaseComponent {
             this.container.innerHTML = this.generateContainerHTML();
 
             // Wait for WebSocket initialization using WebSocket's promise
-            await window.webSocket?.waitForInitialization();
+            const ws = this.ctx.getWebSocket();
+            await ws?.waitForInitialization();
 
-            const contract = window.webSocket.contract;
+            const contract = ws.contract;
             if (!contract) {
                 throw new Error('Contract not initialized');
             }
@@ -68,7 +69,7 @@ export class ContractParams extends BaseComponent {
             await Promise.all(
                 Object.entries(paramMethods).map(async ([key, method]) => {
                     try {
-                        params[key] = await window.webSocket.queueRequest(
+                        params[key] = await ws.queueRequest(
                             async () => contract[method]()
                         );
                         this.debug(`Fetched ${key}:`, params[key]);
@@ -89,7 +90,7 @@ export class ContractParams extends BaseComponent {
             // Use WebSocket's token info cache for fee token details
             if (params.feeToken) {
                 try {
-                    const tokenInfo = await window.webSocket.getTokenInfo(params.feeToken);
+                    const tokenInfo = await ws.getTokenInfo(params.feeToken);
                     params.tokenSymbol = tokenInfo.symbol;
                     params.tokenDecimals = tokenInfo.decimals;
                     this.debug('Fetched token details:', tokenInfo);

@@ -58,69 +58,69 @@ export function createAppContext() {
         },
         
         /**
-         * Get wallet manager (with global fallback for backward compatibility)
+         * Get wallet manager
          * @returns {Object|null}
          */
         getWallet() {
-            return this.wallet || window.walletManager || null;
+            return this.wallet;
         },
         
         /**
-         * Get WebSocket service (with global fallback for backward compatibility)
+         * Get WebSocket service
          * @returns {Object|null}
          */
         getWebSocket() {
-            return this.ws || window.webSocket || null;
+            return this.ws;
         },
         
         /**
-         * Get pricing service (with global fallback for backward compatibility)
+         * Get pricing service
          * @returns {Object|null}
          */
         getPricing() {
-            return this.pricing || window.pricingService || null;
+            return this.pricing;
         },
         
         /**
-         * Show error toast (with global fallback)
+         * Show error toast
          * @param {string} message
          * @param {number} duration
          */
         showError(message, duration = 0) {
-            const fn = this.toast.showError || window.showError;
+            const fn = this.toast.showError;
             if (fn) return fn(message, duration);
             console.error('[AppContext] showError:', message);
         },
         
         /**
-         * Show success toast (with global fallback)
+         * Show success toast
          * @param {string} message
          * @param {number} duration
          */
         showSuccess(message, duration = 5000) {
-            const fn = this.toast.showSuccess || window.showSuccess;
+            const fn = this.toast.showSuccess;
             if (fn) return fn(message, duration);
             console.log('[AppContext] showSuccess:', message);
         },
         
         /**
-         * Show warning toast (with global fallback)
+         * Show warning toast
          * @param {string} message
          * @param {number} duration
          */
         showWarning(message, duration = 5000) {
-            const fn = this.toast.showWarning || window.showWarning;
+            const fn = this.toast.showWarning;
             if (fn) return fn(message, duration);
             console.warn('[AppContext] showWarning:', message);
         },
         
         /**
-         * Show info toast (with global fallback)
+         * Show info toast
          * @param {string} message
          * @param {number} duration
          */
         showInfo(message, duration = 5000) {
-            const fn = this.toast.showInfo || window.showInfo;
+            const fn = this.toast.showInfo;
             if (fn) return fn(message, duration);
             console.log('[AppContext] showInfo:', message);
         }
@@ -128,7 +128,7 @@ export function createAppContext() {
 }
 
 /**
- * Global context instance (for backward compatibility during migration)
+ * Global context instance
  * Components can import this directly, but prefer receiving context via setContext()
  */
 let globalContext = null;

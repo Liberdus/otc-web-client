@@ -6,8 +6,7 @@ import { handleTransactionError, processOrderAddress, generateStatusCellHTML, se
 export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
-        // Use global pricing service instead of local instance
-        this.pricingService = window.pricingService;
+        // Pricing service will be set up via setupServices() in parent class
         
         // Initialize logger
         const logger = createLogger('MY_ORDERS');
@@ -36,7 +35,8 @@ export class MyOrders extends ViewOrders {
             this.debug('Initializing MyOrders component');
             
             // Check wallet connection first
-            if (!window.walletManager.isWalletConnected()) {
+            const wallet = this.ctx.getWallet();
+            if (!wallet?.isWalletConnected()) {
                 this.warn('No wallet connected, showing connect prompt');
                 this.container.innerHTML = `
                     <div class="tab-content-wrapper">
@@ -47,7 +47,7 @@ export class MyOrders extends ViewOrders {
             }
 
             // Get current account
-            let userAddress = window.walletManager.getAccount();
+            let userAddress = wallet.getAccount();
             if (!userAddress) {
                 this.warn('No account connected');
                 return;
@@ -63,18 +63,19 @@ export class MyOrders extends ViewOrders {
             }
 
             // Check if WebSocket cache is already available
-            if (window.webSocket?.orderCache.size > 0) {
+            const ws = this.ctx.getWebSocket();
+            if (ws?.orderCache.size > 0) {
                 this.debug('Using existing WebSocket cache');
                 await this.refreshOrdersView();
                 return;
             }
 
             // If no cache, then wait for WebSocket initialization
-            if (!window.webSocket?.isInitialized) {
+            if (!ws?.isInitialized) {
                 this.warn('WebSocket not initialized, waiting...');
                 await new Promise(resolve => {
                     const checkInterval = setInterval(() => {
-                        if (window.webSocket?.isInitialized) {
+                        if (ws?.isInitialized) {
                             clearInterval(checkInterval);
                             resolve();
                         }
@@ -103,10 +104,12 @@ export class MyOrders extends ViewOrders {
             const showOnlyCancellable = checkbox?.checked ?? false; // Get current state
             
             // Get all orders first
-            let ordersToDisplay = Array.from(window.webSocket.orderCache.values());
+            const ws = this.ctx.getWebSocket();
+            const wallet = this.ctx.getWallet();
+            let ordersToDisplay = Array.from(ws.orderCache.values());
             
             // Filter for user's orders only
-            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            const userAddress = wallet?.getAccount()?.toLowerCase();
             ordersToDisplay = ordersToDisplay.filter(order => 
                 order.maker?.toLowerCase() === userAddress
             );
@@ -124,7 +127,7 @@ export class MyOrders extends ViewOrders {
 
                 // Apply cancellable filter if checked
                 if (showOnlyCancellable) {
-                    return window.webSocket.canCancelOrder(order, userAddress);
+                    return ws.canCancelOrder(order, userAddress);
                 }
                 
                 return true;
@@ -207,7 +210,8 @@ export class MyOrders extends ViewOrders {
         const showOnlyCancellable = existingCheckbox?.checked ?? true; // Default to true if no existing state
         
         // Get tokens from WebSocket's tokenCache first
-        const tokens = Array.from(window.webSocket.tokenCache.values())
+        const ws = this.ctx.getWebSocket();
+        const tokens = Array.from(ws.tokenCache.values())
             .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
         
         this.debug('Available tokens:', tokens);
@@ -537,8 +541,9 @@ export class MyOrders extends ViewOrders {
             tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
 
             // Get token info from WebSocket cache
-            const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
-            const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
+            const ws = this.ctx.getWebSocket();
+            const sellTokenInfo = await ws.getTokenInfo(order.sellToken);
+            const buyTokenInfo = await ws.getTokenInfo(order.buyToken);
 
             // Use pre-formatted values from dealMetrics
             const { 
@@ -579,27 +584,29 @@ export class MyOrders extends ViewOrders {
             };
 
             // Determine prices with fallback to current pricing service map
+            const pricing = this.ctx.getPricing();
             const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
                 ? sellTokenUsdPrice 
-                : (window.pricingService ? window.pricingService.getPrice(order.sellToken) : undefined);
+                : (pricing ? pricing.getPrice(order.sellToken) : undefined);
             const resolvedBuyPrice = typeof buyTokenUsdPrice !== 'undefined' 
                 ? buyTokenUsdPrice 
-                : (window.pricingService ? window.pricingService.getPrice(order.buyToken) : undefined);
+                : (pricing ? pricing.getPrice(order.buyToken) : undefined);
 
             // Mark as estimate if not explicitly present in pricing map
-            const sellPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
-            const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
+            const sellPriceClass = (pricing && pricing.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
+            const buyPriceClass = (pricing && pricing.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
 
             const currentTime = Math.floor(Date.now() / 1000);
             const timeUntilExpiry = order?.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
-            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const orderStatusForExpiry = ws.getOrderStatus(order);
             const expiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeUntilExpiry) : '';
 
             // Get order status from WebSocket cache
-            const orderStatus = window.webSocket.getOrderStatus(order);
+            const orderStatus = ws.getOrderStatus(order);
 
             // Get counterparty address for display
-            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            const wallet = this.ctx.getWallet();
+            const userAddress = wallet?.getAccount()?.toLowerCase();
             const { counterpartyAddress, isZeroAddr, formattedAddress } = processOrderAddress(order, userAddress);
             tr.innerHTML = `
                 <td>${order.id}</td>
@@ -638,7 +645,7 @@ export class MyOrders extends ViewOrders {
             const actionCell = tr.querySelector('.action-column');
             
             // Use WebSocket helper to determine if order can be cancelled
-            if (window.webSocket.canCancelOrder(order, userAddress)) {
+            if (ws.canCancelOrder(order, userAddress)) {
                 const cancelButton = document.createElement('button');
                 cancelButton.className = 'cancel-order-btn';
                 cancelButton.textContent = 'Cancel';
@@ -654,7 +661,7 @@ export class MyOrders extends ViewOrders {
                         cancelButton.classList.add('disabled');
 
                         // Get contract from WebSocket and connect to signer
-                        const contract = window.webSocket.contract;
+                        const contract = ws.contract;
                         if (!contract) {
                             throw new Error('Contract not available');
                         }
@@ -788,22 +795,24 @@ export class MyOrders extends ViewOrders {
             if (!expiresCell || !actionCell) return;
 
             const orderId = row.dataset.orderId;
-            const order = window.webSocket.orderCache.get(Number(orderId));
+            const ws = this.ctx.getWebSocket();
+            const wallet = this.ctx.getWallet();
+            const order = ws.orderCache.get(Number(orderId));
             if (!order) return;
 
             const currentTime = Math.floor(Date.now() / 1000);
                             const timeDiff = order.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
-            const currentAccount = window.walletManager.getAccount()?.toLowerCase();
+            const currentAccount = wallet?.getAccount()?.toLowerCase();
 
             // Update expiry text - only calculate for active orders
-            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const orderStatusForExpiry = ws.getOrderStatus(order);
             const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
 
             // Update action column content for MyOrders view
-            if (window.webSocket.canCancelOrder(order, currentAccount)) {
+            if (ws.canCancelOrder(order, currentAccount)) {
                 // Only update if there isn't already a cancel button
                 if (!actionCell.querySelector('.cancel-order-btn')) {
                     const cancelButton = document.createElement('button');
@@ -820,7 +829,7 @@ export class MyOrders extends ViewOrders {
                             cancelButton.textContent = 'Cancelling...';
                             
                             // Get contract from WebSocket and connect to signer
-                            const contract = window.webSocket.contract;
+                            const contract = ws.contract;
                             if (!contract) {
                                 throw new Error('Contract not available');
                             }

@@ -149,18 +149,15 @@ export class CreateOrder extends BaseComponent {
             }
 
             // Rest of the initialization code for connected mode...
-            if (window.webSocket) {
-                // Remove all order update subscriptions - CreateOrder shouldn't refresh itself
-                // when orders are created or updated, only other components should refresh
-                // CreateOrder only creates orders, it doesn't need to listen to order events
-            }
+            const ws = this.ctx.getWebSocket();
+            // CreateOrder only creates orders, it doesn't need to listen to order events
 
             // Wait for WebSocket to be fully initialized
-            if (!window.webSocket?.isInitialized) {
+            if (!ws?.isInitialized) {
                 this.debug('Waiting for WebSocket initialization...');
                 await new Promise(resolve => {
                     const checkInterval = setInterval(() => {
-                        if (window.webSocket?.isInitialized) {
+                        if (ws?.isInitialized) {
                             clearInterval(checkInterval);
                             resolve();
                         }
@@ -175,8 +172,8 @@ export class CreateOrder extends BaseComponent {
             if (buyContainer) buyContainer.innerHTML = '';
 
             // Use WebSocket's contract instance
-            this.contract = window.webSocket.contract;
-            this.provider = window.webSocket.provider;
+            this.contract = ws.contract;
+            this.provider = ws.provider;
 
             if (!this.contract) {
                 throw new Error('Contract not initialized');
@@ -709,8 +706,9 @@ export class CreateOrder extends BaseComponent {
                     }
                     
                     // Force a sync of all orders after successful creation
-                    if (window.webSocket) {
-                        await window.webSocket.syncAllOrders(this.contract);
+                    const ws = this.ctx.getWebSocket();
+                    if (ws) {
+                        await ws.syncAllOrders(this.contract);
                     }
 
                     // If we get here, the transaction was successful
@@ -864,11 +862,12 @@ export class CreateOrder extends BaseComponent {
             this.debug('Loaded not allowed tokens:', notAllowed);
             
             // Trigger price fetching for allowed tokens
-            if (window.pricingService && allowed.length > 0) {
+            const pricing = this.ctx.getPricing();
+            if (pricing && allowed.length > 0) {
                 try {
                     this.debug('Triggering price fetching for allowed tokens...');
                     const allowedAddresses = allowed.map(token => token.address);
-                    await window.pricingService.fetchPricesForTokens(allowedAddresses);
+                    await pricing.fetchPricesForTokens(allowedAddresses);
                     this.debug('Price fetching completed for allowed tokens');
                 } catch (error) {
                     this.debug('Error fetching prices for allowed tokens:', error);
@@ -1100,7 +1099,8 @@ export class CreateOrder extends BaseComponent {
                         };
 
                         // Get USD price and calculate USD value
-                        const usdPrice = window.pricingService?.getPrice(token.address);
+                        const pricing = this.ctx.getPricing();
+                        const usdPrice = pricing?.getPrice(token.address);
                         const usdValue = usdPrice !== undefined ? Number(token.balance) * usdPrice : 0;
                         const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                             style: 'currency',
@@ -1200,7 +1200,8 @@ export class CreateOrder extends BaseComponent {
                                         maximumFractionDigits: 4,
                                         useGrouping: true
                                     });
-                                    const usdPrice = window.pricingService?.getPrice(token.address);
+                                    const pricing = this.ctx.getPricing();
+                                    const usdPrice = pricing?.getPrice(token.address);
                                     const usdValue = usdPrice !== undefined ? balance * usdPrice : 0;
                                     const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                                         style: 'currency',
@@ -1328,7 +1329,8 @@ export class CreateOrder extends BaseComponent {
             });
             
             // Get USD price and calculate USD value
-            const usdPrice = window.pricingService?.getPrice(token.address);
+            const pricing = this.ctx.getPricing();
+            const usdPrice = pricing?.getPrice(token.address);
             const usdValue = usdPrice !== undefined ? balance * usdPrice : 0;
             const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                 style: 'currency',
@@ -1456,7 +1458,8 @@ export class CreateOrder extends BaseComponent {
             });
             
             // Get USD price and calculate USD value
-            const usdPrice = window.pricingService?.getPrice(token.address);
+            const pricing = this.ctx.getPricing();
+            const usdPrice = pricing?.getPrice(token.address);
             const usdValue = usdPrice !== undefined ? balance * usdPrice : 0;
             const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                 style: 'currency',
@@ -1869,26 +1872,27 @@ export class CreateOrder extends BaseComponent {
             }
             
             // Enhanced price fetching with loading states
+            const pricing = this.ctx.getPricing();
             this.debug('Pricing service state:', {
-                exists: !!window.pricingService,
-                hasGetPrice: !!window.pricingService?.getPrice,
+                exists: !!pricing,
+                hasGetPrice: !!pricing?.getPrice,
                 tokenAddress: token.address
             });
             
             let usdPrice = 0;
             let isPriceEstimated = true;
             
-            if (window.pricingService) {
-                usdPrice = window.pricingService.getPrice(token.address);
-                isPriceEstimated = window.pricingService.isPriceEstimated(token.address);
+            if (pricing) {
+                usdPrice = pricing.getPrice(token.address);
+                isPriceEstimated = pricing.isPriceEstimated(token.address);
                 
                 // If price is estimated, fetch it in the background (non-blocking)
                 if (isPriceEstimated) {
                     this.debug(`Price for ${token.symbol} is estimated, fetching in background...`);
-                    window.pricingService.fetchPricesForTokens([token.address])
+                    pricing.fetchPricesForTokens([token.address])
                         .then(() => {
                             // Update price display after fetching
-                            const updatedPrice = window.pricingService.getPrice(token.address);
+                            const updatedPrice = pricing.getPrice(token.address);
                             this.updateTokenAmounts(type);
                             this.debug(`Updated price for ${token.symbol}: $${updatedPrice}`);
                         })
@@ -2166,8 +2170,9 @@ export class CreateOrder extends BaseComponent {
         const modalContent = document.querySelector(`#${type}TokenModal .token-list`);
         if (!modalContent) return;
 
+        const pricing = this.ctx.getPricing();
         modalContent.innerHTML = tokens.map(token => {
-            const usdPrice = window.pricingService?.getPrice(token.address);
+            const usdPrice = pricing?.getPrice(token.address);
             const balance = parseFloat(token.balance) || 0;
             const balanceUSD = (balance > 0 && usdPrice !== undefined) ? (balance * usdPrice).toFixed(2) : (usdPrice !== undefined ? '0.00' : 'N/A');
             
