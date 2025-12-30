@@ -53,13 +53,19 @@ export class ViewOrders extends BaseComponent {
      * Called once during first initialize()
      */
     setupServices() {
-        // Initialize provider if available
-        if (typeof window.ethereum !== 'undefined' && !this.provider) {
-            this.provider = new ethers.providers.Web3Provider(window.ethereum);
+        // Use walletManager's provider instead of creating our own
+        // This ensures a single source of truth for the connected wallet provider
+        if (!this.provider) {
+            const wallet = this.ctx.getWallet();
+            this.provider = wallet?.provider || null;
+            
+            if (!this.provider) {
+                this.debug('No provider available from walletManager');
+            }
         }
         
         // Use global pricing service
-        this.pricingService = window.pricingService;
+        this.pricingService = this.ctx.getPricing() || window.pricingService;
         
         // Setup error handling
         this.setupErrorHandling();

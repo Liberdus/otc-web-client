@@ -61,8 +61,8 @@ export class BaseComponent {
         // Balance cache for user-specific balance lookups
         this.balanceCache = new Map();
         
-        // Initialize provider from window.walletManager if available
-        this.provider = window.walletManager?.provider || null;
+        // Provider is accessed lazily via getProvider() to ensure we get the latest from context
+        this._provider = null;
     }
     
     /**
@@ -79,6 +79,28 @@ export class BaseComponent {
      */
     get ctx() {
         return this._ctx || getAppContext();
+    }
+    
+    /**
+     * Get the provider from walletManager via context
+     * Returns the connected wallet provider or null if not connected
+     * @returns {ethers.providers.Web3Provider|null}
+     */
+    get provider() {
+        // If explicitly set, use that
+        if (this._provider) return this._provider;
+        
+        // Otherwise get from wallet manager via context
+        const wallet = this.ctx.getWallet();
+        return wallet?.provider || null;
+    }
+    
+    /**
+     * Allow explicit provider override for components that need it
+     * @param {ethers.providers.Provider} value
+     */
+    set provider(value) {
+        this._provider = value;
     }
 
     // Backward compatibility getters for components using isInitialized/isInitializing

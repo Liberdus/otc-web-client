@@ -71,7 +71,7 @@ This allows gradual migration without breaking existing code.
 
 ---
 
-## Current State (Post Phase 3)
+## Current State (Post Phase 4)
 
 ### Wallet / Signer / Account
 
@@ -89,7 +89,7 @@ This allows gradual migration without breaking existing code.
 - Global: `window.walletManager`
 - Direct: `window.ethereum` (some components create their own provider)
 
-**Issue:** Some components (e.g., `ViewOrders`) create `new Web3Provider(window.ethereum)` instead of using walletManager.
+**Resolved in Phase 4:** Components now use `this.ctx.getWallet().provider` or the `BaseComponent.provider` getter instead of creating their own providers.
 
 ---
 
