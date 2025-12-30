@@ -1,13 +1,14 @@
-import { ViewOrders } from './ViewOrders.js';
+import { BaseComponent } from './BaseComponent.js';
 import { createLogger } from '../services/LogService.js';
 import { ethers } from 'ethers';
 import { handleTransactionError, processOrderAddress, generateStatusCellHTML, setupClickToCopy } from '../utils/ui.js';
 import { formatTimeDiff, formatUsdPrice, calculateTotalValue } from '../utils/orderUtils.js';
+import { OrdersComponentHelper } from '../services/OrdersComponentHelper.js';
+import { OrdersTableRenderer } from '../services/OrdersTableRenderer.js';
 
-export class MyOrders extends ViewOrders {
+export class MyOrders extends BaseComponent {
     constructor() {
         super('my-orders');
-        // Pricing service will be set up via setupServices() in parent class
         
         // Initialize logger
         const logger = createLogger('MY_ORDERS');
@@ -15,12 +16,30 @@ export class MyOrders extends ViewOrders {
         this.error = logger.error.bind(logger);
         this.warn = logger.warn.bind(logger);
         
+        // Initialize state
+        this.provider = null;
+        this.currentPage = 1;
+        this.totalOrders = 0;
+        this.eventSubscriptions = new Set();
+        this.expiryTimers = new Map();
+        this.isLoading = false;
+        this.pricingService = null;
+        this.currentAccount = null;
+        
         // Initialize sort config with id as default sort, descending
         this.sortConfig = {
             column: 'id',
             direction: 'desc',
             isColumnClick: false
         };
+        
+        // Initialize helper and renderer
+        this.helper = new OrdersComponentHelper(this);
+        this.renderer = new OrdersTableRenderer(this, {
+            rowRenderer: (order) => this.createOrderRow(order),
+            filterToggleLabel: 'Show only cancellable',
+            showRefreshButton: false
+        });
     }
 
     async initialize(readOnlyMode = true) {
@@ -58,7 +77,12 @@ export class MyOrders extends ViewOrders {
             const existingTable = this.container.querySelector('.orders-table');
             if (!existingTable) {
                 this.debug('Table does not exist, setting up...');
-                await this.setupTable();
+                // Setup services first
+                this.helper.setupServices({
+                    onRefresh: () => this.refreshOrdersView()
+                });
+                await this.renderer.setupTable(() => this.refreshOrdersView());
+                await this.helper.setupWebSocket(() => this.refreshOrdersView());
             } else {
                 this.debug('Table already exists, skipping setup');
             }
@@ -172,7 +196,7 @@ export class MyOrders extends ViewOrders {
             }
 
             // Update pagination controls
-            this.updatePaginationControls(this.totalOrders);
+            this.renderer.updatePaginationControls(this.totalOrders);
 
             // Show empty state if no orders
             if (ordersToDisplay.length === 0) {
@@ -712,7 +736,7 @@ export class MyOrders extends ViewOrders {
             }
 
             // Start the expiry timer
-            this.startExpiryTimer(tr);
+            this.renderer.startExpiryTimer(tr);
 
             return tr;
         } catch (error) {

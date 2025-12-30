@@ -5,10 +5,10 @@ import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 import { getNetworkConfig } from '../config.js';
 import { walletManager } from '../config.js';
 import { createLogger } from '../services/LogService.js';
-import { tokenIconService } from '../services/TokenIconService.js';
-import { generateTokenIconHTML } from '../utils/tokenIcons.js';
 import { handleTransactionError } from '../utils/ui.js';
 import { formatAddress, formatTimestamp, formatTimeDiff, getExplorerUrl, getOrderStatusText, formatUsdPrice, calculateTotalValue } from '../utils/orderUtils.js';
+import { OrdersComponentHelper } from '../services/OrdersComponentHelper.js';
+import { OrdersTableRenderer } from '../services/OrdersTableRenderer.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -36,6 +36,13 @@ export class ViewOrders extends BaseComponent {
         this._boundOrdersUpdatedHandler = null;
         this._refreshTimeout = null;
         
+        // Initialize helper and renderer
+        this.helper = new OrdersComponentHelper(this);
+        this.renderer = new OrdersTableRenderer(this, {
+            rowRenderer: (order) => this.createOrderRow(order),
+            showRefreshButton: true
+        });
+        
         // Debounce mechanism
         this.debouncedRefresh = () => {
             clearTimeout(this._refreshTimeout);
@@ -54,91 +61,13 @@ export class ViewOrders extends BaseComponent {
      * Called once during first initialize()
      */
     setupServices() {
-        // Use walletManager's provider instead of creating our own
-        // This ensures a single source of truth for the connected wallet provider
-        if (!this.provider) {
-            const wallet = this.ctx.getWallet();
-            this.provider = wallet?.provider || null;
-            
-            if (!this.provider) {
-                this.debug('No provider available from walletManager');
-            }
-        }
-        
-        // Use pricing service from context
-        this.pricingService = this.ctx.getPricing();
-        
-        // Setup error handling
-        this.setupErrorHandling();
-        
-        // Subscribe to pricing updates from pricing service
-        if (this.pricingService && !this._boundPricingHandler) {
-            this._boundPricingHandler = (event) => {
-                if (event === 'refreshComplete') {
-                    this.debug('Prices updated, refreshing orders view');
-                    this.refreshOrdersView().catch(error => {
-                        this.error('Error refreshing orders after price update:', error);
-                    });
-                }
-            };
-            this.pricingService.subscribe(this._boundPricingHandler);
-        }
-
-        // Subscribe to WebSocket updates
-        const ws = this.ctx.getWebSocket();
-        if (ws && !this._boundOrdersUpdatedHandler) {
-            this._boundOrdersUpdatedHandler = () => {
-                this.debug('Orders updated via WebSocket, refreshing view');
-                this.refreshOrdersView().catch(error => {
-                    this.error('Error refreshing orders after WebSocket update:', error);
-                });
-            };
-            ws.subscribe("ordersUpdated", this._boundOrdersUpdatedHandler);
-        }
+        this.helper.setupServices({
+            onRefresh: () => this.refreshOrdersView()
+        });
     }
 
     async init() {
-        try {
-            this.debug('Initializing ViewOrders...');
-            
-            // Wait for WebSocket initialization first
-            const ws = this.ctx.getWebSocket();
-            if (!ws) {
-                this.debug('WebSocket not available, showing loading state...');
-                this.showLoadingState();
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                return this.init(); // Retry initialization
-            }
-
-            // Wait for WebSocket to be fully initialized
-            await ws.waitForInitialization();
-            
-            // Get current account
-            const wallet = this.ctx.getWallet();
-            this.currentAccount = wallet?.getAccount()?.toLowerCase();
-            this.debug('Current account:', this.currentAccount);
-            
-            // Add wallet state listener to refresh UI when wallet state changes
-            this.walletListener = (event, data) => {
-                this.debug('Wallet event received:', event, data);
-                if (event === 'connect' || event === 'disconnect' || event === 'accountsChanged') {
-                    this.debug('Wallet state changed, refreshing orders view');
-                    this.currentAccount = wallet?.getAccount()?.toLowerCase();
-                    this.refreshOrdersView().catch(error => {
-                        this.error('Error refreshing orders after wallet state change:', error);
-                    });
-                }
-            };
-            wallet?.addListener(this.walletListener);
-            
-            // Setup WebSocket subscriptions
-            await this.setupWebSocket();
-            
-            this.debug('ViewOrders initialization complete');
-        } catch (error) {
-            this.debug('Error in ViewOrders initialization:', error);
-            this.showError('Failed to initialize orders view');
-        }
+        await this.helper.initWebSocket(() => this.refreshOrdersView());
     }
 
     showLoadingState() {
@@ -149,104 +78,12 @@ export class ViewOrders extends BaseComponent {
             </div>`;
     }
 
-    async getTokenIcon(token) {
-        try {
-            if (!token?.address) {
-                this.debug('No token address provided:', token);
-                return this.getDefaultTokenIcon();
-            }
-
-            // If token already has an iconUrl, use it
-            if (token.iconUrl) {
-                this.debug('Using existing iconUrl for token:', token.symbol);
-                return generateTokenIconHTML(token.iconUrl, token.symbol, token.address);
-            }
-            
-            // Otherwise, get icon URL from token icon service
-            const wallet = this.ctx.getWallet();
-            const chainId = wallet?.chainId ? parseInt(wallet.chainId, 16) : 137; // Default to Polygon
-            const iconUrl = await tokenIconService.getIconUrl(token.address, chainId);
-            
-            // Generate HTML using the utility function
-            return generateTokenIconHTML(iconUrl, token.symbol, token.address);
-        } catch (error) {
-            this.debug('Error getting token icon:', error);
-            return this.getDefaultTokenIcon();
-        }
-    }
-
-    getDefaultTokenIcon() {
-        return generateTokenIconHTML('fallback', '?', 'unknown');
-    }
-
-    // Helper method to render token icon asynchronously
-    async renderTokenIcon(token, container) {
-        try {
-            const iconHtml = await this.getTokenIcon(token);
-            container.innerHTML = iconHtml;
-        } catch (error) {
-            this.debug('Error rendering token icon:', error);
-            // Fallback to basic icon
-            container.innerHTML = generateTokenIconHTML('fallback', token.symbol, token.address);
-        }
-    }
-
-    // Update last updated timestamp
-    updateLastUpdatedTimestamp(element) {
-        if (!element || !this.pricingService) return;
-        
-        const lastUpdateTime = this.pricingService.getLastUpdateTime();
-        if (lastUpdateTime && lastUpdateTime !== 'Never') {
-            element.textContent = `Last updated: ${lastUpdateTime}`;
-            element.style.display = 'inline';
-        } else {
-            element.textContent = 'No prices loaded yet';
-            element.style.display = 'inline';
-        }
-    }
-
-    setupErrorHandling() {
-        const ws = this.ctx.getWebSocket();
-        if (!ws) {
-            if (!this._retryAttempt) {
-                this.warn('WebSocket not available, waiting for initialization...');
-                this._retryAttempt = true;
-            }
-            setTimeout(() => this.setupErrorHandling(), 1000);
-            return;
-        }
-        this._retryAttempt = false;
-
-        ws.subscribe('error', (error) => {
-            let userMessage = 'An error occurred';
-            
-            if (error instanceof ContractError) {
-                switch(error.code) {
-                    case CONTRACT_ERRORS.INVALID_ORDER.code:
-                        userMessage = 'This order no longer exists';
-                        break;
-                    case CONTRACT_ERRORS.INSUFFICIENT_ALLOWANCE.code:
-                        userMessage = 'Please approve tokens before proceeding';
-                        break;
-                    case CONTRACT_ERRORS.UNAUTHORIZED.code:
-                        userMessage = 'You are not authorized to perform this action';
-                        break;
-                    case CONTRACT_ERRORS.EXPIRED_ORDER.code:
-                        userMessage = 'This order has expired';
-                        break;
-                    default:
-                        userMessage = error.message;
-                }
-            }
-
-            this.showError(userMessage);
-            this.error('Order error:', {
-                code: error.code,
-                message: error.message,
-                details: error.details
-            });
-        });
-    }
+    // Token icon and timestamp methods now handled by helper
+    async getTokenIcon(token) { return this.helper.getTokenIcon(token); }
+    getDefaultTokenIcon() { return this.helper.getDefaultTokenIcon(); }
+    async renderTokenIcon(token, container) { return this.helper.renderTokenIcon(token, container); }
+    updateLastUpdatedTimestamp(element) { return this.helper.updateLastUpdatedTimestamp(element); }
+    setupErrorHandling() { return this.helper.setupErrorHandling(); }
 
     async initialize(readOnlyMode = true) {
         if (this.initializing) {
@@ -260,8 +97,8 @@ export class ViewOrders extends BaseComponent {
             if (!this.initialized) {
                 // First time setup - initialize services, create table, setup WebSocket
                 this.setupServices();
-                await this.setupTable();
-                await this.setupWebSocket();
+                await this.renderer.setupTable(() => this.refreshOrdersView());
+                await this.helper.setupWebSocket(() => this.refreshOrdersView());
                 this.initialized = true;
             }
             // Just refresh the view with current cache
@@ -273,54 +110,9 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
+    // setupWebSocket now handled by helper
     async setupWebSocket() {
-        this.debug('Setting up WebSocket subscriptions');
-        
-        const ws = this.ctx.getWebSocket();
-        if (!ws?.provider) {
-            this.debug('WebSocket provider not available, waiting for reconnection...');
-            return;
-        }
-
-        // Add provider state logging
-        this.debug('WebSocket provider state:', {
-            connected: ws.provider._websocket?.connected,
-            readyState: ws.provider._websocket?.readyState
-        });
-        
-        // Clear existing subscriptions
-        this.eventSubscriptions.forEach(sub => {
-            ws.unsubscribe(sub.event, sub.callback);
-        });
-        this.eventSubscriptions.clear();
-
-        // Add new subscriptions with error handling
-        const addSubscription = (event, callback) => {
-            const wrappedCallback = async (...args) => {
-                try {
-                    await callback(...args);
-                } catch (error) {
-                    this.debug(`Error in ${event} callback:`, error);
-                    this.showError('Error processing order update');
-                }
-            };
-            this.eventSubscriptions.add({ event, callback: wrappedCallback });
-            ws.subscribe(event, wrappedCallback);
-        };
-
-        // Add subscriptions with error handling
-        addSubscription('orderSyncComplete', async (orders) => {
-            this.debug('Order sync complete:', orders);
-            await this.refreshOrdersView();
-        });
-
-        // Add other event subscriptions similarly
-        ['OrderCreated', 'OrderFilled', 'OrderCanceled'].forEach(event => {
-            addSubscription(event, async (orderData) => {
-                this.debug(`${event} event received:`, orderData);
-                await this.refreshOrdersView();
-            });
-        });
+        return this.helper.setupWebSocket(() => this.refreshOrdersView());
     }
 
     async refreshOrdersView() {
@@ -397,37 +189,28 @@ export class ViewOrders extends BaseComponent {
                 ordersToDisplay : 
                 ordersToDisplay.slice(startIndex, endIndex);
 
-            // Update the table
-            const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                this.debug('No tbody found, skipping table update');
-                return;
-            }
-            tbody.innerHTML = '';
-            
-            for (const order of paginatedOrders) {
-                const newRow = await this.createOrderRow(order);
-                if (newRow) {
-                    tbody.appendChild(newRow);
-                }
-            }
-
-            // Show empty state if no orders
+            // Render orders using renderer
             if (paginatedOrders.length === 0) {
-                tbody.innerHTML = `
-                    <tr class="empty-message">
-                        <td colspan="7" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyActive ? 
-                                    'No fillable orders found' : 
-                                    'No orders found'}
-                            </div>
-                        </td>
-                    </tr>`;
+                // Show empty state
+                const tbody = this.container.querySelector('tbody');
+                if (tbody) {
+                    tbody.innerHTML = `
+                        <tr class="empty-message">
+                            <td colspan="7" class="no-orders-message">
+                                <div class="placeholder-text">
+                                    ${showOnlyActive ? 
+                                        'No fillable orders found' : 
+                                        'No orders found'}
+                                </div>
+                            </td>
+                        </tr>`;
+                }
+            } else {
+                await this.renderer.renderOrders(paginatedOrders);
             }
 
             // Update pagination controls
-            this.updatePaginationControls(this.totalOrders);
+            this.renderer.updatePaginationControls(this.totalOrders);
 
         } catch (error) {
             this.debug('Error refreshing orders:', error);
@@ -445,262 +228,21 @@ export class ViewOrders extends BaseComponent {
             </div>`;
     }
 
+    // setupTable now handled by renderer
     async setupTable() {
-        // Prevent multiple table setups
-        if (this._tableSetup) {
-            this.debug('Table already setup, skipping...');
-            return;
-        }
-        this._tableSetup = true;
-        
-        // Clear existing content to prevent duplicates
-        this.container.innerHTML = '';
-        
-        const tableContainer = this.createElement('div', 'table-container');
-        
-        // Main filter controls
-        const filterControls = this.createElement('div', 'filter-controls');
-        filterControls.innerHTML = `
-            <div class="filter-row">
-                <div class="filters-group">
-                    <button class="advanced-filters-toggle">
-                        <svg class="filter-icon" viewBox="0 0 24 24" width="16" height="16">
-                            <path fill="currentColor" d="M14,12V19.88C14.04,20.18 13.94,20.5 13.71,20.71C13.32,21.1 12.69,21.1 12.3,20.71L10.29,18.7C10.06,18.47 9.96,18.16 10,17.87V12H9.97L4.21,4.62C3.87,4.19 3.95,3.56 4.38,3.22C4.57,3.08 4.78,3 5,3V3H19V3C19.22,3 19.43,3.08 19.62,3.22C20.05,3.56 20.13,4.19 19.79,4.62L14.03,12H14Z"/>
-                        </svg>
-                        Filters
-                        <svg class="chevron-icon" viewBox="0 0 24 24" width="16" height="16">
-                            <path fill="currentColor" d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
-                        </svg>
-                    </button>
-                    <label class="filter-toggle">
-                        <input type="checkbox" id="fillable-orders-toggle" checked>
-                        <span>Show only fillable orders</span>
-                    </label>
-                </div>
-
-                <div class="pagination-controls">
-                    <select id="page-size-select" class="page-size-select">
-                        <option value="10">10 per page</option>
-                        <option value="25" selected>25 per page</option>
-                        <option value="50">50 per page</option>
-                        <option value="100">100 per page</option>
-                        <option value="-1">View all</option>
-                    </select>
-                    
-                    <div class="pagination-buttons">
-                        <button class="pagination-button prev-page" title="Previous page">←</button>
-                        <span class="page-info">Page 1 of 1</span>
-                        <button class="pagination-button next-page" title="Next page">→</button>
-                    </div>
-                </div>
-            </div>
-        `;
-        // Get tokens from WebSocket's tokenCache
-        const ws = this.ctx.getWebSocket();
-        const tokens = Array.from(ws.tokenCache.values())
-            .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
-        
-        this.debug('Available tokens:', tokens);
-
-        // Advanced filters section
-        const advancedFilters = this.createElement('div', 'advanced-filters');
-        advancedFilters.style.display = 'none';
-        advancedFilters.innerHTML = `
-            <div class="filter-row">
-                <div class="token-filters">
-                    <select id="sell-token-filter" class="token-filter">
-                        <option value="">All Buy Tokens</option>
-                        ${tokens.map(token => 
-                            `<option value="${token.address}">${token.symbol}</option>`
-                        ).join('')}
-                    </select>
-                    <select id="buy-token-filter" class="token-filter">
-                        <option value="">All Sell Tokens</option>
-                        ${tokens.map(token => 
-                            `<option value="${token.address}">${token.symbol}</option>`
-                        ).join('')}
-                    </select>
-                    <select id="order-sort" class="order-sort">
-                        <option value="newest">Newest First</option>
-                        <option value="best-deal">Best Deal First</option>
-                    </select>
-                </div>
-            </div>
-        `;
-
-        // Add the advanced filters section after the main controls
-        filterControls.appendChild(advancedFilters);
-        
-        // Setup advanced filters toggle
-        const advancedFiltersToggle = filterControls.querySelector('.advanced-filters-toggle');
-        advancedFiltersToggle.addEventListener('click', () => {
-            const isExpanded = advancedFilters.style.display !== 'none';
-            advancedFilters.style.display = isExpanded ? 'none' : 'block';
-            advancedFiltersToggle.classList.toggle('expanded', !isExpanded);
-        });
-
-        // Add event listeners for filters
-        const sellTokenFilter = advancedFilters.querySelector('#sell-token-filter');
-        const buyTokenFilter = advancedFilters.querySelector('#buy-token-filter');
-        const orderSort = advancedFilters.querySelector('#order-sort');
-
-        sellTokenFilter.addEventListener('change', () => this.refreshOrdersView());
-        buyTokenFilter.addEventListener('change', () => this.refreshOrdersView());
-        orderSort.addEventListener('change', () => this.refreshOrdersView());
-
-        tableContainer.appendChild(filterControls);
-        
-        // Add table
-        const table = this.createElement('table', 'orders-table');
-        
-        const thead = this.createElement('thead');
-        thead.innerHTML = `
-            <tr>
-                <th>ID</th>
-                <th>Buy</th>
-                <th>Sell</th>
-                <th>
-                    Deal
-                    <span class="info-icon" title="Deal = Buy Value / Sell Value
-                    
-• Higher deal number is better
-• Deal > 1: better deal based on market prices
-• Deal < 1: worse deal based on market prices">ⓘ</span>
-                </th>
-                <th>Expires</th>
-                <th>Status</th>
-                <th>Action</th>
-            </tr>`;
-        
-        table.appendChild(thead);
-        table.appendChild(this.createElement('tbody'));
-        tableContainer.appendChild(table);
-        
-        // Bottom controls with refresh button
-        const bottomControls = this.createElement('div', 'filter-controls bottom-controls');
-        bottomControls.innerHTML = `
-            <div class="filter-row">
-                <div class="refresh-container">
-                    <button id="refresh-prices-btn" class="refresh-prices-button">↻ Refresh Prices</button>
-                    <span class="refresh-status"></span>
-                    <span class="last-updated" id="last-updated-timestamp"></span>
-                </div>
-
-                <div class="pagination-controls">
-                    <div class="pagination-buttons">
-                        <button class="pagination-button prev-page" title="Previous page">←</button>
-                        <span class="page-info">Page 1 of 1</span>
-                        <button class="pagination-button next-page" title="Next page">→</button>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        tableContainer.appendChild(bottomControls);
-
-        // Setup refresh button functionality
-        const refreshButton = bottomControls.querySelector('#refresh-prices-btn');
-        const statusIndicator = bottomControls.querySelector('.refresh-status');
-        const lastUpdatedElement = bottomControls.querySelector('#last-updated-timestamp');
-        
-        // Initialize last updated timestamp
-        this.updateLastUpdatedTimestamp(lastUpdatedElement);
-        
-        let refreshTimeout;
-        refreshButton.addEventListener('click', async () => {
-            if (refreshTimeout) return;
-            
-            refreshButton.disabled = true;
-            refreshButton.innerHTML = '↻ Refreshing...';
-            statusIndicator.className = 'refresh-status loading';
-            statusIndicator.style.opacity = 1;
-            
-            try {
-                const result = await this.pricingService.refreshPrices();
-                if (result.success) {
-                    statusIndicator.className = 'refresh-status success';
-                    statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-                    // Update timestamp after successful refresh
-                    this.updateLastUpdatedTimestamp(lastUpdatedElement);
-                    await this.refreshOrdersView();
-                } else {
-                    statusIndicator.className = 'refresh-status error';
-                    statusIndicator.textContent = result.message;
-                }
-            } catch (error) {
-                statusIndicator.className = 'refresh-status error';
-                statusIndicator.textContent = 'Failed to refresh prices';
-            } finally {
-                refreshButton.disabled = false;
-                refreshButton.innerHTML = '↻ Refresh Prices';
-                
-                refreshTimeout = setTimeout(() => {
-                    refreshTimeout = null;
-                    statusIndicator.style.opacity = 0;
-                }, 2000);
-            }
-        });
-
-        // Sync both page size selects
-        const topSelect = filterControls.querySelector('#page-size-select');
-        
-        topSelect.addEventListener('change', () => {
-            this.currentPage = 1;
-            this.refreshOrdersView();
-        });
-
-        // Add event listeners for pagination
-        const toggle = filterControls.querySelector('#fillable-orders-toggle');
-        toggle.addEventListener('change', () => this.refreshOrdersView());
-        
-        // Add event listeners for pagination
-        const setupPaginationListeners = (controls) => {
-            const prevButton = controls.querySelector('.prev-page');
-            const nextButton = controls.querySelector('.next-page');
-            const pageInfo = controls.querySelector('.page-info');
-            
-            prevButton.addEventListener('click', () => {
-                this.debug('Previous clicked, current page:', this.currentPage);
-                if (this.currentPage > 1) {
-                    this.currentPage--;
-                    this.updatePageInfo(pageInfo);
-                    this.refreshOrdersView();
-                }
-            });
-            
-            nextButton.addEventListener('click', () => {
-                const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-                this.debug('Next clicked, current page:', this.currentPage, 'total orders:', this.totalOrders, 'page size:', pageSize);
-                const totalPages = Math.ceil(this.totalOrders / pageSize);
-                if (this.currentPage < totalPages) {
-                    this.currentPage++;
-                    this.updatePageInfo(pageInfo);
-                    this.refreshOrdersView();
-                }
-            });
-        };
-
-        // Add this helper method to your class
-        this.updatePageInfo = (pageInfoElement) => {
-            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-            const totalPages = Math.ceil(this.totalOrders / pageSize);
-            pageInfoElement.textContent = `Page ${this.currentPage} of ${totalPages}`;
-        };
-
-        // Setup pagination for both top and bottom controls
-        const controls = tableContainer.querySelectorAll('.filter-controls');
-        controls.forEach(setupPaginationListeners);
-
-        this.container.appendChild(tableContainer);
+        return this.renderer.setupTable(() => this.refreshOrdersView());
     }
 
     setupEventListeners() {
-        this.tbody.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('fill-button')) {
-                const orderId = e.target.dataset.orderId;
-                await this.fillOrder(orderId);
-            }
-        });
+        const tbody = this.container.querySelector('tbody');
+        if (tbody) {
+            tbody.addEventListener('click', async (e) => {
+                if (e.target.classList.contains('fill-button')) {
+                    const orderId = e.target.dataset.orderId;
+                    await this.fillOrder(orderId);
+                }
+            });
+        }
     }
 
     async checkAllowance(tokenAddress, owner, amount) {
@@ -713,7 +255,8 @@ export class ViewOrders extends BaseComponent {
                 ['function allowance(address owner, address spender) view returns (uint256)'],
                 this.provider
             );
-            const allowance = await tokenContract.allowance(owner, this.webSocket.contractAddress);
+            const ws = this.ctx.getWebSocket();
+            const allowance = await tokenContract.allowance(owner, ws.contractAddress);
             return allowance.gte(amount);
         } catch (error) {
             this.error('Error checking allowance:', error);
@@ -934,6 +477,14 @@ export class ViewOrders extends BaseComponent {
     cleanup() {
         this.debug('Cleaning up ViewOrders...');
         
+        // Cleanup helper and renderer
+        if (this.helper) {
+            this.helper.cleanup();
+        }
+        if (this.renderer) {
+            this.renderer.cleanup();
+        }
+        
         // Remove wallet listener
         if (this.walletListener) {
             const wallet = this.ctx.getWallet();
@@ -1062,14 +613,14 @@ export class ViewOrders extends BaseComponent {
             const buyTokenIconContainer = tr.querySelector('td:nth-child(3) .token-icon');
             
             if (sellTokenIconContainer) {
-                this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
+                this.helper.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
             }
             if (buyTokenIconContainer) {
-                this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
+                this.helper.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
             }
 
-            // Start expiry timer for this row
-            this.startExpiryTimer(tr);
+            // Start expiry timer for this row (handled by renderer)
+            this.renderer.startExpiryTimer(tr);
 
             return tr;
         } catch (error) {
@@ -1078,109 +629,28 @@ export class ViewOrders extends BaseComponent {
         }
     }
 
+    // updatePaginationControls and startExpiryTimer now handled by renderer
     updatePaginationControls(totalOrders) {
-        const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
-        
-        const updateControls = (container) => {
-            const prevButton = container.querySelector('.prev-page');
-            const nextButton = container.querySelector('.next-page');
-            const pageInfo = container.querySelector('.page-info');
-            
-            if (pageSize === -1) {
-                // Show all orders
-                prevButton.disabled = true;
-                nextButton.disabled = true;
-                pageInfo.textContent = `Showing all ${totalOrders} orders`;
-                return;
-            }
-            
-            const totalPages = Math.max(1, Math.ceil(totalOrders / pageSize));
-            
-            // Ensure current page is within bounds
-            this.currentPage = Math.min(Math.max(1, this.currentPage), totalPages);
-            
-            prevButton.disabled = this.currentPage <= 1;
-            nextButton.disabled = this.currentPage >= totalPages;
-            
-            const startItem = ((this.currentPage - 1) * pageSize) + 1;
-            const endItem = Math.min(this.currentPage * pageSize, totalOrders);
-            
-            pageInfo.textContent = `${startItem}-${endItem} of ${totalOrders} orders (Page ${this.currentPage} of ${totalPages})`;
-        };
-        
-        // Update both top and bottom controls
-        const controls = this.container.querySelectorAll('.filter-controls');
-        controls.forEach(updateControls);
+        return this.renderer.updatePaginationControls(totalOrders);
     }
 
-    startExpiryTimer(row) {
-        // Clear any existing timer
-        const existingTimer = this.expiryTimers?.get(row.dataset.orderId);
-        if (existingTimer) {
-            clearInterval(existingTimer);
+    // Method called by renderer to update action column during expiry timer updates
+    updateActionColumn(actionCell, order, wallet) {
+        const currentAccount = wallet?.getAccount()?.toLowerCase();
+        const isUserOrder = order.maker?.toLowerCase() === currentAccount;
+        const ws = this.ctx.getWebSocket();
+
+        if (isUserOrder) {
+            actionCell.innerHTML = '<span class="mine-label">Mine</span>';
+        } else if (!isUserOrder && ws.canFillOrder(order, currentAccount)) {
+            actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill</button>`;
+            const fillButton = actionCell.querySelector('.fill-button');
+            if (fillButton) {
+                fillButton.addEventListener('click', () => this.fillOrder(order.id));
+            }
+        } else {
+            actionCell.innerHTML = '';
         }
-
-        // Initialize timers Map if not exists
-        if (!this.expiryTimers) {
-            this.expiryTimers = new Map();
-        }
-
-        const updateExpiryAndButton = async () => {
-            const expiresCell = row.querySelector('td:nth-child(5)');
-            const statusCell = row.querySelector('.order-status');
-            const actionCell = row.querySelector('.action-column');
-            if (!expiresCell || !statusCell || !actionCell) return;
-
-            const orderId = row.dataset.orderId;
-            const ws = this.ctx.getWebSocket();
-            const wallet = this.ctx.getWallet();
-            const order = ws.orderCache.get(Number(orderId));
-            if (!order) return;
-
-            const currentTime = Math.floor(Date.now() / 1000);
-            const expiresAt = order?.timings?.expiresAt;
-            const isExpired = typeof expiresAt === 'number' ? currentTime > expiresAt : false;
-            const timeDiff = typeof expiresAt === 'number' ? expiresAt - currentTime : 0;
-            const currentAccount = wallet?.getAccount()?.toLowerCase();
-            const isUserOrder = order.maker?.toLowerCase() === currentAccount;
-
-            // Update expiry text - only calculate for active orders
-            const orderStatusForExpiry = ws.getOrderStatus(order);
-            const newExpiryText = orderStatusForExpiry === 'Active' ? formatTimeDiff(timeDiff) : '';
-            if (expiresCell.textContent !== newExpiryText) {
-                expiresCell.textContent = newExpiryText;
-            }
-
-            // Update status column to show current status
-            const currentStatus = ws.getOrderStatus(order);
-            const statusMainElement = statusCell.querySelector('.status-main');
-            if (statusMainElement && statusMainElement.textContent !== currentStatus) {
-                statusMainElement.textContent = currentStatus;
-                this.debug(`Updated status for order ${order.id}: ${currentStatus}`);
-            } else if (!statusMainElement && statusCell.textContent !== currentStatus) {
-                // Fallback for old structure
-                statusCell.textContent = currentStatus;
-                this.debug(`Updated status for order ${order.id}: ${currentStatus}`);
-            }
-
-            // Update action column content - no status text here, only actions
-            if (isUserOrder) {
-                actionCell.innerHTML = '<span class="mine-label">Mine</span>';
-            } else if (!isUserOrder && ws.canFillOrder(order, currentAccount)) {
-                actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill</button>`;
-                const fillButton = actionCell.querySelector('.fill-button');
-                if (fillButton) {
-                    fillButton.addEventListener('click', () => this.fillOrder(order.id));
-                }
-            } else {
-                actionCell.innerHTML = '';
-            }
-        };
-
-        // Update immediately and then every minute
-        updateExpiryAndButton();
-        const timerId = setInterval(updateExpiryAndButton, 60000); // Update every minute
-        this.expiryTimers.set(row.dataset.orderId, timerId);
     }
 
     async getContract() {
