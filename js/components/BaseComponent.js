@@ -127,44 +127,44 @@ export class BaseComponent {
         return element;
     }
 
+    /**
+     * Show error toast via AppContext (with global fallback)
+     * @param {string} message - Error message to display
+     * @param {number} duration - Display duration in ms (0 = persistent)
+     */
     showError(message, duration = 0) {
         this.debug('Showing error toast:', message);
-        if (window.showError) {
-            return window.showError(message, duration);
-        } else {
-            // Fallback to console if toast is not available
-            this.error(message);
-        }
+        this.ctx.showError(message, duration);
     }
 
+    /**
+     * Show success toast via AppContext (with global fallback)
+     * @param {string} message - Success message to display
+     * @param {number} duration - Display duration in ms
+     */
     showSuccess(message, duration = 5000) {
         this.debug('Showing success toast:', message);
-        if (window.showSuccess) {
-            return window.showSuccess(message, duration);
-        } else {
-            // Fallback to console if toast is not available
-            this.debug(message);
-        }
+        this.ctx.showSuccess(message, duration);
     }
 
+    /**
+     * Show warning toast via AppContext (with global fallback)
+     * @param {string} message - Warning message to display
+     * @param {number} duration - Display duration in ms
+     */
     showWarning(message, duration = 5000) {
         this.debug('Showing warning toast:', message);
-        if (window.showWarning) {
-            return window.showWarning(message, duration);
-        } else {
-            // Fallback to console if toast is not available
-            this.warn(message);
-        }
+        this.ctx.showWarning(message, duration);
     }
 
+    /**
+     * Show info toast via AppContext (with global fallback)
+     * @param {string} message - Info message to display
+     * @param {number} duration - Display duration in ms
+     */
     showInfo(message, duration = 5000) {
         this.debug('Showing info toast:', message);
-        if (window.showInfo) {
-            return window.showInfo(message, duration);
-        } else {
-            // Fallback to console if toast is not available
-            this.debug(message);
-        }
+        this.ctx.showInfo(message, duration);
     }
 
     /**

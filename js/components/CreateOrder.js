@@ -1650,45 +1650,10 @@ export class CreateOrder extends BaseComponent {
         this.debug(`Status update (${type}): ${message}`);
     }
 
-    // Use toast system for error and success messages
-    showError(message, duration = 0) {
-        this.debug('Showing error toast:', message);
-        if (window.showError) {
-            return window.showError(message, duration);
-        } else {
-            // Fallback to status display if toast is not available
-            this.showStatus(message, 'error');
-        }
-    }
-
+    // Override showSuccess with shorter duration for order creation UX
     showSuccess(message, duration = 3000) {
-        this.debug('Showing success toast:', message);
-        if (window.showSuccess) {
-            return window.showSuccess(message, duration);
-        } else {
-            // Fallback to status display if toast is not available
-            this.showStatus(message, 'success');
-        }
-    }
-
-    showWarning(message, duration = 5000) {
-        this.debug('Showing warning toast:', message);
-        if (window.showWarning) {
-            return window.showWarning(message, duration);
-        } else {
-            // Fallback to status display if toast is not available
-            this.showStatus(message, 'warning');
-        }
-    }
-
-    showInfo(message, duration = 5000) {
-        this.debug('Showing info toast:', message);
-        if (window.showInfo) {
-            return window.showInfo(message, duration);
-        } else {
-            // Fallback to status display if toast is not available
-            this.showStatus(message, 'info');
-        }
+        // Use parent's implementation with custom default duration
+        super.showSuccess(message, duration);
     }
 
     /**

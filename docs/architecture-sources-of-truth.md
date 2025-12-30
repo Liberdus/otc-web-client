@@ -71,7 +71,7 @@ This allows gradual migration without breaking existing code.
 
 ---
 
-## Current State (Post Phase 4)
+## Current State (Post Phase 5)
 
 ### Wallet / Signer / Account
 
@@ -158,11 +158,12 @@ This allows gradual migration without breaking existing code.
 | Global access | `window.showError`, etc. | Set in app.js |
 
 **Access patterns:**
-- **Preferred:** `this.ctx.showError()`, `this.ctx.showSuccess()`, etc. (via AppContext)
+- **Preferred:** `this.showError()`, `this.showSuccess()`, etc. (inherited from BaseComponent, uses ctx)
+- Via context: `this.ctx.showError()`, `this.ctx.showSuccess()`, etc.
 - Global: `window.showError()`, etc.
 - Import: `import { showError } from '../components/Toast.js'`
 
-**Issue:** Some components override toast methods (CreateOrder, Cleanup) with slightly different implementations.
+**Resolved in Phase 5:** BaseComponent now provides toast methods that use `this.ctx.*`. Components can override only when needed (e.g., CreateOrder overrides `showSuccess` with 3000ms duration, Cleanup adds form clearing behavior).
 
 ---
 

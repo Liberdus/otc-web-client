@@ -616,13 +616,9 @@ export class Cleanup extends BaseComponent {
         }
     }
 
+    // Override showSuccess to also clear fee form inputs
     showSuccess(message, duration = 5000) {
-        this.debug('Success:', message);
-        
-        // Show toast notification
-        if (window.showSuccess) {
-            window.showSuccess(message, duration);
-        }
+        super.showSuccess(message, duration);
         
         // Clear form inputs for fee config form
         const feeConfigForm = document.querySelector('.fee-config-form');
@@ -634,27 +630,14 @@ export class Cleanup extends BaseComponent {
         }
     }
 
-    showError(message, duration = 0) {
-        this.error('Error:', message);
-        
-        // Show toast notification
-        if (window.showError) {
-            window.showError(message, duration);
-        }
-    }
-
+    // Override with longer default duration for cleanup warnings
     showWarning(message, duration = 15000) {
-        this.debug('Warning:', message);
-        if (window.showWarning) {
-            window.showWarning(message, duration);
-        }
+        super.showWarning(message, duration);
     }
 
+    // Override with longer default duration for cleanup info
     showInfo(message, duration = 15000) {
-        this.debug('Info:', message);
-        if (window.showInfo) {
-            window.showInfo(message, duration);
-        }
+        super.showInfo(message, duration);
     }
 
     // Add helper method to format ETH values
