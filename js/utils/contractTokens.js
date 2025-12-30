@@ -1,6 +1,9 @@
 import { ethers } from 'ethers';
+import { getNetworkConfig } from '../config.js';
 import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
+import { tokenIconService } from '../services/TokenIconService.js';
+import { tryAggregate as multicallTryAggregate } from '../services/MulticallService.js';
 
 // Initialize logger
 const logger = createLogger('CONTRACT_TOKENS');
@@ -8,32 +11,103 @@ const debug = logger.debug.bind(logger);
 const error = logger.error.bind(logger);
 const warn = logger.warn.bind(logger);
 
-// Rate limiting constants
-const BASE_DELAY = 200; // Base delay between requests
-const MAX_RETRIES = 3; // Maximum retries for rate limited requests
-const BACKOFF_MULTIPLIER = 2; // Exponential backoff multiplier
+// Concurrency control
+const CONCURRENCY_LIMIT = 5; // Max concurrent metadata/icon tasks
 
-// Global rate limiting state
-let lastRequestTime = 0;
-let consecutiveRateLimitErrors = 0;
+// No global rate limiting state needed with multicall + caching
+
+// Simple in-memory caches
+const TOKEN_METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const BALANCE_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const tokenMetadataCache = new Map(); // key: tokenAddress (lowercase) -> { value, ts }
+const balanceCache = new Map(); // key: `${token}-${user}` -> { value, ts }
 
 /**
- * Rate limiting utility function
- * @param {number} minDelay - Minimum delay in milliseconds
- * @returns {Promise<void>}
+ * Batch fetch balances and decimals for many tokens using multicall
+ * Returns a map of lowercase tokenAddress -> { rawBalance, decimals, formatted }
  */
-async function enforceRateLimit(minDelay = BASE_DELAY) {
-    const now = Date.now();
-    const timeSinceLastRequest = now - lastRequestTime;
-    
-    if (timeSinceLastRequest < minDelay) {
-        const delay = minDelay - timeSinceLastRequest;
-        debug(`Rate limiting: waiting ${delay}ms`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+async function getBatchTokenBalances(tokenAddresses, userAddress) {
+    const resultMap = new Map();
+    if (!tokenAddresses || tokenAddresses.length === 0 || !userAddress) {
+        return resultMap;
     }
-    
-    lastRequestTime = Date.now();
+
+    // Prepare calls: for each token, balanceOf + decimals
+    const iface = new ethers.utils.Interface([
+        'function balanceOf(address) view returns (uint256)',
+        'function decimals() view returns (uint8)'
+    ]);
+
+    const calls = [];
+    for (const token of tokenAddresses) {
+        calls.push({ target: token, callData: iface.encodeFunctionData('balanceOf', [userAddress]) });
+        calls.push({ target: token, callData: iface.encodeFunctionData('decimals') });
+    }
+
+    const mc = await multicallTryAggregate(calls);
+    if (mc) {
+        for (let i = 0; i < tokenAddresses.length; i++) {
+            const token = tokenAddresses[i];
+            const lc = token.toLowerCase();
+            try {
+                const balRes = mc[2 * i];
+                const decRes = mc[2 * i + 1];
+                if (!balRes || !decRes || !balRes.success || !decRes.success) {
+                    resultMap.set(lc, { rawBalance: ethers.BigNumber.from(0), decimals: 18, formatted: '0' });
+                    continue;
+                }
+                const rawBalance = iface.decodeFunctionResult('balanceOf', balRes.returnData)[0];
+                const decimals = iface.decodeFunctionResult('decimals', decRes.returnData)[0];
+                const formatted = ethers.utils.formatUnits(rawBalance, decimals);
+                resultMap.set(lc, { rawBalance, decimals, formatted });
+                // Update single balance cache too
+                const cacheKey = `${lc}-${userAddress.toLowerCase()}`;
+                balanceCache.set(cacheKey, { value: formatted, ts: Date.now() });
+            } catch (_) {
+                resultMap.set(lc, { rawBalance: ethers.BigNumber.from(0), decimals: 18, formatted: '0' });
+            }
+        }
+        return resultMap;
+    }
+
+    // Fallback: per-token (still cached)
+    for (const token of tokenAddresses) {
+        try {
+            const formatted = await getUserTokenBalance(token);
+            const lc = token.toLowerCase();
+            resultMap.set(lc, { rawBalance: null, decimals: null, formatted });
+        } catch {
+            const lc = token.toLowerCase();
+            resultMap.set(lc, { rawBalance: null, decimals: null, formatted: '0' });
+        }
+    }
+    return resultMap;
 }
+
+// Simple concurrency-limited map utility
+async function mapWithConcurrency(items, mapper, concurrency = CONCURRENCY_LIMIT) {
+    const results = new Array(items.length);
+    let cursor = 0;
+
+    async function worker() {
+        while (true) {
+            const idx = cursor++;
+            if (idx >= items.length) break;
+            try {
+                results[idx] = await mapper(items[idx], idx);
+            } catch (err) {
+                error('mapWithConcurrency item failed:', err);
+                results[idx] = null;
+            }
+        }
+    }
+
+    const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+    await Promise.all(workers);
+    return results.filter(r => r !== null);
+}
+
+// Removed older batch/delay logic in favor of concurrency-limited mapping
 
 /**
  * Get allowed tokens from contract with metadata and balances
@@ -45,58 +119,53 @@ export async function getContractAllowedTokens() {
         
         // Get allowed tokens from contract
         const allowedTokenAddresses = await contractService.getAllowedTokens();
-        debug(`Found ${allowedTokenAddresses.length} allowed tokens`);
+        debug(`Found ${allowedTokenAddresses.length} allowed tokens:`, allowedTokenAddresses);
 
         if (allowedTokenAddresses.length === 0) {
             debug('No allowed tokens found');
             return [];
         }
 
-        // Get metadata and balances for each token
-        const tokensWithData = [];
-        
-        // Reset rate limiting state for new batch
-        consecutiveRateLimitErrors = 0;
-        
-        for (const address of allowedTokenAddresses) {
-            try {
-                // Enforce rate limiting with exponential backoff
-                const currentDelay = BASE_DELAY * Math.pow(BACKOFF_MULTIPLIER, consecutiveRateLimitErrors);
-                await enforceRateLimit(currentDelay);
-                
-                const [metadata, balance] = await Promise.all([
-                    getTokenMetadata(address),
-                    getUserTokenBalance(address)
-                ]);
+        // Fetch all balances in a single multicall
+        const userAddress = await contractService.getUserAddress();
+        const balanceMap = await getBatchTokenBalances(allowedTokenAddresses, userAddress);
 
-                tokensWithData.push({
-                    address,
-                    ...metadata,
-                    balance: balance || '0'
-                });
-                
-                // Reset consecutive errors on success
-                consecutiveRateLimitErrors = 0;
-                
-            } catch (err) {
-                error(`Error processing token ${address}:`, err);
-                
-                // Increment consecutive errors for rate limiting
-                if (err.code === -32005 || err.message?.includes('rate limit')) {
-                    consecutiveRateLimitErrors++;
-                    warn(`Rate limit error ${consecutiveRateLimitErrors}/${MAX_RETRIES} for token ${address}`);
+        // Process metadata and icons with concurrency limits
+        const tokensWithData = await mapWithConcurrency(allowedTokenAddresses, async (address) => {
+            try {
+                const metadata = await getTokenMetadata(address);
+                const lc = address.toLowerCase();
+                const balanceEntry = balanceMap.get(lc);
+                const balance = balanceEntry?.formatted || '0';
+
+                // Get icon URL (deferred priority)
+                let iconUrl = null;
+                try {
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    const networkConfig = getNetworkConfig();
+                    const chainId = parseInt(networkConfig.chainId, 16);
+                    iconUrl = await tokenIconService.getIconUrl(address, chainId);
+                } catch (err) {
+                    debug(`Icon fetch failed for ${address} (${metadata.symbol}):`, err?.message || err);
                 }
                 
-                // Return basic token info even if metadata/balance fails
-                tokensWithData.push({
+                return {
+                    address,
+                    ...metadata,
+                    balance,
+                    iconUrl
+                };
+            } catch (err) {
+                error(`Error processing token ${address}:`, err);
+                return {
                     address,
                     symbol: 'UNKNOWN',
                     name: 'Unknown Token',
                     decimals: 18,
                     balance: '0'
-                });
+                };
             }
-        }
+        });
 
         debug(`Successfully processed ${tokensWithData.length} tokens`);
         return tokensWithData;
@@ -120,8 +189,15 @@ export async function getContractAllowedTokens() {
  */
 async function getTokenMetadata(tokenAddress) {
     try {
+        // Cache lookup first
+        const normalizedAddress = tokenAddress.toLowerCase();
+        const cached = tokenMetadataCache.get(normalizedAddress);
+        if (cached && (Date.now() - cached.ts) < TOKEN_METADATA_CACHE_TTL_MS) {
+            return cached.value;
+        }
         // Known token fallbacks for common tokens
         const knownTokens = {
+            // Polygon Mainnet tokens
             '0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6': {
                 symbol: 'WBTC',
                 name: 'Wrapped Bitcoin',
@@ -151,34 +227,81 @@ async function getTokenMetadata(tokenAddress) {
                 symbol: 'WPOL',
                 name: 'Wrapped Polygon Ecosystem Token',
                 decimals: 18
-            }
+            },
         };
 
+                    /* // Amoy Testnet tokens
+                    '0x224708430f2FF85E32cd77e986eE558Eb8cC77D9': {
+                        symbol: 'FEE',
+                        name: 'Fee Token',
+                        decimals: 18
+                    },
+                    '0xB93D55595796D8c59beFC0C9045415B4d567f27c': {
+                        symbol: 'TT1',
+                        name: 'Trading Token 1',
+                        decimals: 18
+                    },
+                    '0x963322CC131A072F333A76ac321Bb80b6cb5375C': {
+                        symbol: 'TT2',
+                        name: 'Trading Token 2',
+                        decimals: 18
+                    } */
+
         // Check if we have known metadata for this token
-        const normalizedAddress = tokenAddress.toLowerCase();
         const knownToken = knownTokens[normalizedAddress];
         
         if (knownToken) {
             debug(`Using known metadata for ${knownToken.symbol}`);
+            tokenMetadataCache.set(normalizedAddress, { value: knownToken, ts: Date.now() });
             return knownToken;
         }
 
         const provider = contractService.getProvider();
-        const tokenContract = new ethers.Contract(
-            tokenAddress,
-            [
+
+        // Prepare multicall for symbol, name, decimals
+        const iface = new ethers.utils.Interface([
+            'function symbol() view returns (string)',
+            'function name() view returns (string)',
+            'function decimals() view returns (uint8)'
+        ]);
+        const calls = [
+            { target: tokenAddress, callData: iface.encodeFunctionData('symbol') },
+            { target: tokenAddress, callData: iface.encodeFunctionData('name') },
+            { target: tokenAddress, callData: iface.encodeFunctionData('decimals') }
+        ];
+
+        let symbol, name, decimals;
+        const mcResult = await multicallTryAggregate(calls);
+        if (mcResult) {
+            // Decode gracefully; if any fail, fallback to direct
+            try {
+                symbol = iface.decodeFunctionResult('symbol', mcResult[0].returnData)[0];
+                name = iface.decodeFunctionResult('name', mcResult[1].returnData)[0];
+                decimals = iface.decodeFunctionResult('decimals', mcResult[2].returnData)[0];
+            } catch (_) {
+                const tokenContract = new ethers.Contract(tokenAddress, [
+                    'function symbol() view returns (string)',
+                    'function name() view returns (string)',
+                    'function decimals() view returns (uint8)'
+                ], provider);
+                [symbol, name, decimals] = await Promise.all([
+                    tokenContract.symbol(),
+                    tokenContract.name(),
+                    tokenContract.decimals()
+                ]);
+            }
+        } else {
+            const tokenContract = new ethers.Contract(tokenAddress, [
                 'function symbol() view returns (string)',
                 'function name() view returns (string)',
                 'function decimals() view returns (uint8)'
-            ],
-            provider
-        );
-
-        const [symbol, name, decimals] = await Promise.all([
+            ], provider);
+            [symbol, name, decimals] = await Promise.all([
             tokenContract.symbol(),
             tokenContract.name(),
             tokenContract.decimals()
         ]);
+        }
 
         const metadata = {
             symbol,
@@ -186,6 +309,7 @@ async function getTokenMetadata(tokenAddress) {
             decimals: parseInt(decimals)
         };
 
+        tokenMetadataCache.set(normalizedAddress, { value: metadata, ts: Date.now() });
         return metadata;
 
     } catch (err) {
@@ -200,6 +324,7 @@ async function getTokenMetadata(tokenAddress) {
                 decimals: 18
             };
             
+            tokenMetadataCache.set(tokenAddress.toLowerCase(), { value: fallbackMetadata, ts: Date.now() });
             return fallbackMetadata;
         }
         
@@ -211,7 +336,7 @@ async function getTokenMetadata(tokenAddress) {
             name: 'Unknown Token',
             decimals: 18
         };
-        
+        tokenMetadataCache.set(tokenAddress.toLowerCase(), { value: fallbackMetadata, ts: Date.now() });
         return fallbackMetadata;
     }
 }
@@ -223,30 +348,59 @@ async function getTokenMetadata(tokenAddress) {
  */
 async function getUserTokenBalance(tokenAddress) {
     try {
-        // Check if wallet is connected
-        if (!window.ethereum || !window.ethereum.selectedAddress) {
+        // Get user's wallet address using the same method as getAllWalletTokens
+        const userAddress = await contractService.getUserAddress();
+        if (!userAddress) {
             return '0';
         }
 
-        const userAddress = window.ethereum.selectedAddress;
+        // Cache check
+        const cacheKey = `${tokenAddress.toLowerCase()}-${userAddress.toLowerCase()}`;
+        const cached = balanceCache.get(cacheKey);
+        if (cached && (Date.now() - cached.ts) < BALANCE_CACHE_TTL_MS) {
+            return cached.value;
+        }
         
         const provider = contractService.getProvider();
-        const tokenContract = new ethers.Contract(
-            tokenAddress,
-            [
+
+        // First, try multicall for decimals and balanceOf
+        const iface = new ethers.utils.Interface([
+            'function balanceOf(address) view returns (uint256)',
+            'function decimals() view returns (uint8)'
+        ]);
+        const calls = [
+            { target: tokenAddress, callData: iface.encodeFunctionData('balanceOf', [userAddress]) },
+            { target: tokenAddress, callData: iface.encodeFunctionData('decimals') }
+        ];
+        let rawBalance, decimals;
+        const mcResult = await multicallTryAggregate(calls);
+        if (mcResult) {
+            try {
+                rawBalance = iface.decodeFunctionResult('balanceOf', mcResult[0].returnData)[0];
+                decimals = iface.decodeFunctionResult('decimals', mcResult[1].returnData)[0];
+            } catch (_) {
+                const tokenContract = new ethers.Contract(tokenAddress, [
+                    'function balanceOf(address) view returns (uint256)',
+                    'function decimals() view returns (uint8)'
+                ], provider);
+                [rawBalance, decimals] = await Promise.all([
+                    tokenContract.balanceOf(userAddress),
+                    tokenContract.decimals()
+                ]);
+            }
+        } else {
+            const tokenContract = new ethers.Contract(tokenAddress, [
                 'function balanceOf(address) view returns (uint256)',
                 'function decimals() view returns (uint8)'
-            ],
-            provider
-        );
-
-        const [rawBalance, decimals] = await Promise.all([
+            ], provider);
+            [rawBalance, decimals] = await Promise.all([
             tokenContract.balanceOf(userAddress),
             tokenContract.decimals()
         ]);
+        }
 
         const balance = ethers.utils.formatUnits(rawBalance, decimals);
-
+        balanceCache.set(cacheKey, { value: balance, ts: Date.now() });
         return balance;
 
     } catch (err) {
@@ -276,19 +430,70 @@ export async function isTokenAllowed(tokenAddress) {
 }
 
 /**
+ * Get formatted balance information for display using cached/multicall-backed paths
+ * @param {string} tokenAddress
+ * @returns {Promise<{balance: string, symbol: string, decimals: number}>}
+ */
+export async function getTokenBalanceInfo(tokenAddress) {
+    try {
+        if (!tokenAddress || !ethers.utils.isAddress(tokenAddress)) {
+            debug(`Invalid token address provided: ${tokenAddress}`);
+            return { balance: '0', symbol: 'N/A', decimals: 18 };
+        }
+
+        const userAddress = await contractService.getUserAddress();
+        if (!userAddress) {
+            debug('Wallet not connected');
+            const md = await getTokenMetadata(tokenAddress).catch(() => ({ symbol: 'N/A', decimals: 18 }));
+            return { balance: '0', symbol: md.symbol ?? 'N/A', decimals: md.decimals ?? 18 };
+        }
+
+        const metadata = await getTokenMetadata(tokenAddress);
+        const balance = await getUserTokenBalance(tokenAddress);
+        return {
+            balance: balance || '0',
+            symbol: metadata.symbol ?? 'N/A',
+            decimals: metadata.decimals ?? 18
+        };
+    } catch (err) {
+        if (err.code === -32005 || err.message?.includes('rate limit')) {
+            warn(`Rate limit hit while getting balance info for token ${tokenAddress}`);
+            return { balance: '0', symbol: 'N/A', decimals: 18 };
+        }
+        debug(`Failed to get balance info for token ${tokenAddress}:`, err);
+        return { balance: '0', symbol: 'N/A', decimals: 18 };
+    }
+}
+
+/**
  * Clear all caches (useful for testing or when switching networks)
  */
 export function clearTokenCaches() {
-    debug('Caching disabled - no caches to clear');
+    tokenMetadataCache.clear();
+    balanceCache.clear();
+    debug('Token caches cleared');
 }
 
 /**
  * Reset rate limiting state (useful when switching networks or after errors)
  */
+// Deprecated: rate limiting reset (no-op retained for API compatibility)
 export function resetRateLimiting() {
-    lastRequestTime = 0;
-    consecutiveRateLimitErrors = 0;
-    debug('Rate limiting state reset');
+    debug('resetRateLimiting called (no-op)');
+}
+
+/**
+ * Get current rate limiting status for debugging
+ * @returns {Object} Current rate limiting state
+ */
+export function getRateLimitingStatus() {
+    return {
+        queueLength: 0,
+        isProcessingQueue: false,
+        baseDelay: 0,
+        maxConsecutiveErrors: 0,
+        batchSize: 0
+    };
 }
 
 /**
@@ -338,31 +543,14 @@ export async function getAllWalletTokens() {
     try {
         debug('Getting all wallet tokens...');
         
-        // Get allowed tokens first
+        // Get allowed tokens only (no wallet scanning)
         const allowedTokens = await getContractAllowedTokens();
-        const allowedAddresses = new Set(allowedTokens.map(token => token.address.toLowerCase()));
         
         // Get user's wallet address
         const userAddress = await contractService.getUserAddress();
         if (!userAddress) {
             debug('No user address available');
             return { allowed: allowedTokens, notAllowed: [] };
-        }
-
-        // Get all ERC20 tokens from user's wallet
-        const walletTokens = await getUserWalletTokens(userAddress);
-        debug(`Found ${walletTokens.length} tokens in wallet`);
-
-        // Separate allowed and not allowed tokens
-        const notAllowedTokens = [];
-        
-        for (const token of walletTokens) {
-            if (!allowedAddresses.has(token.address.toLowerCase())) {
-                notAllowedTokens.push({
-                    ...token,
-                    isAllowed: false
-                });
-            }
         }
 
         // Mark allowed tokens
@@ -373,83 +561,14 @@ export async function getAllWalletTokens() {
 
         const result = {
             allowed: markedAllowedTokens,
-            notAllowed: notAllowedTokens
+            notAllowed: []
         };
 
-        debug(`Successfully processed ${markedAllowedTokens.length} allowed and ${notAllowedTokens.length} not allowed tokens`);
+        debug(`Successfully processed ${markedAllowedTokens.length} allowed tokens`);
         return result;
 
     } catch (err) {
         error('Failed to get all wallet tokens:', err);
         return { allowed: [], notAllowed: [] };
-    }
-}
-
-/**
- * Get all ERC20 tokens in user's wallet
- * @param {string} userAddress - User's wallet address
- * @returns {Promise<Array>} Array of token objects with metadata and balances
- */
-async function getUserWalletTokens(userAddress) {
-    try {
-        debug(`Getting wallet tokens for ${userAddress}...`);
-        
-        const provider = contractService.getProvider();
-        
-        // Get recent Transfer events to find tokens the user has interacted with
-        const currentBlock = await provider.getBlockNumber();
-        const fromBlock = Math.max(0, currentBlock - 10000); // Look back 10k blocks
-        
-        // Get Transfer events where user is recipient
-        const filter = {
-            fromBlock: fromBlock,
-            toBlock: 'latest',
-            topics: [
-                ethers.utils.id('Transfer(address,address,uint256)'),
-                null, // from address (any)
-                ethers.utils.hexZeroPad(userAddress, 32) // to address (user)
-            ]
-        };
-
-        const logs = await provider.getLogs(filter);
-        debug(`Found ${logs.length} Transfer events to user`);
-
-        // Extract unique token addresses from Transfer events
-        const tokenAddresses = [...new Set(logs.map(log => log.address))];
-        debug(`Found ${tokenAddresses.length} unique token addresses`);
-        
-        // Log the first few addresses for debugging
-        if (tokenAddresses.length > 0) {
-            debug('Sample token addresses found:', tokenAddresses.slice(0, 5));
-        }
-
-        const walletTokens = [];
-        
-        // Check balance for each token address from Transfer events
-        for (const tokenAddress of tokenAddresses) {
-            try {
-                await enforceRateLimit(100); // Shorter delay for balance checks
-                
-                const balance = await getUserTokenBalance(tokenAddress);
-                if (Number(balance) > 0) {
-                    const metadata = await getTokenMetadata(tokenAddress);
-                    walletTokens.push({
-                        address: tokenAddress,
-                        ...metadata,
-                        balance: balance
-                    });
-                }
-            } catch (err) {
-                debug(`Error checking token ${tokenAddress}:`, err.message);
-                // Continue with next token
-            }
-        }
-
-        debug(`Found ${walletTokens.length} tokens with balance in wallet`);
-        return walletTokens;
-
-    } catch (err) {
-        error('Failed to get wallet tokens:', err);
-        return [];
     }
 }

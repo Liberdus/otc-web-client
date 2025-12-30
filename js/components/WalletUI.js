@@ -69,9 +69,6 @@ export class WalletUI extends BaseComponent {
             this.debug('Connect result:', result);
             if (result && result.account) {
                 this.updateUI(result.account);
-                if (window.app && typeof window.app.handleWalletConnect === 'function') {
-                    await window.app.handleWalletConnect(result.account);
-                }
             }
         } catch (error) {
             this.error('Error in handleConnectClick:', error);
@@ -186,9 +183,6 @@ export class WalletUI extends BaseComponent {
                 case 'connect':
                     this.debug('Connect event received');
                     this.updateUI(data.account);
-                    if (window.app && typeof window.app.handleWalletConnect === 'function') {
-                        window.app.handleWalletConnect(data.account);
-                    }
                     break;
                 case 'disconnect':
                     this.debug('Disconnect event received');
@@ -196,10 +190,6 @@ export class WalletUI extends BaseComponent {
                     break;
                 case 'accountsChanged':
                     this.debug('Account change event received');
-                    // Clean up CreateOrder component when account changes
-                    if (window.app?.components['create-order']?.cleanup) {
-                        window.app.components['create-order'].cleanup();
-                    }
                     this.updateUI(data.account);
                     break;
                 case 'chainChanged':

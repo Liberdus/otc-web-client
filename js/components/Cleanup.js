@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { BaseComponent } from './BaseComponent.js';
 import { createLogger } from '../services/LogService.js';
+import { handleTransactionError, isUserRejection } from '../utils/ui.js';
 
 export class Cleanup extends BaseComponent {
     constructor(containerId) {
@@ -9,6 +10,7 @@ export class Cleanup extends BaseComponent {
         this.contract = null;
         this.isInitializing = false;
         this.isInitialized = false;
+        this.currentMode = null; // track readOnly/connected mode to allow re-init on change
         
         // Initialize logger
         const logger = createLogger('CLEANUP');
@@ -23,8 +25,9 @@ export class Cleanup extends BaseComponent {
             return;
         }
 
-        if (this.isInitialized) {
-            this.debug('Already initialized, skipping...');
+        // Allow re-initialization when mode changes (read-only -> connected or vice versa)
+        if (this.isInitialized && this.currentMode === readOnlyMode) {
+            this.debug('Already initialized for this mode, skipping...');
             return;
         }
 
@@ -33,6 +36,7 @@ export class Cleanup extends BaseComponent {
         try {
             this.debug('Starting Cleanup initialization...');
             this.debug('ReadOnly mode:', readOnlyMode);
+            this.currentMode = readOnlyMode;
             
             // Wait for WebSocket to be fully initialized
             if (!window.webSocket?.isInitialized) {
@@ -94,10 +98,14 @@ export class Cleanup extends BaseComponent {
                 this.cleanupButton = document.getElementById('cleanup-button');
                 if (this.cleanupButton) {
                     this.cleanupButton.addEventListener('click', () => {
+                        this.debug('Cleanup button clicked (read-only): attempting wallet connect');
                         if (window.walletManager) {
                             window.walletManager.connect().catch(error => {
+                                this.error('Wallet connect failed from cleanup (read-only):', error);
                                 this.showError('Failed to connect wallet: ' + error.message);
                             });
+                        } else {
+                            this.warn('WalletManager not available on cleanup button click (read-only)');
                         }
                     });
                 }
@@ -107,7 +115,13 @@ export class Cleanup extends BaseComponent {
                     window.walletManager.addListener((event, data) => {
                         if (event === 'connect') {
                             this.debug('Wallet connected in read-only mode, reinitializing...');
-                            this.initialize(false); // Reinitialize in connected mode
+                            // Force re-init in connected mode
+                            this.isInitialized = false;
+                            if (this.intervalId) {
+                                clearInterval(this.intervalId);
+                                this.intervalId = null;
+                            }
+                            this.initialize(false);
                         }
                     });
                 }
@@ -148,7 +162,10 @@ export class Cleanup extends BaseComponent {
             // Only set up the cleanup button event listener
             this.cleanupButton = document.getElementById('cleanup-button');
             if (this.cleanupButton) {
-                this.cleanupButton.addEventListener('click', () => this.performCleanup());
+                this.cleanupButton.addEventListener('click', () => {
+                    this.debug('Cleanup button clicked (connected): starting performCleanup');
+                    this.performCleanup();
+                });
             }
 
             this.debug('Starting cleanup opportunities check');
@@ -206,10 +223,11 @@ export class Cleanup extends BaseComponent {
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
             
-            // Filter eligible orders
-            const eligibleOrders = orders.filter(order => 
-                currentTime > order.timings.graceEndsAt
-            );
+            // Filter eligible orders (defensive against missing timings)
+            const eligibleOrders = orders.filter(order => {
+                const graceEndsAt = order?.timings?.graceEndsAt;
+                return typeof graceEndsAt === 'number' && currentTime > graceEndsAt;
+            });
 
             // Get the first order that will be cleaned (lowest ID)
             const nextOrderToClean = eligibleOrders.length > 0 
@@ -384,9 +402,10 @@ export class Cleanup extends BaseComponent {
 
             const orders = this.webSocket.getOrders();
             const currentTime = Math.floor(Date.now() / 1000);
-            const eligibleOrders = orders.filter(order => 
-                currentTime > order.timings.graceEndsAt
-            );
+            const eligibleOrders = orders.filter(order => {
+                const graceEndsAt = order?.timings?.graceEndsAt;
+                return typeof graceEndsAt === 'number' && currentTime > graceEndsAt;
+            });
 
             if (eligibleOrders.length === 0) {
                 throw new Error('No eligible orders to clean');
@@ -439,83 +458,161 @@ export class Cleanup extends BaseComponent {
                 estimatedCost: ethers.utils.formatEther(gasLimit.mul(feeData.gasPrice)) + ' ETH'
             });
 
-            // Execute cleanup with retry mechanism
-            const maxRetries = 3;
-            let attempt = 0;
-            let lastError;
+            // Execute cleanup transaction
+            console.log('[Cleanup] Sending transaction with options:', txOptions);
+            const tx = await contractWithSigner.cleanupExpiredOrders(txOptions);
+            console.log('[Cleanup] Transaction sent:', tx.hash);
 
-            while (attempt < maxRetries) {
-                try {
-                    console.log('[Cleanup] Sending transaction with options:', txOptions);
-                    const tx = await contractWithSigner.cleanupExpiredOrders(txOptions);
-                    console.log('[Cleanup] Transaction sent:', tx.hash);
+            const receipt = await tx.wait();
+            console.log('[Cleanup] Transaction confirmed:', receipt);
 
-                    const receipt = await tx.wait();
-                    console.log('[Cleanup] Transaction confirmed:', receipt);
-
-                    if (receipt.status === 1) {
-                        // Parse cleanup events from receipt
-                        const events = receipt.events || [];
-                        const cleanedOrderIds = [];
-                        const retryOrderIds = new Map(); // Map old order IDs to new ones
-
-                        for (const event of events) {
-                            if (event.event === 'OrderCleanedUp') {
-                                cleanedOrderIds.push(event.args.orderId.toString());
-                            } else if (event.event === 'RetryOrder') {
-                                retryOrderIds.set(
-                                    event.args.oldOrderId.toString(),
-                                    event.args.newOrderId.toString()
-                                );
-                            }
-                        }
-
-                        if (cleanedOrderIds.length || retryOrderIds.size) {
-                            this.debug('Cleanup results:', {
-                                cleaned: cleanedOrderIds,
-                                retried: Array.from(retryOrderIds.entries())
-                            });
-
-                            // Remove cleaned orders from WebSocket cache
-                            if (cleanedOrderIds.length) {
-                                this.webSocket.removeOrders(cleanedOrderIds);
-                            }
-
-                            // Update retried orders in WebSocket cache
-                            if (retryOrderIds.size) {
-                                await this.webSocket.syncAllOrders(contract);
-                            }
-
-                            this.showSuccess('Cleanup successful! Check your wallet for rewards.');
-                        }
-                        return;
-                    }
-                    throw new Error('Transaction failed during execution');
-                } catch (error) {
-                    lastError = error;
-                    attempt++;
-                    if (attempt < maxRetries) {
-                        this.debug(`Attempt ${attempt} failed, retrying...`, error);
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
+            if (receipt.status === 1) {
+                // Enhanced event parsing with detailed feedback
+                const result = await this.parseCleanupEvents(receipt, signer);
+                await this.handleCleanupResult(result);
+                return;
             }
-
-            throw lastError;
+            throw new Error('Transaction failed during execution');
 
         } catch (error) {
-            this.error('Cleanup failed:', {
-                message: error.message,
-                code: error.code,
-                error: error.error,
-                reason: error.reason,
-                transaction: error.transaction
-            });
-            this.showError(`Cleanup failed: ${error.message}`);
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'cleanup');
         } finally {
             this.cleanupButton.textContent = 'Clean Orders';
             this.cleanupButton.disabled = false;
             await this.checkCleanupOpportunities();
+        }
+    }
+
+    // TODO: if things get changed in ABI, this will need to be updated 
+    // TODO: create constants for event names and use them here
+    // New method to parse cleanup events with detailed analysis
+    async parseCleanupEvents(receipt, signer) {
+        const events = receipt.events || [];
+        const userAddress = await signer.getAddress();
+        
+        // Parse all relevant events
+        const retryEvents = [];
+        const feeEvents = [];
+        const cleanedEvents = [];
+        const errorEvents = [];
+
+        for (const event of events) {
+            if (event.event === 'RetryOrder') {
+                retryEvents.push({
+                    oldOrderId: event.args.oldOrderId.toString(),
+                    newOrderId: event.args.newOrderId.toString(),
+                    maker: event.args.maker,
+                    tries: event.args.tries.toString(),
+                    timestamp: event.args.timestamp.toString()
+                });
+            } else if (event.event === 'CleanupFeesDistributed') {
+                feeEvents.push({
+                    recipient: event.args.recipient,
+                    feeToken: event.args.feeToken,
+                    amount: event.args.amount.toString(),
+                    timestamp: event.args.timestamp.toString()
+                });
+            } else if (event.event === 'OrderCleanedUp') {
+                cleanedEvents.push({
+                    orderId: event.args.orderId.toString(),
+                    maker: event.args.maker,
+                    timestamp: event.args.timestamp.toString()
+                });
+            } else if (event.event === 'CleanupError') {
+                errorEvents.push({
+                    orderId: event.args.orderId.toString(),
+                    reason: event.args.reason,
+                    timestamp: event.args.timestamp.toString()
+                });
+            }
+        }
+
+        this.debug('Parsed cleanup events:', {
+            retryEvents,
+            feeEvents,
+            cleanedEvents,
+            errorEvents
+        });
+
+        return {
+            retryEvents,
+            feeEvents,
+            cleanedEvents,
+            errorEvents,
+            userAddress: userAddress.toLowerCase()
+        };
+    }
+
+    // New method to handle cleanup results and show appropriate feedback
+    async handleCleanupResult(result) {
+        const { retryEvents, feeEvents, cleanedEvents, errorEvents, userAddress } = result;
+        
+        // Check for errors first
+        if (errorEvents.length > 0) {
+            // Deduplicate error messages to avoid repetition
+            const uniqueErrors = new Map();
+            errorEvents.forEach(e => {
+                const key = `${e.orderId}-${e.reason}`;
+                if (!uniqueErrors.has(key)) {
+                    uniqueErrors.set(key, `Order #${e.orderId}: ${e.reason}`);
+                }
+            });
+            const errorMsg = Array.from(uniqueErrors.values()).join(', ');
+            this.showWarning(`Cleanup completed with errors: ${errorMsg}`);
+        }
+
+        // Check if user received fees
+        const userFeeEvent = feeEvents.find(f => f.recipient.toLowerCase() === userAddress);
+        if (userFeeEvent) {
+            try {
+                const tokenInfo = await this.webSocket.getTokenInfo(userFeeEvent.feeToken);
+                const formattedAmount = parseFloat(
+                    ethers.utils.formatUnits(userFeeEvent.amount, tokenInfo.decimals)
+                ).toFixed(6);
+                
+                this.showSuccess(`Cleanup successful! You received ${formattedAmount} ${tokenInfo.symbol} as reward.`);
+            } catch (error) {
+                this.debug('Error formatting fee amount:', error);
+                this.showSuccess('Cleanup successful! You received a reward. Check your wallet.');
+            }
+        } else if (retryEvents.length > 0 && feeEvents.length === 0) {
+            // Order was recycled but no fees were distributed
+            const retryMsg = retryEvents.map(r => 
+                `Order #${r.oldOrderId} → #${r.newOrderId} (tries: ${r.tries})`
+            ).join(', ');
+            this.showInfo(`Order recycled (no fee distribution): ${retryMsg}`);
+        } else if (cleanedEvents.length > 0 && feeEvents.length === 0) {
+            // Order was cleaned but no fees were distributed
+            const cleanedMsg = cleanedEvents.map(c => `#${c.orderId}`).join(', ');
+            this.showInfo(`Orders cleaned: ${cleanedMsg} (no fee distribution in this transaction)`);
+        } else if (retryEvents.length === 0 && cleanedEvents.length === 0 && feeEvents.length === 0) {
+            this.showInfo('No eligible orders to clean up at this time.');
+        } else {
+            // Mixed results
+            let msg = 'Cleanup completed: ';
+            if (cleanedEvents.length > 0) {
+                msg += `${cleanedEvents.length} order(s) cleaned. `;
+            }
+            if (retryEvents.length > 0) {
+                msg += `${retryEvents.length} order(s) recycled. `;
+            }
+            if (feeEvents.length > 0) {
+                msg += `Fees distributed to ${feeEvents.length} recipient(s).`;
+            }
+            this.showSuccess(msg);
+        }
+
+        // Update WebSocket cache
+        const cleanedOrderIds = cleanedEvents.map(e => e.orderId);
+        const retryOrderIds = new Map(retryEvents.map(r => [r.oldOrderId, r.newOrderId]));
+
+        if (cleanedOrderIds.length > 0) {
+            this.webSocket.removeOrders(cleanedOrderIds);
+        }
+
+        if (retryOrderIds.size > 0) {
+            await this.webSocket.syncAllOrders(this.webSocket.contract);
         }
     }
 
@@ -546,14 +643,14 @@ export class Cleanup extends BaseComponent {
         }
     }
 
-    showWarning(message, duration = 5000) {
+    showWarning(message, duration = 15000) {
         this.debug('Warning:', message);
         if (window.showWarning) {
             window.showWarning(message, duration);
         }
     }
 
-    showInfo(message, duration = 5000) {
+    showInfo(message, duration = 15000) {
         this.debug('Info:', message);
         if (window.showInfo) {
             window.showInfo(message, duration);

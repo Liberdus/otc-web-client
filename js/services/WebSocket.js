@@ -1,7 +1,9 @@
 import { ethers } from 'ethers';
-import { getNetworkConfig } from '../config.js';
+import { getNetworkConfig, ORDER_CONSTANTS } from '../config.js';
+import { tryAggregate as multicallTryAggregate, isMulticallAvailable } from './MulticallService.js';
 import { erc20Abi } from '../abi/erc20.js';
 import { createLogger } from './LogService.js';
+import { tokenIconService } from './TokenIconService.js';
 
 export class WebSocketService {
     constructor() {
@@ -27,6 +29,9 @@ export class WebSocketService {
         // Add contract constants
         this.orderExpiry = null;
         this.gracePeriod = null;
+
+        // Throttle state for block logs
+        this.lastBlockLogTime = 0;
         
 
         const logger = createLogger('WEBSOCKET');
@@ -139,6 +144,13 @@ export class WebSocketService {
                         this.debug('Price update received, updating all deals...');
                         this.updateAllDeals();
                     });
+                    // Trigger initial allowed token price fetch after contract is ready
+                    try {
+                        await window.pricingService.getAllowedTokens();
+                        await window.pricingService.fetchAllowedTokensPrices();
+                    } catch (err) {
+                        this.debug('Initial allowed token fetch after WS init failed:', err);
+                    }
                 } else {
                     this.debug('Warning: PricingService not available');
                 }
@@ -194,15 +206,44 @@ export class WebSocketService {
             const filter = contract.filters.OrderCreated();
             this.debug('Created filter:', filter);
             
-            // Listen for new blocks to ensure connection is alive
+            // Listen for new blocks to ensure connection is alive (throttled logging)
             this.provider.on("block", async (blockNumber) => {
-                await this.queueRequest(async () => {
-                    this.debug('New block received:', blockNumber);
-                });
+                try {
+                    const now = Date.now();
+                    if (now - this.lastBlockLogTime >= 5000) { // log at most every 5s
+                        this.lastBlockLogTime = now;
+                        await this.queueRequest(async () => {
+                            this.debug('New block received:', blockNumber);
+                        });
+                    }
+                } catch (error) {
+                    this.debug('Error processing block event:', error);
+                    // Don't let block processing errors crash the app
+                }
             });
+
+            // Add error handling for WebSocket connection
+            this.provider._websocket.onerror = (error) => {
+                this.debug('WebSocket error:', error);
+            };
+
+            this.provider._websocket.onclose = (event) => {
+                this.debug('WebSocket closed:', event);
+                // Attempt to reconnect if not manually closed
+                if (event.code !== 1000) {
+                    this.debug('WebSocket closed unexpectedly, attempting to reconnect...');
+                    setTimeout(() => {
+                        this.reconnect();
+                    }, 5000);
+                }
+            };
 
             contract.on("OrderCreated", async (...args) => {
                 try {
+                    if (!args || args.length < 9) {
+                        this.debug('Invalid OrderCreated event args:', args);
+                        return;
+                    }
                     const [orderId, maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, fee, event] = args;
                     
                     let orderData = {
@@ -234,7 +275,7 @@ export class WebSocketService {
                         id: orderData.id,
                         maker: orderData.maker,
                         status: orderData.status,
-                        timestamp: orderData.timings.createdAt
+                        timestamp: orderData.timings?.createdAt || 0
                     });
                     
                     // Notify subscribers
@@ -303,6 +344,187 @@ export class WebSocketService {
         }
     }
 
+    /**
+     * Build Interface for decoding the orders(uint256) response
+     */
+    static getOrdersInterface() {
+        if (!this._ordersInterface) {
+            this._ordersInterface = new ethers.utils.Interface([
+                'function orders(uint256) view returns (address maker, address taker, address sellToken, uint256 sellAmount, address buyToken, uint256 buyAmount, uint256 timestamp, uint8 status, address feeToken, uint256 orderCreationFee, uint256 tries)'
+            ]);
+        }
+        return this._ordersInterface;
+    }
+
+    /**
+     * Fetch a contiguous range of orders via Multicall2.
+     * Returns an array of decoded order objects (filtered for non-zero maker).
+     * If multicall is unavailable, returns null to signal fallback.
+     */
+    async fetchOrdersViaMulticall(startIndex, endIndex) {
+        try {
+            if (!isMulticallAvailable()) {
+                this.debug('Multicall not available, skipping multicall path');
+                return null;
+            }
+
+            const iface = WebSocketService.getOrdersInterface();
+            const calls = [];
+            for (let i = startIndex; i < endIndex; i++) {
+                calls.push({
+                    target: this.contract.address,
+                    callData: iface.encodeFunctionData('orders', [i])
+                });
+            }
+
+            // Try once, then retry once on failure before falling back
+            // Apply a simple timeout wrapper to multicall
+            const withTimeout = (p, ms) => Promise.race([
+                p,
+                new Promise((_, rej) => setTimeout(() => rej(new Error('multicall timeout')), ms))
+            ]);
+
+            let results = await withTimeout(multicallTryAggregate(calls, { requireSuccess: false }), 5000);
+            if (!results) {
+                this.debug('Multicall returned null, retrying once after short delay...');
+                await new Promise(r => setTimeout(r, 150));
+                try {
+                    results = await withTimeout(multicallTryAggregate(calls, { requireSuccess: false }), 5000);
+                } catch (_) {
+                    results = null;
+                }
+                if (!results) {
+                    this.debug('Multicall retry failed');
+                    return null;
+                }
+            }
+
+            const orders = [];
+            for (let i = 0; i < results.length; i++) {
+                const result = results[i];
+                const orderId = startIndex + i;
+                if (!result || result.success !== true) {
+                    continue;
+                }
+                try {
+                    const decoded = iface.decodeFunctionResult('orders', result.returnData);
+                    const [maker, taker, sellToken, sellAmount, buyToken, buyAmount, timestamp, status, feeToken, orderCreationFee, tries] = decoded;
+                    if (maker === ethers.constants.AddressZero) {
+                        continue;
+                    }
+                    orders.push({
+                        id: orderId,
+                        maker,
+                        taker,
+                        sellToken,
+                        sellAmount,
+                        buyToken,
+                        buyAmount,
+                        timestamp: timestamp.toNumber(),
+                        status: ORDER_CONSTANTS.STATUS_MAP[Number(status)],
+                        feeToken,
+                        orderCreationFee,
+                        tries: (tries && tries.toNumber) ? tries.toNumber() : Number(tries)
+                    });
+                } catch (e) {
+                    this.debug(`Failed to decode order ${orderId} from multicall`, e);
+                }
+            }
+            return orders;
+        } catch (error) {
+            this.debug('fetchOrdersViaMulticall error:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Fallback: fetch orders individually with small concurrency.
+     */
+    async fetchOrdersIndividually(startIndex, endIndex, concurrency = 3) {
+        const indices = [];
+        for (let i = startIndex; i < endIndex; i++) indices.push(i);
+        const results = [];
+
+        let cursor = 0;
+        const worker = async () => {
+            const iface = WebSocketService.getOrdersInterface();
+            while (true) {
+                const idx = cursor++;
+                if (idx >= indices.length) break;
+                const orderId = indices[idx];
+                try {
+                    const order = await this.contract.orders(orderId);
+                    if (order.maker === ethers.constants.AddressZero) {
+                        continue;
+                    }
+                    results.push({
+                        id: orderId,
+                        maker: order.maker,
+                        taker: order.taker,
+                        sellToken: order.sellToken,
+                        sellAmount: order.sellAmount,
+                        buyToken: order.buyToken,
+                        buyAmount: order.buyAmount,
+                        timestamp: order.timestamp.toNumber(),
+                        status: ORDER_CONSTANTS.STATUS_MAP[Number(order.status)],
+                        feeToken: order.feeToken,
+                        orderCreationFee: order.orderCreationFee,
+                        tries: (order.tries && order.tries.toNumber) ? order.tries.toNumber() : Number(order.tries)
+                    });
+                } catch (e) {
+                    this.debug(`Failed to read order ${orderId} via fallback`, e);
+                }
+            }
+        };
+
+        const workers = Array.from({ length: Math.min(concurrency, indices.length) }, () => worker());
+        await Promise.all(workers);
+        // Keep results sorted by id
+        results.sort((a, b) => a.id - b.id);
+        return results;
+    }
+
+    /**
+     * High-level helper: fetch orders in batches using multicall with fallback.
+     * Returns an array of decoded orders (without timing expansion).
+     */
+    async fetchOrdersBatched(totalOrders, batchSize = 50) {
+        const all = [];
+        if (!this.contract) {
+            throw new Error('Contract not initialized. Call initialize() first.');
+        }
+        const totalBatches = Math.ceil(totalOrders / batchSize);
+        this.debug(`Batched order fetch: ${totalOrders} orders in ${totalBatches} batches of ${batchSize}`);
+        let fetchedSoFar = 0;
+
+        for (let batch = 0; batch < totalBatches; batch++) {
+            const startIndex = batch * batchSize;
+            const endIndex = Math.min(startIndex + batchSize, totalOrders);
+            this.debug(`Fetching batch ${batch + 1}/${totalBatches} (orders ${startIndex}-${endIndex - 1})`);
+            let batchOrders = await this.fetchOrdersViaMulticall(startIndex, endIndex);
+            if (!batchOrders) {
+                batchOrders = await this.fetchOrdersIndividually(startIndex, endIndex, 3);
+            }
+            all.push(...batchOrders);
+            fetchedSoFar += batchOrders.length;
+            // Emit progress for UI consumers
+            try {
+                this.notifySubscribers('orderSyncProgress', {
+                    fetched: fetchedSoFar,
+                    total: totalOrders,
+                    batch: batch + 1,
+                    totalBatches
+                });
+            } catch (_) {}
+            if (batch < totalBatches - 1) {
+                // Short delay between batches
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
+        this.debug(`Batched order fetch complete: ${all.length} orders retrieved`);
+        return all;
+    }
+
     cleanup() {
         try {
             this.debug('Cleaning up WebSocket service...');
@@ -351,85 +573,70 @@ export class WebSocketService {
 
             // Clear existing cache before sync
             this.orderCache.clear();
-            
-            // Process orders in smaller batches to avoid rate limiting
-            const batchSize = 3; // Process only 3 orders at a time
-            const totalBatches = Math.ceil(nextOrderId / batchSize);
-            
-            this.debug(`Processing ${nextOrderId} orders in ${totalBatches} batches of ${batchSize}`);
-            
-            for (let batch = 0; batch < totalBatches; batch++) {
-                const startIndex = batch * batchSize;
-                const endIndex = Math.min(startIndex + batchSize, nextOrderId);
-                
-                this.debug(`Processing batch ${batch + 1}/${totalBatches} (orders ${startIndex}-${endIndex - 1})`);
-                
-                                // Process current batch
-                for (let i = startIndex; i < endIndex; i++) {
-                    try {
-                        // Add longer delay to avoid rate limiting
-                        if (i > startIndex) {
-                            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
-                        }
-                        
-                        const order = await this.contract.orders(i);
-                        this.debug(`Order ${i} data:`, {
-                            maker: order.maker,
-                            taker: order.taker,
-                            sellToken: order.sellToken,
-                            buyToken: order.buyToken,
-                            status: order.status.toString(),
-                            isZeroMaker: order.maker === ethers.constants.AddressZero
-                        });
-                        
-                        // Only filter out zero-address makers (non-existent orders)
-                        if (order.maker !== ethers.constants.AddressZero) {
-                            const orderData = {
-                                id: i,
-                                maker: order.maker,
-                                taker: order.taker,
-                                sellToken: order.sellToken,
-                                sellAmount: order.sellAmount,
-                                buyToken: order.buyToken,
-                                buyAmount: order.buyAmount,
-                                timestamp: order.timestamp.toNumber(),
-                                status: ['Active', 'Filled', 'Canceled'][order.status], // Map enum to string
-                                orderCreationFee: order.orderCreationFee,
-                                tries: order.tries
-                            };
-                            this.orderCache.set(i, orderData);
-                            this.debug('Added order to cache:', orderData);
-                        }
-                    } catch (error) {
-                        this.debug(`Failed to read order ${i}:`, error);
-                        
-                        // If it's a rate limit error, add extra delay
-                        if (error.code === 'CALL_EXCEPTION' && error.error?.code === -32005) {
-                            this.debug(`Rate limit hit for order ${i}, waiting 2 seconds...`);
-                            await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
-                        }
-                        
-                        continue;
+
+            // Use optimized batched fetch (multicall with fallback)
+            const fetchedOrders = await this.fetchOrdersBatched(Number(nextOrderId), 50);
+
+            // Enrich with timings and populate cache
+            for (const o of fetchedOrders) {
+                const orderData = {
+                    ...o,
+                    timings: {
+                        createdAt: o.timestamp,
+                        expiresAt: o.timestamp + (this.orderExpiry ? this.orderExpiry.toNumber() : ORDER_CONSTANTS.DEFAULT_ORDER_EXPIRY_SECS),
+                        graceEndsAt: o.timestamp +
+                            (this.orderExpiry ? this.orderExpiry.toNumber() : ORDER_CONSTANTS.DEFAULT_ORDER_EXPIRY_SECS) +
+                            (this.gracePeriod ? this.gracePeriod.toNumber() : ORDER_CONSTANTS.DEFAULT_GRACE_PERIOD_SECS)
                     }
-                }
-                
-                // Add delay between batches
-                if (batch < totalBatches - 1) {
-                    this.debug(`Batch ${batch + 1} complete, waiting 1 second before next batch...`);
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second between batches
+                };
+                // Calculate deal metrics for the order
+                try {
+                    const enrichedOrderData = await this.calculateDealMetrics(orderData);
+                    this.orderCache.set(o.id, enrichedOrderData);
+                    this.debug('Added order to cache with deal metrics:', enrichedOrderData);
+                } catch (error) {
+                    this.debug('Failed to calculate deal metrics for order', o.id, ':', error);
+                    // Still add the order without deal metrics as fallback
+                    this.orderCache.set(o.id, orderData);
+                    this.debug('Added order to cache without deal metrics:', orderData);
                 }
             }
-            
+
+            // Validate and summarize order cache
+            try {
+                this.validateOrderCache();
+            } catch (_) {}
+
             this.debug('Order sync complete. Cache size:', this.orderCache.size);
             this.notifySubscribers('orderSyncComplete', Object.fromEntries(this.orderCache));
             this.debug('Setting up event listeners...');
-            // TODO move this where needed (after sync)
             await this.setupEventListeners(this.contract);
-            
+
         } catch (error) {
             this.debug('Order sync failed:', error);
             this.orderCache.clear();
             this.notifySubscribers('orderSyncComplete', {});
+        }
+    }
+
+    // Basic validation and summary for testing/diagnostics
+    validateOrderCache() {
+        const orders = Array.from(this.orderCache.values());
+        const summary = orders.reduce((acc, o) => {
+            const s = o.status || 'Unknown';
+            acc[s] = (acc[s] || 0) + 1;
+            return acc;
+        }, {});
+        this.debug('Order cache validation:', {
+            total: orders.length,
+            byStatus: summary
+        });
+        // Spot-check required fields on a few entries
+        for (let i = 0; i < Math.min(3, orders.length); i++) {
+            const o = orders[i];
+            if (!o.maker || !o.sellToken || !o.buyToken) {
+                this.warn('Order missing critical fields:', o.id);
+            }
         }
     }
 
@@ -567,8 +774,29 @@ export class WebSocketService {
         return order.timestamp + this.orderExpiry.toNumber();
     }
 
-    // Add this helper method to WebSocketService class
+    //TODO: calculate deal metric based on buy value / sell value where buy value is the amount of buy tokens * token price and sell value is the amount of sell tokens * token price
     async calculateDealMetrics(orderData) {
+        const buyTokenInfo = await this.getTokenInfo(orderData.buyToken); // person who created order set this
+        const sellTokenInfo = await this.getTokenInfo(orderData.sellToken);// person who created order set this
+        const buyTokenUsdPrice = window.pricingService.getPrice(orderData.buyToken);
+        const sellTokenUsdPrice = window.pricingService.getPrice(orderData.sellToken);
+        if (buyTokenUsdPrice === undefined || sellTokenUsdPrice === undefined || buyTokenUsdPrice === 0 || sellTokenUsdPrice === 0) {
+            this.debug('Missing price data, skipping deal calculation for order:', orderData.id);
+            return orderData;
+        }
+        const buyValue = Number(orderData.buyAmount) * buyTokenUsdPrice;
+        const sellValue = Number(orderData.sellAmount) * sellTokenUsdPrice;
+        const deal = buyValue / sellValue;
+        return {
+            ...orderData,
+            dealMetrics: {
+                deal
+            }
+        };
+    }
+
+    // Add this helper method to WebSocketService class
+    async calculateDealMetrics_old(orderData) {
         try {
             const buyTokenInfo = await this.getTokenInfo(orderData.buyToken);
             const sellTokenInfo = await this.getTokenInfo(orderData.sellToken);
@@ -576,9 +804,25 @@ export class WebSocketService {
             const buyTokenUsdPrice = window.pricingService.getPrice(orderData.buyToken);
             const sellTokenUsdPrice = window.pricingService.getPrice(orderData.sellToken);
 
+            // Check if we have valid price data
+            if (buyTokenUsdPrice === undefined || sellTokenUsdPrice === undefined) {
+                this.debug('Missing price data, skipping deal calculation for order:', orderData.id);
+                return orderData; // Return order without deal metrics
+            }
+
             // Format amounts using correct decimals
             const sellAmount = ethers.utils.formatUnits(orderData.sellAmount, sellTokenInfo.decimals);
             const buyAmount = ethers.utils.formatUnits(orderData.buyAmount, buyTokenInfo.decimals);
+
+            if (sellAmount === 0) {
+                this.debug('Division by zero: sellAmount is 0 for order:', orderData.id);
+                return orderData;
+            }
+            
+            if (buyTokenUsdPrice === 0) {
+                this.debug('Division by zero: buyTokenUsdPrice is 0 for order:', orderData.id);
+                return orderData;
+            }
 
             // Calculate Price (what you get / what you give from taker perspective)
             const price = Number(buyAmount) / Number(sellAmount);
@@ -588,8 +832,18 @@ export class WebSocketService {
             
             // Calculate Deal (Price * Rate)
             const deal = price * rate;
+            
+            // Validate calculations
+            if (isNaN(price) || isNaN(rate) || isNaN(deal)) {
+                this.debug('Invalid calculation result for order:', orderData.id, {
+                    price, rate, deal,
+                    buyAmount, sellAmount,
+                    buyTokenUsdPrice, sellTokenUsdPrice
+                });
+                return orderData;
+            }
 
-            return {
+            const result = {
                 ...orderData,
                 dealMetrics: {
                     price,
@@ -602,8 +856,10 @@ export class WebSocketService {
                     lastUpdated: Date.now()
                 }
             };
+            
+            return result;
         } catch (error) {
-            this.debug('Error calculating deal metrics:', error);
+            this.debug('Error calculating deal metrics for order', orderData.id, ':', error);
             return orderData;
         }
     }
@@ -629,11 +885,21 @@ export class WebSocketService {
                     contract.name()
                 ]);
 
+                // Get icon URL for the token
+                let iconUrl = null;
+                try {
+                    const chainId = 137; // Polygon - TODO: might want to get this dynamically
+                    iconUrl = await tokenIconService.getIconUrl(tokenAddress, chainId);
+                } catch (err) {
+                    this.debug(`Failed to get icon for token ${tokenAddress}:`, err);
+                }
+
                 const tokenInfo = {
                     address: normalizedAddress,
                     symbol,
                     decimals: Number(decimals),
-                    name
+                    name,
+                    iconUrl: iconUrl
                 };
 
                 // Cache the result
@@ -683,7 +949,7 @@ export class WebSocketService {
     // Use this to determine to provide a fill button in the UI
     canFillOrder(order, currentAccount) {
         if (order.status !== 'Active') return false;
-        if (Date.now()/1000 > order.timings.expiresAt) return false;
+        if (order.timings?.expiresAt && Date.now()/1000 > order.timings.expiresAt) return false;
         if (order.maker?.toLowerCase() === currentAccount?.toLowerCase()) return false;
         return order.taker === ethers.constants.AddressZero || 
                order.taker?.toLowerCase() === currentAccount?.toLowerCase();
@@ -693,7 +959,7 @@ export class WebSocketService {
     // Use this to determine to provide a cancel button in the UI
     canCancelOrder(order, currentAccount) {
         if (order.status !== 'Active') return false;
-        if (Date.now()/1000 > order.timings.graceEndsAt) return false;
+        if (order.timings?.graceEndsAt && Date.now()/1000 > order.timings.graceEndsAt) return false;
         return order.maker?.toLowerCase() === currentAccount?.toLowerCase();
     }
 
@@ -707,16 +973,56 @@ export class WebSocketService {
         // Then check timing using cached timings
         const currentTime = Math.floor(Date.now() / 1000);
 
-        if (currentTime > order.timings.graceEndsAt) {
-            this.debug('Order not active: Past grace period');
-            return '';
+        this.debug(`Checking order ${order.id} status: currentTime=${currentTime}, expiresAt=${order.timings?.expiresAt}, graceEndsAt=${order.timings?.graceEndsAt}`);
+
+        if (order.timings?.graceEndsAt && currentTime > order.timings.graceEndsAt) {
+            this.debug(`Order ${order.id} status: Expired (past grace period)`);
+            return 'Expired';
         }
-        if (currentTime > order.timings.expiresAt) {
-            this.debug('Order status: Awaiting Clean');
+        if (order.timings?.expiresAt && currentTime > order.timings.expiresAt) {
+            this.debug(`Order ${order.id} status: Expired (past expiry time)`);
             return 'Expired';
         }
 
-        this.debug('Order status: Active');
+        this.debug(`Order ${order.id} status: Active`);
         return 'Active';
+    }
+
+    // Reconnect method for handling WebSocket disconnections
+    async reconnect() {
+        try {
+            this.debug('Attempting to reconnect WebSocket...');
+            
+            // Clean up existing connection
+            if (this.provider) {
+                try {
+                    this.provider.removeAllListeners();
+                    if (this.provider._websocket) {
+                        this.provider._websocket.close();
+                    }
+                } catch (error) {
+                    this.debug('Error cleaning up old connection:', error);
+                }
+            }
+
+            // Reset state
+            this.isInitialized = false;
+            this.provider = null;
+            this.contract = null;
+
+            // Wait a bit before reconnecting
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Reinitialize
+            await this.initialize();
+            
+            this.debug('WebSocket reconnection successful');
+        } catch (error) {
+            this.error('WebSocket reconnection failed:', error);
+            // Try again after a longer delay
+            setTimeout(() => {
+                this.reconnect();
+            }, 10000);
+        }
     }
 }

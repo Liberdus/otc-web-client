@@ -2,43 +2,103 @@ import { abi as CONTRACT_ABI } from './abi/OTCSwap.js';
 import { ethers } from 'ethers';
 import { createLogger } from './services/LogService.js';
 
+export const APP_BRAND = 'LiberdusOTC';
+export const APP_LOGO = 'assets/1.png';
+
 const networkConfig = {
-    "137": {
-        name: "Polygon",
-        displayName: "Polygon Mainnet",
-        isDefault: true,
-        contractAddress: "0x2F786290BAe87D1e8c01A97e6529030bbCF9f147", // New contract with allowed tokens 08/15/25
-        /* "0x34396a792510d6fb8ec0f70b68b8739456af06c6",  */// old 08/14/25
-        /* "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837", */ // old 08/13/25
-        contractABI: CONTRACT_ABI,
-        explorer: "https://polygonscan.com",
-        rpcUrl: "https://polygon-rpc.com",
-        fallbackRpcUrls: [
-            "https://rpc-mainnet.matic.network",
-            "https://polygon-bor.publicnode.com",
-            "https://polygon.api.onfinality.io/public"
-        ],
-        chainId: "0x89",
-        nativeCurrency: {
-            name: "MATIC",
-            symbol: "MATIC",
-            decimals: 18
-        },
-        wsUrl: "wss://polygon.gateway.tenderly.co",
-        fallbackWsUrls: [
-            "wss://polygon-bor.publicnode.com",
-            "wss://polygon-bor-rpc.publicnode.com",
-            "wss://polygon.api.onfinality.io/public-ws"
-        ]
+    "80002": {
+    name: "Amoy",
+    displayName: "Polygon Amoy Testnet",
+    isDefault: true,
+    contractAddress: "0x7A64764074971839bd5A3022beA2450CBc51dEC8",
+    contractABI: CONTRACT_ABI,
+    explorer: "https://www.oklink.com/amoy",
+    rpcUrl: "https://rpc-amoy.polygon.technology",
+    fallbackRpcUrls: [
+        "https://rpc.ankr.com/polygon_amoy",
+        "https://polygon-amoy.blockpi.network/v1/rpc/public",
+        "https://polygon-amoy.public.blastapi.io"
+    ],
+    chainId: "0x13882",
+    nativeCurrency: {
+        name: "POL",
+        symbol: "POL",
+        decimals: 18
     },
+    // multicall address amoy testnet
+    multicallAddress: "0xca11bde05977b3631167028862be2a173976ca11",
+    wsUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
+    fallbackWsUrls: [
+        "wss://polygon-amoy.public.blastapi.io"
+    ]
+},
 };
+
+// replace above with this when testing amoy
+/* "80002": {
+    name: "Amoy",
+    displayName: "Polygon Amoy Testnet",
+    isDefault: true,
+    contractAddress: "0x0BE723F88aDb867022fA0a71EB82365556cb3c8C",
+    contractABI: CONTRACT_ABI,
+    explorer: "https://www.oklink.com/amoy",
+    rpcUrl: "https://rpc-amoy.polygon.technology",
+    fallbackRpcUrls: [
+        "https://rpc.ankr.com/polygon_amoy",
+        "https://polygon-amoy.blockpi.network/v1/rpc/public",
+        "https://polygon-amoy.public.blastapi.io"
+    ],
+    chainId: "0x13882",
+    nativeCurrency: {
+        name: "POL",
+        symbol: "POL",
+        decimals: 18
+    },
+    // multicall address amoy testnet
+    multicallAddress: "0xca11bde05977b3631167028862be2a173976ca11",
+    wsUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
+    fallbackWsUrls: [
+        "wss://polygon-amoy.public.blastapi.io"
+    ]
+}, */
+
+// "137": {
+//     name: "Polygon",
+//     displayName: "Polygon Mainnet",
+//     isDefault: false,
+//     contractAddress: "0x2F786290BAe87D1e8c01A97e6529030bbCF9f147", // New contract with allowed tokens 08/15/25
+//     /* "0x34396a792510d6fb8ec0f70b68b8739456af06c6",  */// old 08/14/25
+//     /* "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837", */ // old 08/13/25
+//     contractABI: CONTRACT_ABI,
+//     explorer: "https://polygonscan.com",
+//     rpcUrl: "https://polygon-rpc.com",
+//     fallbackRpcUrls: [
+//         "https://rpc-mainnet.matic.network",
+//         "https://polygon-bor.publicnode.com",
+//         "https://polygon.api.onfinality.io/public"
+//     ],
+//     chainId: "0x89",
+//     nativeCurrency: {
+//         name: "MATIC",
+//         symbol: "MATIC",
+//         decimals: 18
+//     },
+//     // Multicall2 contract (Uniswap) deployed on Polygon mainnet
+//     multicallAddress: "0x275617327c958bD06b5D6b871E7f491D76113dd8",
+//     wsUrl: "wss://polygon.gateway.tenderly.co",
+//     fallbackWsUrls: [
+//         "wss://polygon-bor.publicnode.com",
+//         "wss://polygon-bor-rpc.publicnode.com",
+//         "wss://polygon.api.onfinality.io/public-ws"
+//     ]
+// },
 
 
 export const DEBUG_CONFIG = {
     APP: false,
-    WEBSOCKET: false,
+    WEBSOCKET: true, // Enable to debug status calculation
     WALLET: false,
-    VIEW_ORDERS: false,
+    VIEW_ORDERS: true, // Enable to debug status updates
     CREATE_ORDER: false,
     MY_ORDERS: false,
     TAKER_ORDERS: false,
@@ -47,8 +107,68 @@ export const DEBUG_CONFIG = {
     BASE_COMPONENT: false,
     PRICING: false,
     TOKENS: false,
-    TOAST: true, // Enable toast debugging for testing
+    TOKEN_ICON_SERVICE: false, // Add token icon service debugging
+    TOAST: false, // Enable toast debugging for testing
+    PRICING_DEFAULT_TO_ONE: false, // Default missing prices to 1 for testing, false for production
+    LIBERDUS_VALIDATION: true, // Enable frontend Liberdus token validation
     // Add more specific flags as needed
+};
+
+// Centralized order-related constants
+export const ORDER_CONSTANTS = {
+    STATUS_MAP: ['Active', 'Filled', 'Canceled'],
+    DEFAULT_ORDER_EXPIRY_SECS: 7 * 24 * 60 * 60, // 7 days
+    DEFAULT_GRACE_PERIOD_SECS: 7 * 24 * 60 * 60 // 7 days
+};
+
+// Token Icon Service Configuration
+export const TOKEN_ICON_CONFIG = {
+    // CoinGecko API configuration
+    COINGECKO_API_BASE: 'https://api.coingecko.com/api/v3',
+    COINGECKO_ICON_BASE: 'https://assets.coingecko.com/coins/images',
+    
+    // CoinGecko chain mapping
+    CHAIN_ID_MAP: {
+        '1': 'ethereum',
+        '137': 'polygon-pos',
+        '80002': 'polygon-amoy',
+        '56': 'binance-smart-chain',
+        '42161': 'arbitrum-one',
+        '10': 'optimistic-ethereum',
+        '43114': 'avalanche',
+        '250': 'fantom',
+        '25': 'cronos'
+    },
+    
+    // Known token mappings for Polygon (expandable)
+    KNOWN_TOKENS: {
+        "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": "usd-coin", // USDC
+        "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": "tether", // USDT
+        "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": "weth", // WETH
+        "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270": "matic-network", // WMATIC
+        "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6": "wrapped-bitcoin", // WBTC
+    },
+    
+    // Special cases
+    SPECIAL_TOKENS: {
+        "0x693ed886545970f0a3adf8c59af5ccdb6ddf0a76": "assets/32.png" // Liberdus
+    },
+    
+    // Rate limiting configuration
+    RATE_LIMIT_DELAY: 100, // ms between requests
+    MAX_CACHE_SIZE: 1000, // Maximum number of cached icons
+    CACHE_EXPIRY: 24 * 60 * 60 * 1000, // 24 hours in ms
+    
+    // Icon validation configuration
+    VALIDATION_TIMEOUT: 5000, // 5 seconds timeout for icon validation
+    MAX_RETRIES: 3, // Maximum retries for failed icon requests
+    
+    // Fallback configuration
+    ENABLE_FALLBACK_ICONS: true, // Enable color-based fallback icons
+    FALLBACK_COLORS: [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+        '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
+    ]
 };
 
 export const getAllNetworks = () => Object.values(networkConfig);
@@ -160,9 +280,20 @@ export class WalletManager {
                 const accounts = await window.ethereum.request({ method: 'eth_accounts' });
                 if (accounts.length > 0) {
                     this.debug('Auto-connecting to existing MetaMask session');
-                    await this.initializeSigner(accounts[0]);
+                    // Ensure internal state reflects connected session
+                    this.account = accounts[0];
                     const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                    this.chainId = chainId;
+                    // Enforce default network behavior on reload (same as connect flow)
                     this.handleChainChanged(chainId);
+                    this.isConnected = true;
+                    // Initialize signer and contract for the session
+                    await this.initializeSigner(this.account);
+                    // Notify listeners so UI can react as connected
+                    this.notifyListeners('connect', {
+                        account: this.account,
+                        chainId: this.chainId
+                    });
                 }
             } else {
                 this.debug('User has manually disconnected, skipping auto-connect');
@@ -254,7 +385,7 @@ export class WalletManager {
             const decimalChainId = parseInt(chainId, 16).toString();
             this.debug('Decimal Chain ID:', decimalChainId);
             
-            if (decimalChainId !== "137") {
+            if (decimalChainId !== "80002") { //TODO: need to not hardcode this
                 await this.switchToDefaultNetwork();
             }
 
@@ -311,16 +442,24 @@ export class WalletManager {
         }
     }
 
-    handleAccountsChanged(accounts) {
+    async handleAccountsChanged(accounts) {
         this.debug('Accounts changed:', accounts);
         if (accounts.length === 0) {
             this.account = null;
             this.isConnected = false;
+            this.signer = null;
+            this.contract = null;
+            this.contractInitialized = false;
             this.debug('No accounts, triggering disconnect');
             this.notifyListeners('disconnect', {});
         } else if (accounts[0] !== this.account) {
             this.account = accounts[0];
             this.isConnected = true;
+            try {
+                await this.initializeSigner(this.account);
+            } catch (e) {
+                this.error('Error reinitializing signer on account change:', e);
+            }
             this.debug('New account:', this.account);
             this.notifyListeners('accountsChanged', { account: this.account });
         }

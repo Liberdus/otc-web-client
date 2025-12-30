@@ -308,30 +308,26 @@
 }
 
 .token-selector {
-  display: flex;
+  display: inline-flex;
+  flex-direction: row;
   align-items: center;
   padding: 4px 8px;
-  background: white;
-  border: 1px solid #e8e8e8;
   border-radius: 16px;
   cursor: pointer;
-  gap: 8px;
+  gap: 4px;
 }
 
-.token-selector:hover {
-  background: #f7f8fa;
+/* Vertical stack for selector + balance chip */
+.token-selector-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center; /* center children horizontally */
+  gap: 4px;
 }
 
 .dropdown-arrow {
   font-size: 12px;
   color: #7d7d7d;
-}
-
-.balance-text {
-  font-size: 12px;
-  color: #7d7d7d;
-  margin-top: 4px;
-  display: block;
 }
 
 .swap-arrow {
@@ -904,6 +900,7 @@
   gap: 12px;
   position: relative;
   z-index: 1;
+  min-height: 120px;
 }
 
 .token-input-wrapper {
@@ -1018,18 +1015,6 @@
 
 /* Balance text positioning */
 .balance-text {
-  position: relative;
-  z-index: 1;
-}
-
-/* Unified token input */
-.unified-token-input {
-  display: flex;
-  align-items: center;
-  background: var(--bg-tertiary);
-  border-radius: 12px;
-  padding: 16px;
-  gap: 12px;
   position: relative;
   z-index: 1;
 }
@@ -1227,32 +1212,10 @@
   font-size: 0.85em;
 }
 
-.token-balance-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.token-balance {
-  color: var(--text-primary);
-  font-size: 0.9em;
-}
-
-.token-balance-usd {
-  color: var(--text-secondary);
-  font-size: 0.85em;
-}
-
 .token-selector-left {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.token-balance-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
 .amount-container {
@@ -1261,16 +1224,6 @@
   align-items: flex-end;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
-}
-
-.token-balance {
-  color: var(--text-primary);
-  font-size: 0.9em;
-}
-
-.token-balance-usd {
-  color: var(--text-secondary);
-  font-size: 0.85em;
 }
 
 .token-selector-left {
@@ -1287,6 +1240,16 @@
 .token-no-balance {
   border-left: 3px solid #6b7280;
   opacity: 0.7;
+}
+
+/* Buy token modal specific styling - remove borders and ensure consistent hover */
+#buyTokenModal .token-item {
+  border-left: none !important;
+}
+
+#buyTokenModal .token-item:hover {
+  background-color: var(--bg-tertiary) !important;
+  opacity: 1 !important;
 }
 
 .token-not-allowed {
@@ -1530,5 +1493,129 @@
 
   .token-balance-usd {
     font-size: 0.7rem;
+  }
+}
+
+/* Token Balance Display - New Implementation */
+
+.token-balance-display:hover {
+  background: var(--bg-tertiary); /* match selector hover */
+}
+
+.balance-clickable {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px; /* match selector content spacing */
+  padding: 6px 12px; /* pill padding */
+  border-radius: 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px; /* match selector */
+  color: var(--text-primary);
+  transition: background-color 0.2s;
+  white-space: nowrap;
+  min-width: 120px; /* match selector min-width */
+}
+
+.balance-clickable:hover {
+  background: var(--bg-tertiary);
+}
+
+.balance-clickable:focus {
+  outline: 2px solid #4b6bfb;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.balance-clickable:active {
+  transform: scale(0.98);
+}
+
+.balance-amount {
+  font-size: 14px; /* match selector */
+  font-weight: 500;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  min-width: 0;
+}
+
+.balance-usd {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  opacity: 0.8;
+}
+
+/* Explicitly hide balance USD chips by ID when present */
+#sellTokenBalanceUSD,
+#buyTokenBalanceUSD {
+  display: none !important;
+}
+
+/* Position balance displays relative to their containers */
+#sellContainer {
+  position: relative;
+}
+
+#buyContainer {
+  position: relative;
+}
+
+/* Ensure balance displays flow naturally after their containers */
+.token-balance-display {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0;
+  margin-right: 0;
+  border-radius: 20px; /* match selector */
+  padding: 6px 12px; /* match selector */
+  transition: background-color 0.2s; /* match selector */
+  font-size: 14px; /* match selector */
+  color: var(--text-primary);
+  gap: 8px; /* match selector */
+  align-self: center; /* center chip in the group */
+  min-width: 120px; /* match selector min-width */
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  .token-balance-display {
+    margin-top: 3px;
+    padding: 3px 6px;
+  }
+
+  .balance-amount {
+    font-size: 10px;
+  }
+
+  .balance-usd {
+    font-size: 9px;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .token-balance-display {
+    border: 2px solid var(--text-primary);
+  }
+
+  .balance-clickable:focus {
+    outline: 3px solid var(--text-primary);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .token-balance-display,
+  .balance-clickable {
+    transition: none;
+  }
+
+  .balance-clickable:active {
+    transform: none;
   }
 }

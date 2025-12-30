@@ -1,11 +1,13 @@
 import { ViewOrders } from './ViewOrders.js';
-import { PricingService } from '../services/PricingService.js';
 import { createLogger } from '../services/LogService.js';
+import { ethers } from 'ethers';
+import { handleTransactionError, processOrderAddress, generateStatusCellHTML, setupClickToCopy } from '../utils/ui.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
         super('my-orders');
-        this.pricingService = new PricingService();
+        // Use global pricing service instead of local instance
+        this.pricingService = window.pricingService;
         
         // Initialize logger
         const logger = createLogger('MY_ORDERS');
@@ -51,10 +53,18 @@ export class MyOrders extends ViewOrders {
                 return;
             }
 
+            // Check if table already exists to avoid rebuilding
+            const existingTable = this.container.querySelector('.orders-table');
+            if (!existingTable) {
+                this.debug('Table does not exist, setting up...');
+                await this.setupTable();
+            } else {
+                this.debug('Table already exists, skipping setup');
+            }
+
             // Check if WebSocket cache is already available
             if (window.webSocket?.orderCache.size > 0) {
                 this.debug('Using existing WebSocket cache');
-                await this.setupTable();
                 await this.refreshOrdersView();
                 return;
             }
@@ -72,8 +82,7 @@ export class MyOrders extends ViewOrders {
                 });
             }
 
-            // Setup table and refresh view
-            await this.setupTable();
+            // Refresh view
             await this.refreshOrdersView();
 
         } catch (error) {
@@ -165,7 +174,7 @@ export class MyOrders extends ViewOrders {
             if (ordersToDisplay.length === 0) {
                 tbody.innerHTML = `
                     <tr class="empty-message">
-                        <td colspan="9" class="no-orders-message">
+                        <td colspan="7" class="no-orders-message">
                             <div class="placeholder-text">
                                 ${showOnlyCancellable ? 
                                     'No cancellable orders found' : 
@@ -175,10 +184,7 @@ export class MyOrders extends ViewOrders {
                     </tr>`;
             }
 
-            // After table is rebuilt, restore checkbox state
-            if (checkbox) {
-                checkbox.checked = showOnlyCancellable;
-            }
+            // Checkbox state is now preserved in setupTable(), no need to restore here
 
         } catch (error) {
             this.error('Error refreshing orders:', error);
@@ -196,6 +202,10 @@ export class MyOrders extends ViewOrders {
 
     // Keep the setupTable method as is since it's specific to MyOrders view
     async setupTable() {
+        // Store current filter state before rebuilding table
+        const existingCheckbox = this.container.querySelector('#fillable-orders-toggle');
+        const showOnlyCancellable = existingCheckbox?.checked ?? true; // Default to true if no existing state
+        
         // Get tokens from WebSocket's tokenCache first
         const tokens = Array.from(window.webSocket.tokenCache.values())
             .sort((a, b) => a.symbol.localeCompare(b.symbol)); // Sort alphabetically by symbol
@@ -240,7 +250,7 @@ export class MyOrders extends ViewOrders {
                                 </svg>
                             </button>
                             <label class="filter-toggle">
-                                <input type="checkbox" id="fillable-orders-toggle" checked>
+                                <input type="checkbox" id="fillable-orders-toggle" ${showOnlyCancellable ? 'checked' : ''}>
                                 <span>Show only cancellable orders</span>
                             </label>
                         </div>
@@ -277,6 +287,7 @@ export class MyOrders extends ViewOrders {
                     <div class="refresh-container">
                         <button id="refresh-prices-btn" class="refresh-prices-button">↻ Refresh Prices</button>
                         <span class="refresh-status"></span>
+                        <span class="last-updated" id="last-updated-timestamp"></span>
                     </div>
                     ${paginationControls}
                 </div>
@@ -291,21 +302,14 @@ export class MyOrders extends ViewOrders {
                         <tr>
                             <th>ID</th>
                             <th>Sell</th>
-                            <th>Amount</th>
                             <th>Buy</th>
-                            <th>Amount</th>
                             <th>
                                 Deal
-                                <span class="info-icon" title="Deal = Price × Market Rate
+                                <span class="info-icon" title="Deal = Buy Value / Sell Value
 
-For Your Orders (as Seller):
 • Higher deal number is better
-• Deal > 1: You're getting more than market value
-• Deal < 1: You're getting less than market value
-
-Example:
-Deal = 1.2 means you're selling at 20% above market rate
-Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
+• Deal > 1: better deal based on market prices
+• Deal < 1: worse deal based on market prices">ⓘ</span>
                             </th>
                             <th>Expires</th>
                             <th>Status</th>
@@ -411,6 +415,10 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
         // Add refresh button functionality
         const refreshButton = this.container.querySelector('#refresh-prices-btn');
         const statusIndicator = this.container.querySelector('.refresh-status');
+        const lastUpdatedElement = this.container.querySelector('#last-updated-timestamp');
+        
+        // Initialize last updated timestamp
+        this.updateLastUpdatedTimestamp(lastUpdatedElement);
         
         let refreshTimeout;
         if (refreshButton) {
@@ -427,6 +435,8 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                     if (result.success) {
                         statusIndicator.className = 'refresh-status success';
                         statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                        // Update timestamp after successful refresh
+                        this.updateLastUpdatedTimestamp(lastUpdatedElement);
                     } else {
                         statusIndicator.className = 'refresh-status error';
                         statusIndicator.textContent = result.message;
@@ -505,13 +515,27 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
         }
     }
 
+    // Update last updated timestamp
+    updateLastUpdatedTimestamp(element) {
+        if (!element || !this.pricingService) return;
+        
+        const lastUpdateTime = this.pricingService.getLastUpdateTime();
+        if (lastUpdateTime && lastUpdateTime !== 'Never') {
+            element.textContent = `Last updated: ${lastUpdateTime}`;
+            element.style.display = 'inline';
+        } else {
+            element.textContent = 'No prices loaded yet';
+            element.style.display = 'inline';
+        }
+    }
+
     async createOrderRow(order) {
         try {
             // Create the row element first
             const tr = document.createElement('tr');
             tr.dataset.orderId = order.id.toString();
-            tr.dataset.timestamp = order.timings.createdAt.toString();
-            
+            tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
+
             // Get token info from WebSocket cache
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
             const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
@@ -525,6 +549,18 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 buyTokenUsdPrice 
             } = order.dealMetrics || {};
 
+            // Fallback amount formatting if dealMetrics not yet populated
+            const safeFormattedSellAmount = typeof formattedSellAmount !== 'undefined'
+                ? formattedSellAmount
+                : (order?.sellAmount && sellTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals)
+                    : '0');
+            const safeFormattedBuyAmount = typeof formattedBuyAmount !== 'undefined'
+                ? formattedBuyAmount
+                : (order?.buyAmount && buyTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals)
+                    : '0');
+
             // Format USD prices with appropriate precision
             const formatUsdPrice = (price) => {
                 if (!price) return '';
@@ -533,64 +569,73 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 return `$${price.toFixed(4)}`;
             };
 
-            // Format expiry time
-            const formatTimeDiff = (seconds) => {
-                const days = Math.floor(Math.abs(seconds) / 86400);
-                const hours = Math.floor((Math.abs(seconds) % 86400) / 3600);
-                const minutes = Math.floor((Math.abs(seconds) % 3600) / 60);
-                
-                const prefix = seconds < 0 ? '-' : '';
-                
-                if (days > 0) {
-                    return `${prefix}${days}D ${hours}H ${minutes}M`;
-                } else if (hours > 0) {
-                    return `${prefix}${hours}H ${minutes}M`;
-                } else {
-                    return `${prefix}${minutes}M`;
-                }
+            // Calculate total values (price × amount)
+            const calculateTotalValue = (price, amount) => {
+                if (!price || !amount) return 'N/A';
+                const total = price * parseFloat(amount);
+                if (total >= 100) return `$${total.toFixed(0)}`;
+                if (total >= 1) return `$${total.toFixed(2)}`;
+                return `$${total.toFixed(4)}`;
             };
 
-            const currentTime = Math.floor(Date.now() / 1000);
-            const timeUntilExpiry = order.timings.expiresAt - currentTime;
-            const expiryText = formatTimeDiff(timeUntilExpiry);
+            // Determine prices with fallback to current pricing service map
+            const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
+                ? sellTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.sellToken) : undefined);
+            const resolvedBuyPrice = typeof buyTokenUsdPrice !== 'undefined' 
+                ? buyTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.buyToken) : undefined);
 
-            // Add price-estimate class if using default price
-            const sellPriceClass = sellTokenUsdPrice ? '' : 'price-estimate';
-            const buyPriceClass = buyTokenUsdPrice ? '' : 'price-estimate';
+            // Mark as estimate if not explicitly present in pricing map
+            const sellPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
+            const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
+
+            const currentTime = Math.floor(Date.now() / 1000);
+            const timeUntilExpiry = order?.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
+            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const expiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeUntilExpiry) : '';
 
             // Get order status from WebSocket cache
             const orderStatus = window.webSocket.getOrderStatus(order);
 
+            // Get counterparty address for display
+            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            const { counterpartyAddress, isZeroAddr, formattedAddress } = processOrderAddress(order, userAddress);
             tr.innerHTML = `
                 <td>${order.id}</td>
                 <td>
                     <div class="token-info">
-                        ${this.getTokenIcon(sellTokenInfo)}
+                        <div class="token-icon"><div class="loading-spinner"></div></div>
                         <div class="token-details">
-                            <span>${sellTokenInfo.symbol}</span>
-                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${sellTokenInfo.symbol}</span>
+                                <span class="token-price ${sellPriceClass}">${calculateTotalValue(resolvedSellPrice, safeFormattedSellAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedSellAmount}</span>
                         </div>
                     </div>
                 </td>
-                <td>${formattedSellAmount}</td>
                 <td>
                     <div class="token-info">
-                        ${this.getTokenIcon(buyTokenInfo)}
+                        <div class="token-icon"><div class="loading-spinner"></div></div>
                         <div class="token-details">
-                            <span>${buyTokenInfo.symbol}</span>
-                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${buyTokenInfo.symbol}</span>
+                                <span class="token-price ${buyPriceClass}">${calculateTotalValue(resolvedBuyPrice, safeFormattedBuyAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedBuyAmount}</span>
                         </div>
                     </div>
                 </td>
-                <td>${formattedBuyAmount}</td>
-                <td>${(deal || 0).toFixed(6)}</td>
+                <td>${deal !== undefined ? (deal || 0).toFixed(6) : 'N/A'}</td>
                 <td>${expiryText}</td>
-                <td class="order-status">${orderStatus}</td>
+                <td class="order-status">
+                    ${generateStatusCellHTML(orderStatus, counterpartyAddress, isZeroAddr, formattedAddress)}
+                </td>
                 <td class="action-column"></td>`;
 
             // Add cancel button logic to action column
             const actionCell = tr.querySelector('.action-column');
-            const userAddress = window.walletManager.getAccount()?.toLowerCase();
             
             // Use WebSocket helper to determine if order can be cancelled
             if (window.webSocket.canCancelOrder(order, userAddress)) {
@@ -648,11 +693,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                         this.debouncedRefresh();
                     } catch (error) {
                         this.debug('Error cancelling order:', error);
-                        if (error.code === 4001) {
-                            this.showError('Transaction rejected by user');
-                        } else {
-                            this.showError(this.getReadableError(error));
-                        }
+                        handleTransactionError(error, this, 'order cancellation');
                     } finally {
                         cancelButton.disabled = false;
                         cancelButton.textContent = 'Cancel';
@@ -663,6 +704,20 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                 actionCell.appendChild(cancelButton);
             } else {
                 actionCell.textContent = '-';
+            }
+
+            // Add click-to-copy functionality for counterparty address
+            const addressElement = tr.querySelector('.counterparty-address.clickable');
+            setupClickToCopy(addressElement);
+
+            // Render token icons asynchronously (match column positions)
+            const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
+            const buyTokenIconContainer = tr.querySelector('td:nth-child(3) .token-icon');
+            if (sellTokenIconContainer) {
+                this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
+            }
+            if (buyTokenIconContainer) {
+                this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
             }
 
             // Start the expiry timer
@@ -728,7 +783,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
         }
 
         const updateExpiryAndButton = async () => {
-            const expiresCell = row.querySelector('td:nth-child(7)');
+            const expiresCell = row.querySelector('td:nth-child(5)');
             const actionCell = row.querySelector('.action-column');
             if (!expiresCell || !actionCell) return;
 
@@ -737,11 +792,12 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
             if (!order) return;
 
             const currentTime = Math.floor(Date.now() / 1000);
-            const timeDiff = order.timings.expiresAt - currentTime;
+                            const timeDiff = order.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
             const currentAccount = window.walletManager.getAccount()?.toLowerCase();
 
-            // Update expiry text
-            const newExpiryText = this.formatTimeDiff(timeDiff);
+            // Update expiry text - only calculate for active orders
+            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
@@ -787,8 +843,8 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                             actionCell.textContent = '-';
                             this.debouncedRefresh();
                         } catch (error) {
-                            console.error('Error cancelling order:', error);
-                            this.showError(this.getReadableError(error));
+                            this.debug('Error cancelling order:', error);
+                            handleTransactionError(error, this, 'order cancellation');
                             cancelButton.disabled = false;
                             cancelButton.textContent = 'Cancel';
                         }
@@ -798,9 +854,7 @@ Deal = 0.8 means you're selling at 20% below market rate">ⓘ</span>
                     actionCell.appendChild(cancelButton);
                 }
             } else if (order.maker?.toLowerCase() === currentAccount) {
-                actionCell.innerHTML = '<span class="your-order">Your Order</span>';
-            } else if (currentTime > order.timings.expiresAt) {
-                actionCell.innerHTML = '<span class="expired-order">Expired</span>';
+                actionCell.innerHTML = '<span class="your-order">Mine</span>';
             } else {
                 actionCell.textContent = '-';
             }

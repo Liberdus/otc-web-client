@@ -1,5 +1,7 @@
 import { ViewOrders } from './ViewOrders.js';
 import { createLogger } from '../services/LogService.js';
+import { ethers } from 'ethers';
+import { processOrderAddress, generateStatusCellHTML, setupClickToCopy } from '../utils/ui.js';
 
 export class TakerOrders extends ViewOrders {
     constructor() {
@@ -13,6 +15,8 @@ export class TakerOrders extends ViewOrders {
         this.warn = logger.warn.bind(logger);
     }
 
+
+
     async refreshOrdersView() {
         if (this.isLoading) return;
         this.isLoading = true;
@@ -23,8 +27,20 @@ export class TakerOrders extends ViewOrders {
             // Get current user address
             const userAddress = await window.walletManager.getAccount();
             if (!userAddress) {
-                this.warn('No wallet connected');
-                throw new Error('No wallet connected');
+                this.debug('No wallet connected, showing empty state');
+                // Show empty state for taker orders when no wallet is connected
+                const tbody = this.container.querySelector('tbody');
+                if (tbody) {
+                    tbody.innerHTML = `
+                        <tr class="empty-message">
+                            <td colspan="7" class="no-orders-message">
+                                <div class="placeholder-text">
+                                    Please connect your wallet to view your taker orders
+                                </div>
+                            </td>
+                        </tr>`;
+                }
+                return; // Exit early without throwing error
             }
 
             // Get all orders and filter for taker
@@ -83,10 +99,11 @@ export class TakerOrders extends ViewOrders {
             if (orderSort === 'newest') {
                 ordersToDisplay.sort((a, b) => b.id - a.id);
             } else if (orderSort === 'best-deal') {
-                ordersToDisplay.sort((a, b) => 
-                    Number(a.dealMetrics?.deal || Infinity) - 
-                    Number(b.dealMetrics?.deal || Infinity)
-                );
+                ordersToDisplay.sort((a, b) => {
+                    const dealA = a.dealMetrics?.deal > 0 ? 1 / a.dealMetrics.deal : Infinity;
+                    const dealB = b.dealMetrics?.deal > 0 ? 1 / b.dealMetrics.deal : Infinity;
+                    return dealB - dealA; // Higher deal is better for buyer perspective
+                });
             }
 
             // Apply pagination
@@ -119,7 +136,7 @@ export class TakerOrders extends ViewOrders {
                 this.debug('No orders to display');
                 tbody.innerHTML = `
                     <tr class="empty-message">
-                        <td colspan="8" class="no-orders-message">
+                        <td colspan="7" class="no-orders-message">
                             <div class="placeholder-text">
                                 ${showOnlyActive ? 
                                     'No active orders where you are the taker' : 
@@ -200,21 +217,14 @@ export class TakerOrders extends ViewOrders {
             thead.innerHTML = `
                 <th>ID</th>
                 <th>Buy</th>
-                <th>Amount</th>
                 <th>Sell</th>
-                <th>Amount</th>
                 <th>
                     Deal
-                    <span class="info-icon" title="Deal = Price × Market Rate
+                    <span class="info-icon" title="Deal = Buy Value / Sell Value
 
-For You as Taker (Buyer):
-• Lower deal number is better
-• Deal > 1: You're paying more than market value
-• Deal < 1: You're paying less than market value
-
-Example:
-Deal = 1.2 means you're paying 20% above market rate
-Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
+• Higher deal number is better
+• Deal > 1: better deal based on market prices
+• Deal < 1: worse deal based on market prices">ⓘ</span>
                 </th>
                 <th>Expires</th>
                 <th>Status</th>
@@ -222,6 +232,144 @@ Deal = 0.8 means you're paying 20% below market rate">ⓘ</span>
             `;
         } catch (error) {
             this.error('Error setting up table:', error);
+        }
+    }
+
+    /**
+     * Override createOrderRow to add counterparty address display
+     * @param {Object} order - The order object
+     * @returns {HTMLElement} The table row element
+     */
+    async createOrderRow(order) {
+        try {
+            const tr = document.createElement('tr');
+            tr.dataset.orderId = order.id.toString();
+            tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
+
+            // Get token info from WebSocket cache
+            const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
+            const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
+
+            // Use pre-formatted values from dealMetrics
+            const { 
+                formattedSellAmount,
+                formattedBuyAmount,
+                sellTokenUsdPrice,
+                buyTokenUsdPrice 
+            } = order.dealMetrics || {};
+            
+            const deal = order.dealMetrics?.deal > 0 ? 1 / order.dealMetrics?.deal : undefined; // view as buyer/taker
+
+            // Fallback amount formatting if dealMetrics not yet populated
+            const safeFormattedSellAmount = typeof formattedSellAmount !== 'undefined'
+                ? formattedSellAmount
+                : (order?.sellAmount && sellTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals)
+                    : '0');
+            const safeFormattedBuyAmount = typeof formattedBuyAmount !== 'undefined'
+                ? formattedBuyAmount
+                : (order?.buyAmount && buyTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals)
+                    : '0');
+
+            // Format USD prices
+            const formatUsdPrice = (price) => {
+                if (!price) return '';
+                if (price >= 100) return `$${price.toFixed(0)}`;
+                if (price >= 1) return `$${price.toFixed(2)}`;
+                return `$${price.toFixed(4)}`;
+            };
+
+            // Calculate total values (price × amount)
+            const calculateTotalValue = (price, amount) => {
+                if (!price || !amount) return 'N/A';
+                const total = price * parseFloat(amount);
+                if (total >= 100) return `$${total.toFixed(0)}`;
+                if (total >= 1) return `$${total.toFixed(2)}`;
+                return `$${total.toFixed(4)}`;
+            };
+
+            // Determine prices with fallback to current pricing service map
+            const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
+                ? sellTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.sellToken) : undefined);
+            const resolvedBuyPrice = typeof buyTokenUsdPrice !== 'undefined' 
+                ? buyTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.buyToken) : undefined);
+
+            // Mark as estimate if not explicitly present in pricing map
+            const sellPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
+            const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
+
+            const orderStatus = window.webSocket.getOrderStatus(order);
+            const expiryEpoch = order?.timings?.expiresAt;
+            const expiryText = orderStatus === 'Active' && typeof expiryEpoch === 'number' 
+                ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
+                : '';
+
+            // Get counterparty address for display
+            const userAddress = window.walletManager.getAccount()?.toLowerCase();
+            const { counterpartyAddress, isZeroAddr, formattedAddress } = processOrderAddress(order, userAddress);
+
+            tr.innerHTML = `
+                <td>${order.id}</td>
+                <td>
+                    <div class="token-info">
+                        <div class="token-icon">
+                            <div class="loading-spinner"></div>
+                        </div>
+                        <div class="token-details">
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${sellTokenInfo.symbol}</span>
+                                <span class="token-price ${sellPriceClass}">${calculateTotalValue(resolvedSellPrice, safeFormattedSellAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedSellAmount}</span>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <div class="token-info">
+                        <div class="token-icon">
+                            <div class="loading-spinner"></div>
+                        </div>
+                        <div class="token-details">
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${buyTokenInfo.symbol}</span>
+                                <span class="token-price ${buyPriceClass}">${calculateTotalValue(resolvedBuyPrice, safeFormattedBuyAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedBuyAmount}</span>
+                        </div>
+                    </div>
+                </td>
+                <td>${deal !== undefined ? (deal || 0).toFixed(6) : 'N/A'}</td>
+                <td>${expiryText}</td>
+                <td class="order-status">
+                    ${generateStatusCellHTML(orderStatus, counterpartyAddress, isZeroAddr, formattedAddress)}
+                </td>
+                <td class="action-column"></td>`;
+
+            // Add click-to-copy functionality for counterparty address
+            const addressElement = tr.querySelector('.counterparty-address.clickable');
+            setupClickToCopy(addressElement);
+
+            // Render token icons asynchronously (target explicit columns)
+            const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
+            const buyTokenIconContainer = tr.querySelector('td:nth-child(3) .token-icon');
+            
+            if (sellTokenIconContainer) {
+                this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
+            }
+            if (buyTokenIconContainer) {
+                this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
+            }
+
+            // Start expiry timer for this row
+            this.startExpiryTimer(tr);
+
+            return tr;
+        } catch (error) {
+            this.error('Error creating order row:', error);
+            return null;
         }
     }
 }

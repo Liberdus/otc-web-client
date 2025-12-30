@@ -3,9 +3,11 @@ import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { ContractError, CONTRACT_ERRORS } from '../errors/ContractErrors.js';
 import { getNetworkConfig } from '../config.js';
-import { PricingService } from '../services/PricingService.js';
 import { walletManager } from '../config.js';
 import { createLogger } from '../services/LogService.js';
+import { tokenIconService } from '../services/TokenIconService.js';
+import { generateTokenIconHTML } from '../utils/tokenIcons.js';
+import { handleTransactionError } from '../utils/ui.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -40,18 +42,20 @@ export class ViewOrders extends BaseComponent {
         // Add loading state
         this.isLoading = false;
 
-        // Add pricing service
-        this.pricingService = new PricingService();
+        // Use global pricing service instead of local instance
+        this.pricingService = window.pricingService;
 
-        // Subscribe to pricing updates
-        this.pricingService.subscribe((event) => {
-            if (event === 'refreshComplete') {
-                this.debug('Prices updated, refreshing orders view');
-                this.refreshOrdersView().catch(error => {
-                    this.error('Error refreshing orders after price update:', error);
-                });
-            }
-        });
+        // Subscribe to pricing updates from global service
+        if (window.pricingService) {
+            window.pricingService.subscribe((event) => {
+                if (event === 'refreshComplete') {
+                    this.debug('Prices updated, refreshing orders view');
+                    this.refreshOrdersView().catch(error => {
+                        this.error('Error refreshing orders after price update:', error);
+                    });
+                }
+            });
+        }
 
         // Subscribe to WebSocket updates
         if (window.webSocket) {
@@ -83,10 +87,21 @@ export class ViewOrders extends BaseComponent {
             this.currentAccount = walletManager.getAccount()?.toLowerCase();
             this.debug('Current account:', this.currentAccount);
             
-            // Initialize table and setup WebSocket
-            await super.init();
+            // Add wallet state listener to refresh UI when wallet state changes
+            this.walletListener = (event, data) => {
+                this.debug('Wallet event received:', event, data);
+                if (event === 'connect' || event === 'disconnect' || event === 'accountsChanged') {
+                    this.debug('Wallet state changed, refreshing orders view');
+                    this.currentAccount = walletManager.getAccount()?.toLowerCase();
+                    this.refreshOrdersView().catch(error => {
+                        this.error('Error refreshing orders after wallet state change:', error);
+                    });
+                }
+            };
+            walletManager.addListener(this.walletListener);
+            
+            // Setup WebSocket subscriptions
             await this.setupWebSocket();
-            await this.refreshOrdersView();
             
             this.debug('ViewOrders initialization complete');
         } catch (error) {
@@ -103,47 +118,59 @@ export class ViewOrders extends BaseComponent {
             </div>`;
     }
 
-    getTokenIcon(token) {
+    async getTokenIcon(token) {
         try {
             if (!token?.address) {
                 this.debug('No token address provided:', token);
                 return this.getDefaultTokenIcon();
             }
 
-            // Generate color-based icon for all tokens
-            this.debug('Generating color-based icon for token:', token.symbol);
-            const symbol = token.symbol || '?';
-            const firstLetter = symbol.charAt(0).toUpperCase();
+            // If token already has an iconUrl, use it
+            if (token.iconUrl) {
+                this.debug('Using existing iconUrl for token:', token.symbol);
+                return generateTokenIconHTML(token.iconUrl, token.symbol, token.address);
+            }
             
-            const colors = [
-                '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
-                '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
-            ];
+            // Otherwise, get icon URL from token icon service
+            const chainId = walletManager.chainId ? parseInt(walletManager.chainId, 16) : 137; // Default to Polygon
+            const iconUrl = await tokenIconService.getIconUrl(token.address, chainId);
             
-            const colorIndex = token.address ? 
-                parseInt(token.address.slice(-6), 16) % colors.length :
-                Math.floor(Math.random() * colors.length);
-            const backgroundColor = colors[colorIndex];
-            
-            return `
-                <div class="token-icon">
-                    <div class="token-icon-fallback" style="background: ${backgroundColor}">
-                        ${firstLetter}
-                    </div>
-                </div>
-            `;
+            // Generate HTML using the utility function
+            return generateTokenIconHTML(iconUrl, token.symbol, token.address);
         } catch (error) {
-            this.debug('Error generating token icon:', error);
+            this.debug('Error getting token icon:', error);
             return this.getDefaultTokenIcon();
         }
     }
 
     getDefaultTokenIcon() {
-        return `
-            <div class="token-icon">
-                <div class="token-icon-fallback" style="background: #FF6B6B">?</div>
-            </div>
-        `;
+        return generateTokenIconHTML('fallback', '?', 'unknown');
+    }
+
+    // Helper method to render token icon asynchronously
+    async renderTokenIcon(token, container) {
+        try {
+            const iconHtml = await this.getTokenIcon(token);
+            container.innerHTML = iconHtml;
+        } catch (error) {
+            this.debug('Error rendering token icon:', error);
+            // Fallback to basic icon
+            container.innerHTML = generateTokenIconHTML('fallback', token.symbol, token.address);
+        }
+    }
+
+    // Update last updated timestamp
+    updateLastUpdatedTimestamp(element) {
+        if (!element || !this.pricingService) return;
+        
+        const lastUpdateTime = this.pricingService.getLastUpdateTime();
+        if (lastUpdateTime && lastUpdateTime !== 'Never') {
+            element.textContent = `Last updated: ${lastUpdateTime}`;
+            element.style.display = 'inline';
+        } else {
+            element.textContent = 'No prices loaded yet';
+            element.style.display = 'inline';
+        }
     }
 
     setupErrorHandling() {
@@ -190,8 +217,9 @@ export class ViewOrders extends BaseComponent {
 
     async initialize(readOnlyMode = true) {
         if (!this.initialized) {
-            // First time setup - create table structure
+            // First time setup - create table structure and setup WebSocket
             await this.setupTable();
+            await this.setupWebSocket();
             this.initialized = true;
         }
         // Just refresh the view with current cache
@@ -278,7 +306,8 @@ export class ViewOrders extends BaseComponent {
             // Filter orders based on status and fillable flag
             ordersToDisplay = ordersToDisplay.filter(order => {
                 const currentTime = Math.floor(Date.now() / 1000);
-                const isExpired = currentTime > order.timings.expiresAt;
+                const expiresAt = order?.timings?.expiresAt;
+                const isExpired = typeof expiresAt === 'number' ? currentTime > expiresAt : false;
                 const isActive = order.status === 'Active' && !isExpired;
                 const canFill = window.webSocket.canFillOrder(order, walletManager.getAccount());
                 const isUserOrder = order.maker?.toLowerCase() === walletManager.getAccount()?.toLowerCase();
@@ -302,14 +331,16 @@ export class ViewOrders extends BaseComponent {
             if (orderSort === 'newest') {
                 ordersToDisplay.sort((a, b) => b.id - a.id);
             } else if (orderSort === 'best-deal') {
-                ordersToDisplay.sort((a, b) => 
-                    Number(a.dealMetrics?.deal || Infinity) - 
-                    Number(b.dealMetrics?.deal || Infinity)
-                );
+                ordersToDisplay.sort((a, b) => {
+                    const dealA = a.dealMetrics?.deal > 0 ? 1 / a.dealMetrics.deal : Infinity;
+                    const dealB = b.dealMetrics?.deal > 0 ? 1 / b.dealMetrics.deal : Infinity;
+                    return dealB - dealA; // Higher deal is better for buyer perspective
+                });
             }
 
             // Apply pagination
-            const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
+            const pageSizeSelect = this.container.querySelector('#page-size-select');
+            const pageSize = pageSizeSelect ? parseInt(pageSizeSelect.value) : 25; // Default to 25 if element doesn't exist
             const startIndex = (this.currentPage - 1) * pageSize;
             const endIndex = pageSize === -1 ? ordersToDisplay.length : startIndex + pageSize;
             const paginatedOrders = pageSize === -1 ? 
@@ -318,6 +349,10 @@ export class ViewOrders extends BaseComponent {
 
             // Update the table
             const tbody = this.container.querySelector('tbody');
+            if (!tbody) {
+                this.debug('No tbody found, skipping table update');
+                return;
+            }
             tbody.innerHTML = '';
             
             for (const order of paginatedOrders) {
@@ -331,7 +366,7 @@ export class ViewOrders extends BaseComponent {
             if (paginatedOrders.length === 0) {
                 tbody.innerHTML = `
                     <tr class="empty-message">
-                        <td colspan="8" class="no-orders-message">
+                        <td colspan="7" class="no-orders-message">
                             <div class="placeholder-text">
                                 ${showOnlyActive ? 
                                     'No fillable orders found' : 
@@ -361,6 +396,16 @@ export class ViewOrders extends BaseComponent {
     }
 
     async setupTable() {
+        // Prevent multiple table setups
+        if (this._tableSetup) {
+            this.debug('Table already setup, skipping...');
+            return;
+        }
+        this._tableSetup = true;
+        
+        // Clear existing content to prevent duplicates
+        this.container.innerHTML = '';
+        
         const tableContainer = this.createElement('div', 'table-container');
         
         // Main filter controls
@@ -413,13 +458,13 @@ export class ViewOrders extends BaseComponent {
             <div class="filter-row">
                 <div class="token-filters">
                     <select id="sell-token-filter" class="token-filter">
-                        <option value="">All Sell Tokens</option>
+                        <option value="">All Buy Tokens</option>
                         ${tokens.map(token => 
                             `<option value="${token.address}">${token.symbol}</option>`
                         ).join('')}
                     </select>
                     <select id="buy-token-filter" class="token-filter">
-                        <option value="">All Buy Tokens</option>
+                        <option value="">All Sell Tokens</option>
                         ${tokens.map(token => 
                             `<option value="${token.address}">${token.symbol}</option>`
                         ).join('')}
@@ -462,22 +507,14 @@ export class ViewOrders extends BaseComponent {
             <tr>
                 <th>ID</th>
                 <th>Buy</th>
-                <th>Amount</th>
                 <th>Sell</th>
-                <th>Amount</th>
                 <th>
                     Deal
-                    <span class="info-icon" title="Deal = Price × Market Rate
+                    <span class="info-icon" title="Deal = Buy Value / Sell Value
                     
-For Sellers:
 • Higher deal number is better
-• Deal > 1: Getting more than market value
-• Deal < 1: Getting less than market value
-
-For Buyers:
-• Lower deal number is better
-• Deal > 1: Paying more than market value
-• Deal < 1: Paying less than market value">ⓘ</span>
+• Deal > 1: better deal based on market prices
+• Deal < 1: worse deal based on market prices">ⓘ</span>
                 </th>
                 <th>Expires</th>
                 <th>Status</th>
@@ -495,6 +532,7 @@ For Buyers:
                 <div class="refresh-container">
                     <button id="refresh-prices-btn" class="refresh-prices-button">↻ Refresh Prices</button>
                     <span class="refresh-status"></span>
+                    <span class="last-updated" id="last-updated-timestamp"></span>
                 </div>
 
                 <div class="pagination-controls">
@@ -512,6 +550,10 @@ For Buyers:
         // Setup refresh button functionality
         const refreshButton = bottomControls.querySelector('#refresh-prices-btn');
         const statusIndicator = bottomControls.querySelector('.refresh-status');
+        const lastUpdatedElement = bottomControls.querySelector('#last-updated-timestamp');
+        
+        // Initialize last updated timestamp
+        this.updateLastUpdatedTimestamp(lastUpdatedElement);
         
         let refreshTimeout;
         refreshButton.addEventListener('click', async () => {
@@ -527,6 +569,8 @@ For Buyers:
                 if (result.success) {
                     statusIndicator.className = 'refresh-status success';
                     statusIndicator.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                    // Update timestamp after successful refresh
+                    this.updateLastUpdatedTimestamp(lastUpdatedElement);
                     await this.refreshOrdersView();
                 } else {
                     statusIndicator.className = 'refresh-status error';
@@ -646,6 +690,20 @@ For Buyers:
         try {
             if (!this.provider) {
                 throw new Error('MetaMask is not installed. Please install MetaMask to take orders.');
+            }
+
+            // Check if wallet is connected and has an account
+            const connectedAccount = walletManager.getAccount();
+            if (!connectedAccount) {
+                throw new Error('Please sign in to fill order');
+            }
+
+            // Additional check to ensure signer is properly connected
+            try {
+                const signer = this.provider.getSigner();
+                await signer.getAddress(); // This will throw if not properly connected
+            } catch (error) {
+                throw new Error('Please sign in to fill order');
             }
 
             if (button) {
@@ -785,12 +843,8 @@ For Buyers:
         } catch (error) {
             this.debug('Fill order error details:', error);
             
-            // Handle specific error cases
-            if (error.code === 4001) {
-                this.showError('Transaction rejected by user');
-            } else {
-                this.showError(this.getReadableError(error));
-            }
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'fill order');
         } finally {
             if (button) {
                 button.disabled = false;
@@ -826,6 +880,12 @@ For Buyers:
             case -32603:
                 return 'Transaction would fail. Check order status and approvals.';
             case 'UNPREDICTABLE_GAS_LIMIT':
+                // For contract revert errors, extract the actual revert message
+                if (error.error?.data?.message) {
+                    return error.error.data.message;
+                } else if (error.reason) {
+                    return error.reason;
+                }
                 return 'Error estimating gas. The transaction may fail.';
             default:
                 return error.reason || error.message || 'Unknown error occurred';
@@ -833,11 +893,21 @@ For Buyers:
     }
 
     cleanup() {
+        // Remove wallet listener
+        if (this.walletListener) {
+            walletManager.removeListener(this.walletListener);
+            this.walletListener = null;
+        }
+        
         // Only clear timers, keep table structure
         if (this.expiryTimers) {
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
             this.expiryTimers.clear();
         }
+        
+        // Reset table setup flag to allow re-initialization if needed
+        this._tableSetup = false;
+        
         // Don't clear the table
     }
 
@@ -845,20 +915,31 @@ For Buyers:
         try {
             const tr = document.createElement('tr');
             tr.dataset.orderId = order.id.toString();
-            tr.dataset.timestamp = order.timings.createdAt.toString();
+            tr.dataset.timestamp = order.timings?.createdAt?.toString() || '0';
 
             // Get token info from WebSocket cache
             const sellTokenInfo = await window.webSocket.getTokenInfo(order.sellToken);
             const buyTokenInfo = await window.webSocket.getTokenInfo(order.buyToken);
-
+            const deal = order.dealMetrics?.deal > 0 ? 1 / order.dealMetrics?.deal : undefined; // view as buyer/taker
             // Use pre-formatted values from dealMetrics
             const { 
                 formattedSellAmount,
                 formattedBuyAmount,
-                deal,
                 sellTokenUsdPrice,
                 buyTokenUsdPrice 
             } = order.dealMetrics || {};
+
+            // Fallback amount formatting if dealMetrics not yet populated
+            const safeFormattedSellAmount = typeof formattedSellAmount !== 'undefined'
+                ? formattedSellAmount
+                : (order?.sellAmount && sellTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.sellAmount, sellTokenInfo.decimals)
+                    : '0');
+            const safeFormattedBuyAmount = typeof formattedBuyAmount !== 'undefined'
+                ? formattedBuyAmount
+                : (order?.buyAmount && buyTokenInfo?.decimals != null
+                    ? ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals)
+                    : '0');
 
             // Format USD prices
             const formatUsdPrice = (price) => {
@@ -868,39 +949,78 @@ For Buyers:
                 return `$${price.toFixed(4)}`;
             };
 
-            // Add price-estimate class if using default price
-            const sellPriceClass = sellTokenUsdPrice ? '' : 'price-estimate';
-            const buyPriceClass = buyTokenUsdPrice ? '' : 'price-estimate';
+            // Calculate total values (price × amount)
+            const calculateTotalValue = (price, amount) => {
+                if (!price || !amount) return 'N/A';
+                const total = price * parseFloat(amount);
+                if (total >= 100) return `$${total.toFixed(0)}`;
+                if (total >= 1) return `$${total.toFixed(2)}`;
+                return `$${total.toFixed(4)}`;
+            };
+
+            // Determine prices with fallback to current pricing service map
+            const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
+                ? sellTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.sellToken) : undefined);
+            const resolvedBuyPrice = typeof buyTokenUsdPrice !== 'undefined' 
+                ? buyTokenUsdPrice 
+                : (window.pricingService ? window.pricingService.getPrice(order.buyToken) : undefined);
+
+            // Mark as estimate if not explicitly present in pricing map
+            const sellPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.sellToken)) ? 'price-estimate' : '';
+            const buyPriceClass = (window.pricingService && window.pricingService.isPriceEstimated(order.buyToken)) ? 'price-estimate' : '';
 
             const orderStatus = window.webSocket.getOrderStatus(order);
-            const expiryText = this.formatTimeDiff(order.timings.expiresAt - Math.floor(Date.now() / 1000));
+            const expiryEpoch = order?.timings?.expiresAt;
+            const expiryText = orderStatus === 'Active' && typeof expiryEpoch === 'number' 
+                ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
+                : '';
 
             tr.innerHTML = `
                 <td>${order.id}</td>
                 <td>
                     <div class="token-info">
-                        ${this.getTokenIcon(sellTokenInfo)}
+                        <div class="token-icon">
+                            <div class="loading-spinner"></div>
+                        </div>
                         <div class="token-details">
-                            <span>${sellTokenInfo.symbol}</span>
-                            <span class="token-price ${sellPriceClass}">${formatUsdPrice(sellTokenUsdPrice)}</span>
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${sellTokenInfo.symbol}</span>
+                                <span class="token-price ${sellPriceClass}">${calculateTotalValue(resolvedSellPrice, safeFormattedSellAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedSellAmount}</span>
                         </div>
                     </div>
                 </td>
-                <td>${formattedSellAmount}</td>
                 <td>
                     <div class="token-info">
-                        ${this.getTokenIcon(buyTokenInfo)}
+                        <div class="token-icon">
+                            <div class="loading-spinner"></div>
+                        </div>
                         <div class="token-details">
-                            <span>${buyTokenInfo.symbol}</span>
-                            <span class="token-price ${buyPriceClass}">${formatUsdPrice(buyTokenUsdPrice)}</span>
+                            <div class="token-symbol-row">
+                                <span class="token-symbol">${buyTokenInfo.symbol}</span>
+                                <span class="token-price ${buyPriceClass}">${calculateTotalValue(resolvedBuyPrice, safeFormattedBuyAmount)}</span>
+                            </div>
+                            <span class="token-amount">${safeFormattedBuyAmount}</span>
                         </div>
                     </div>
                 </td>
-                <td>${formattedBuyAmount}</td>
-                <td>${(deal || 0).toFixed(6)}</td>
+                <td>${deal !== undefined ? (deal || 0).toFixed(6) : 'N/A'}</td>
                 <td>${expiryText}</td>
                 <td class="order-status">${orderStatus}</td>
                 <td class="action-column"></td>`;
+
+            // Render token icons asynchronously (target explicit columns)
+            const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
+            const buyTokenIconContainer = tr.querySelector('td:nth-child(3) .token-icon');
+            
+            if (sellTokenIconContainer) {
+                this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
+            }
+            if (buyTokenIconContainer) {
+                this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
+            }
 
             // Start expiry timer for this row
             this.startExpiryTimer(tr);
@@ -960,33 +1080,46 @@ For Buyers:
         }
 
         const updateExpiryAndButton = async () => {
-            const expiresCell = row.querySelector('td:nth-child(7)');
+            const expiresCell = row.querySelector('td:nth-child(5)');
+            const statusCell = row.querySelector('.order-status');
             const actionCell = row.querySelector('.action-column');
-            if (!expiresCell || !actionCell) return;
+            if (!expiresCell || !statusCell || !actionCell) return;
 
             const orderId = row.dataset.orderId;
             const order = window.webSocket.orderCache.get(Number(orderId));
             if (!order) return;
 
             const currentTime = Math.floor(Date.now() / 1000);
-            const isExpired = currentTime > order.timings.expiresAt;
-            const timeDiff = order.timings.expiresAt - currentTime;
+            const expiresAt = order?.timings?.expiresAt;
+            const isExpired = typeof expiresAt === 'number' ? currentTime > expiresAt : false;
+            const timeDiff = typeof expiresAt === 'number' ? expiresAt - currentTime : 0;
             const currentAccount = walletManager.getAccount()?.toLowerCase();
             const isUserOrder = order.maker?.toLowerCase() === currentAccount;
 
-            // Update expiry text
-            const newExpiryText = this.formatTimeDiff(timeDiff);
+            // Update expiry text - only calculate for active orders
+            const orderStatusForExpiry = window.webSocket.getOrderStatus(order);
+            const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
 
-            // Update action column content
+            // Update status column to show current status
+            const currentStatus = window.webSocket.getOrderStatus(order);
+            const statusMainElement = statusCell.querySelector('.status-main');
+            if (statusMainElement && statusMainElement.textContent !== currentStatus) {
+                statusMainElement.textContent = currentStatus;
+                this.debug(`Updated status for order ${order.id}: ${currentStatus}`);
+            } else if (!statusMainElement && statusCell.textContent !== currentStatus) {
+                // Fallback for old structure
+                statusCell.textContent = currentStatus;
+                this.debug(`Updated status for order ${order.id}: ${currentStatus}`);
+            }
+
+            // Update action column content - no status text here, only actions
             if (isUserOrder) {
-                actionCell.innerHTML = '<span class="your-order">Your Order</span>';
-            } else if (isExpired) {
-                actionCell.innerHTML = '<span class="expired-order">Expired</span>';
+                actionCell.innerHTML = '<span class="mine-label">Mine</span>';
             } else if (!isUserOrder && window.webSocket.canFillOrder(order, currentAccount)) {
-                actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill Order</button>`;
+                actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill</button>`;
                 const fillButton = actionCell.querySelector('.fill-button');
                 if (fillButton) {
                     fillButton.addEventListener('click', () => this.fillOrder(order.id));
@@ -1029,18 +1162,16 @@ For Buyers:
     }
 
     formatTimeDiff(seconds) {
-        const days = Math.floor(Math.abs(seconds) / 86400);
-        const hours = Math.floor((Math.abs(seconds) % 86400) / 3600);
-        const minutes = Math.floor((Math.abs(seconds) % 3600) / 60);
-        
-        const prefix = seconds < 0 ? '-' : '';
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
         
         if (days > 0) {
-            return `${prefix}${days}D ${hours}H ${minutes}M`;
+            return `${days}D ${hours}H ${minutes}M`;
         } else if (hours > 0) {
-            return `${prefix}${hours}H ${minutes}M`;
+            return `${hours}H ${minutes}M`;
         } else {
-            return `${prefix}${minutes}M`;
+            return `${minutes}M`;
         }
     }
 }

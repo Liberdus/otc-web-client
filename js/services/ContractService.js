@@ -2,15 +2,14 @@ import { ethers } from 'ethers';
 import { getNetworkConfig, walletManager } from '../config.js';
 import { createLogger } from './LogService.js';
 
-// Initialize logger
-const logger = createLogger('CONTRACT_SERVICE');
-const debug = logger.debug.bind(logger);
-const error = logger.error.bind(logger);
-const warn = logger.warn.bind(logger);
-
 class ContractService {
     constructor() {
         this.initialized = false;
+        // Initialize logger per instance
+        const logger = createLogger('CONTRACT_SERVICE');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
     }
 
     /**
@@ -18,7 +17,7 @@ class ContractService {
      */
     initialize() {
         this.initialized = true;
-        debug('Contract service initialized');
+        this.debug('Contract service initialized');
     }
 
     /**
@@ -56,13 +55,38 @@ class ContractService {
     async getAllowedTokens() {
         try {
             const contract = this.getContract();
-            debug('Fetching allowed tokens from contract...');
+            this.debug('Fetching allowed tokens from contract...');
             const allowedTokens = await contract.getAllowedTokens();
-            debug(`Found ${allowedTokens.length} allowed tokens`);
+            this.debug(`Found ${allowedTokens.length} allowed tokens`);
             
             return allowedTokens;
         } catch (error) {
-            error('Failed to get allowed tokens:', error);
+            // If WS provider is rate limited, try read-only HTTP fallbacks
+            const isRateLimit = error?.code === -32005 || /rate limit/i.test(error?.message || '');
+            if (isRateLimit) {
+                this.warn('WS rate limited while fetching allowed tokens, retrying via HTTP provider...');
+                try {
+                    const net = getNetworkConfig();
+                    const rpcUrls = [net.rpcUrl, ...(net.fallbackRpcUrls || [])].filter(Boolean);
+                    for (const url of rpcUrls) {
+                        try {
+                            this.debug(`Trying HTTP provider: ${url}`);
+                            const httpProvider = new ethers.providers.JsonRpcProvider(url);
+                            const httpContract = new ethers.Contract(net.contractAddress, net.contractABI, httpProvider);
+                            const allowedTokens = await httpContract.getAllowedTokens();
+                            this.debug(`HTTP provider succeeded. Found ${allowedTokens.length} allowed tokens`);
+                            return allowedTokens;
+                        } catch (e) {
+                            const isRl = e?.code === -32005 || /rate limit/i.test(e?.message || '');
+                            this.warn(`HTTP provider failed (${url})${isRl ? ' due to rate limit' : ''}`);
+                            continue;
+                        }
+                    }
+                } catch (fallbackErr) {
+                    this.warn('HTTP fallback attempt failed:', fallbackErr);
+                }
+            }
+            this.error('Failed to get allowed tokens:', error);
             throw new Error(`Failed to get allowed tokens: ${error.message}`);
         }
     }
@@ -74,13 +98,13 @@ class ContractService {
     async getAllowedTokensCount() {
         try {
             const contract = this.getContract();
-            debug('Fetching allowed tokens count...');
+            this.debug('Fetching allowed tokens count...');
             const count = await contract.getAllowedTokensCount();
-            debug(`Allowed tokens count: ${count}`);
+            this.debug(`Allowed tokens count: ${count}`);
             
             return count.toNumber();
         } catch (error) {
-            error('Failed to get allowed tokens count:', error);
+            this.error('Failed to get allowed tokens count:', error);
             throw new Error(`Failed to get allowed tokens count: ${error.message}`);
         }
     }
@@ -98,13 +122,13 @@ class ContractService {
                 return false;
             }
 
-            debug(`Checking if token ${tokenAddress} is allowed...`);
+            this.debug(`Checking if token ${tokenAddress} is allowed...`);
             const isAllowed = await contract.allowedTokens(tokenAddress);
-            debug(`Token ${tokenAddress} allowed: ${isAllowed}`);
+            this.debug(`Token ${tokenAddress} allowed: ${isAllowed}`);
             
             return isAllowed;
         } catch (err) {
-            error('Failed to check if token is allowed:', err);
+            this.error('Failed to check if token is allowed:', err);
             return false;
         }
     }
@@ -119,14 +143,14 @@ class ContractService {
             const address = await walletManager.getCurrentAddress();
             
             if (address) {
-                debug(`User address: ${address}`);
+                this.debug(`User address: ${address}`);
                 return address;
             }
             
-            debug('No wallet address available - user not connected');
+            this.debug('No wallet address available - user not connected');
             return null;
         } catch (err) {
-            error('Failed to get user address:', err);
+            this.error('Failed to get user address:', err);
             return null;
         }
     }
@@ -138,7 +162,7 @@ class ContractService {
     async validateContract() {
         try {
             const contract = this.getContract();
-            debug('Validating contract functions...');
+            this.debug('Validating contract functions...');
             
             // Check if required functions exist
             const hasGetAllowedTokens = typeof contract.getAllowedTokens === 'function';
@@ -146,17 +170,17 @@ class ContractService {
             const hasAllowedTokens = typeof contract.allowedTokens === 'function';
 
             if (!hasGetAllowedTokens || !hasGetAllowedTokensCount || !hasAllowedTokens) {
-                error('Contract missing required functions');
+                this.error('Contract missing required functions');
                 return false;
             }
 
             // Test the functions
             await this.getAllowedTokensCount();
-            debug('Contract validation successful');
+            this.debug('Contract validation successful');
             
             return true;
         } catch (err) {
-            error('Contract validation failed:', err);
+            this.error('Contract validation failed:', err);
             return false;
         }
     }
@@ -167,9 +191,8 @@ class ContractService {
      */
     async getContractInfo() {
         try {
-            if (!this.contract) {
-                throw new Error('Contract not initialized');
-            }
+            // Ensure contract is available
+            this.getContract();
 
             const networkConfig = getNetworkConfig();
             const allowedTokensCount = await this.getAllowedTokensCount();
@@ -183,7 +206,7 @@ class ContractService {
                 hasMoreTokens: allowedTokens.length > 5
             };
         } catch (err) {
-            error('Failed to get contract info:', err);
+            this.error('Failed to get contract info:', err);
             throw err;
         }
     }

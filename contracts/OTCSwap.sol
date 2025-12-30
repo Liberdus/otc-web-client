@@ -9,9 +9,9 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 contract OTCSwap is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
-    uint256 public constant ORDER_EXPIRY = 7 minutes;
-    uint256 public constant GRACE_PERIOD = 7 minutes;
-    uint256 public constant MAX_RETRY_ATTEMPTS = 10;
+    uint256 public constant ORDER_EXPIRY = 1 minutes;
+    uint256 public constant GRACE_PERIOD = 1 minutes;
+    uint256 public constant MAX_RETRY_ATTEMPTS = 3;
 
     address public feeToken;
     uint256 public orderCreationFeeAmount;
@@ -19,6 +19,9 @@ contract OTCSwap is ReentrancyGuard, Ownable {
     uint256 public firstOrderId;
     uint256 public nextOrderId;
     bool public isDisabled;
+    
+    mapping(address => bool) public allowedTokens;
+    address[] public allowedTokensList;
 
     enum OrderStatus {
         Active,     // Order is active and can be filled
@@ -126,17 +129,33 @@ contract OTCSwap is ReentrancyGuard, Ownable {
         uint256 timestamp
     );
 
+    event AllowedTokensUpdated(
+        address[] tokens,
+        bool[] allowed,
+        uint256 timestamp
+    );
+
     modifier validOrder(uint256 orderId) {
         require(orders[orderId].maker != address(0), "Order does not exist");
         require(orders[orderId].status == OrderStatus.Active, "Order is not active");
         _;
     }
 
-    constructor(address _feeToken, uint256 _feeAmount) Ownable(msg.sender) {
+    constructor(address _feeToken, uint256 _feeAmount, address[] memory _allowedTokens) Ownable(msg.sender) {
         require(_feeToken != address(0), "Invalid fee token");
         require(_feeAmount > 0, "Invalid fee amount");
+        require(_allowedTokens.length > 0, "Must specify allowed tokens");
+        
         feeToken = _feeToken;
         orderCreationFeeAmount = _feeAmount;
+        
+        // Initialize allowed tokens
+        for (uint256 i = 0; i < _allowedTokens.length; i++) {
+            require(_allowedTokens[i] != address(0), "Invalid token address");
+            allowedTokens[_allowedTokens[i]] = true;
+            allowedTokensList.push(_allowedTokens[i]);
+        }
+        
         emit FeeConfigUpdated(_feeToken, _feeAmount, block.timestamp);
     }
 
@@ -154,6 +173,45 @@ contract OTCSwap is ReentrancyGuard, Ownable {
         emit ContractDisabled(msg.sender, block.timestamp);
     }
 
+    function updateAllowedTokens(address[] memory tokens, bool[] memory allowed) external onlyOwner {
+        require(tokens.length == allowed.length, "Arrays length mismatch");
+        require(tokens.length > 0, "Empty arrays");
+        
+        for (uint256 i = 0; i < tokens.length; i++) {
+            require(tokens[i] != address(0), "Invalid token address");
+            
+            if (allowed[i] && !allowedTokens[tokens[i]]) {
+                // Adding new token
+                allowedTokens[tokens[i]] = true;
+                allowedTokensList.push(tokens[i]);
+            } else if (!allowed[i] && allowedTokens[tokens[i]]) {
+                // Removing existing token
+                allowedTokens[tokens[i]] = false;
+                _removeFromAllowedTokensList(tokens[i]);
+            }
+        }
+        
+        emit AllowedTokensUpdated(tokens, allowed, block.timestamp);
+    }
+
+    function _removeFromAllowedTokensList(address tokenToRemove) internal {
+        for (uint256 i = 0; i < allowedTokensList.length; i++) {
+            if (allowedTokensList[i] == tokenToRemove) {
+                allowedTokensList[i] = allowedTokensList[allowedTokensList.length - 1];
+                allowedTokensList.pop();
+                break;
+            }
+        }
+    }
+
+    function getAllowedTokens() external view returns (address[] memory) {
+        return allowedTokensList;
+    }
+
+    function getAllowedTokensCount() external view returns (uint256) {
+        return allowedTokensList.length;
+    }
+
     function createOrder(
         address taker,
         address sellToken,
@@ -167,6 +225,8 @@ contract OTCSwap is ReentrancyGuard, Ownable {
         require(sellAmount > 0, "Invalid sell amount");
         require(buyAmount > 0, "Invalid buy amount");
         require(sellToken != buyToken, "Cannot swap same token");
+        require(allowedTokens[sellToken], "Sell token not allowed");
+        require(allowedTokens[buyToken], "Buy token not allowed");
 
         require(
             IERC20(sellToken).balanceOf(msg.sender) >= sellAmount,

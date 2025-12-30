@@ -1,18 +1,27 @@
 import { BaseComponent } from './BaseComponent.js';
 import { ethers } from 'ethers';
 import { getNetworkConfig, walletManager } from '../config.js';
+import { setVisibility } from '../utils/ui.js';
 import { erc20Abi } from '../abi/erc20.js';
-import { getContractAllowedTokens, getAllWalletTokens } from '../utils/contractTokens.js';
+import { getContractAllowedTokens, getAllWalletTokens, clearTokenCaches } from '../utils/contractTokens.js';
 import { contractService } from '../services/ContractService.js';
 import { createLogger } from '../services/LogService.js';
 import { validateSellBalance } from '../utils/balanceValidation.js';
+import { tokenIconService } from '../services/TokenIconService.js';
+import { generateTokenIconHTML, getFallbackIconData } from '../utils/tokenIcons.js';
+import { handleTransactionError } from '../utils/ui.js';
 
 export class CreateOrder extends BaseComponent {
+    // Liberdus token address constant
+    static LIBERDUS_ADDRESS = '0x693ed886545970f0a3adf8c59af5ccdb6ddf0a76';
+    
     constructor() {
         super('create-order');
         this.contract = null;
         this.provider = null;
         this.initialized = false;
+        this.isRendered = false;
+        this.hasLoadedData = false;
         this.tokenCache = new Map();
         this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
         this.isSubmitting = false;
@@ -20,6 +29,8 @@ export class CreateOrder extends BaseComponent {
         this.sellToken = null;
         this.buyToken = null;
         this.tokenSelectorListeners = {};  // Store listeners to prevent duplicates
+        this.boundWindowClickHandler = null;
+        this.amountInputListeners = {};
         
         // Initialize logger
         const logger = createLogger('CREATE_ORDER');
@@ -39,6 +50,20 @@ export class CreateOrder extends BaseComponent {
             clearTimeout(timeout);
             timeout = setTimeout(later, wait);
         };
+    }
+
+    // Method to reset component state for account switching
+    resetState() {
+        this.debug('Resetting CreateOrder component state...');
+        this.initialized = false;
+        this.initializing = false;
+        this.hasLoadedData = false;
+        this.tokens = [];
+        // this.sellToken = null;  // Commented out - not resetting form
+        // this.buyToken = null;   // Commented out - not resetting form
+        this.feeToken = null;
+        this.tokenCache.clear();
+        this.resetBalanceDisplays();
     }
 
     async initializeContract() {
@@ -78,19 +103,35 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    async initialize(readOnlyMode = true) {
+    async initialize(readOnlyMode = true, options = {}) {
         if (this.initializing || this.initialized) {
             this.debug('Already initializing or initialized, skipping...');
             return;
         }
         this.initializing = true;
         
+        // Reset balance displays when re-initializing
+        this.resetBalanceDisplays();
+        
         try {
             this.debug('Starting initialization...');
             
-            // Render the HTML first
+            // Render the HTML once
             const container = document.getElementById('create-order');
-            container.innerHTML = this.render();
+            if (!this.isRendered) {
+                container.innerHTML = this.render();
+                this.isRendered = true;
+
+                // Initialize initial visibility state for static elements
+                const sellUsd = document.getElementById('sellAmountUSD');
+                const buyUsd = document.getElementById('buyAmountUSD');
+                const sellBal = document.getElementById('sellTokenBalanceDisplay');
+                const buyBal = document.getElementById('buyTokenBalanceDisplay');
+                setVisibility(sellUsd, false);
+                setVisibility(buyUsd, false);
+                setVisibility(sellBal, false);
+                setVisibility(buyBal, false);
+            }
             
             // Handle read-only mode first, before any other initialization
             if (readOnlyMode) {
@@ -106,21 +147,9 @@ export class CreateOrder extends BaseComponent {
 
             // Rest of the initialization code for connected mode...
             if (window.webSocket) {
-                window.webSocket.subscribe("OrderCreated", (order) => {
-                    this.debug('New order created:', order);
-                    // Use refreshActiveComponent instead of loadOrders
-                    if (window.app?.refreshActiveComponent) {
-                        window.app.refreshActiveComponent();
-                    }
-                });
-
-                window.webSocket.subscribe("ordersUpdated", (orders) => {
-                    this.debug('Orders updated:', orders);
-                    // Use refreshActiveComponent instead of loadOrders
-                    if (window.app?.refreshActiveComponent) {
-                        window.app.refreshActiveComponent();
-                    }
-                });
+                // Remove all order update subscriptions - CreateOrder shouldn't refresh itself
+                // when orders are created or updated, only other components should refresh
+                // CreateOrder only creates orders, it doesn't need to listen to order events
             }
 
             // Wait for WebSocket to be fully initialized
@@ -156,9 +185,10 @@ export class CreateOrder extends BaseComponent {
             // Enable form when wallet is connected
             this.setConnectedMode();
             
-            // Setup UI immediately
-            this.populateTokenDropdowns();
-            this.setupTokenInputListeners();
+            // Setup UI only on first render to preserve user input on tab switches
+            if (!this.hasLoadedData) {
+                this.populateTokenDropdowns();
+            }
             this.setupCreateOrderListener();
             
             // Wait for contract to be ready
@@ -171,6 +201,7 @@ export class CreateOrder extends BaseComponent {
             ]);
 
             this.updateFeeDisplay();
+            this.hasLoadedData = true;
             
             // Initialize token selectors
             this.initializeTokenSelectors();
@@ -274,7 +305,7 @@ export class CreateOrder extends BaseComponent {
     }
 
     setReadOnlyMode() {
-        console.log('[CreateOrder] Setting read-only mode');
+        this.debug('Setting read-only mode');
         const createOrderBtn = document.getElementById('createOrderBtn');
         const orderCreationFee = document.getElementById('orderCreationFee');
         
@@ -327,74 +358,78 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    async updateTokenBalance(tokenAddress, elementId) {
+    /**
+     * Update the new balance display elements outside the token selectors
+     * @param {string} type - 'sell' or 'buy'
+     * @param {string} formattedBalance - Formatted balance amount
+     * @param {string} balanceUSD - USD equivalent of the balance
+     */
+    updateBalanceDisplay(type, formattedBalance, balanceUSD) {
         try {
-            const balanceElement = document.getElementById(elementId);
-            if (!tokenAddress || !ethers.utils.isAddress(tokenAddress)) {
-                balanceElement.textContent = '';
-                return;
-            }
-
-            const tokenDetails = await this.getTokenDetails([tokenAddress]);
-            if (tokenDetails && tokenDetails[0]?.symbol) {
-                const token = tokenDetails[0];
-                const formattedBalance = parseFloat(token.formattedBalance).toFixed(4);
+            const balanceDisplay = document.getElementById(`${type}TokenBalanceDisplay`);
+            const balanceAmount = document.getElementById(`${type}TokenBalanceAmount`);
+            const balanceUSDElement = document.getElementById(`${type}TokenBalanceUSD`);
+            
+            if (balanceDisplay && balanceAmount && balanceUSDElement) {
+                // Update the balance values
+                balanceAmount.textContent = formattedBalance;
+                balanceUSDElement.textContent = `• $${balanceUSD}`;
                 
-                // Update token selector button
-                const type = elementId.includes('sell') ? 'sell' : 'buy';
-                const selector = document.getElementById(`${type}TokenSelector`);
-                selector.innerHTML = `
-                    <span class="token-selector-content">
-                        <div class="token-icon small">
-                            ${this.getTokenIcon(token)}
-                        </div>
-                        <span>${token.symbol}</span>
-                        <svg width="12" height="12" viewBox="0 0 12 12">
-                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        </svg>
-                    </span>
-                `;
+                // Show the balance display without layout shift
+                setVisibility(balanceDisplay, true);
                 
-                // Update balance display
-                balanceElement.innerHTML = `Balance: ${formattedBalance}`;
+                // Update ARIA label with current balance
+                const balanceBtn = document.getElementById(`${type}TokenBalanceBtn`);
+                if (balanceBtn) {
+                    balanceBtn.setAttribute('aria-label', `Click to fill ${type} amount with available balance: ${formattedBalance}`);
+                }
+                
+                this.debug(`Updated ${type} balance display: ${formattedBalance} ($${balanceUSD})`);
             }
         } catch (error) {
-            console.error(`Error updating token balance:`, error);
-            document.getElementById(elementId).textContent = 'Error loading balance';
+            this.error(`Error updating ${type} balance display:`, error);
         }
     }
 
-    setupTokenInputListeners() {
-        const sellTokenInput = document.getElementById('sellToken');
-        const buyTokenInput = document.getElementById('buyToken');
-
-        const updateBalance = async (input, balanceId) => {
-            const tokenAddress = input.value.trim();
-            if (ethers.utils.isAddress(tokenAddress)) {
-                const container = input.parentElement;
-                const existingTooltip = container.querySelector('.token-address-tooltip');
-                if (existingTooltip) {
-                    existingTooltip.remove();
-                }
-                
-                const tooltip = document.createElement('div');
-                tooltip.className = 'token-address-tooltip';
-                tooltip.innerHTML = `
-                    Verify token at: 
-                    <a href="${this.getExplorerUrl(tokenAddress)}" 
-                       target="_blank"
-                       style="color: #fff; text-decoration: underline;">
-                       ${tokenAddress.slice(0, 6)}...${tokenAddress.slice(-4)}
-                    </a>
-                `;
-                container.appendChild(tooltip);
+    /**
+     * Hide balance display when no token is selected
+     * @param {string} type - 'sell' or 'buy'
+     */
+    hideBalanceDisplay(type) {
+        try {
+            const balanceDisplay = document.getElementById(`${type}TokenBalanceDisplay`);
+            if (balanceDisplay) {
+                setVisibility(balanceDisplay, false);
+                this.debug(`Hidden ${type} balance display`);
             }
-            await this.updateTokenBalance(tokenAddress, balanceId);
-        };
-
-        sellTokenInput.addEventListener('change', () => updateBalance(sellTokenInput, 'sellTokenBalance'));
-        buyTokenInput.addEventListener('change', () => updateBalance(buyTokenInput, 'buyTokenBalance'));
+        } catch (error) {
+            this.error(`Error hiding ${type} balance display:`, error);
+        }
     }
+
+    /**
+     * Reset all balance displays to initial state
+     */
+    resetBalanceDisplays() {
+        try {
+            ['sell', 'buy'].forEach(type => {
+                this.hideBalanceDisplay(type);
+                
+                // Reset balance values to default
+                const balanceAmount = document.getElementById(`${type}TokenBalanceAmount`);
+                const balanceUSD = document.getElementById(`${type}TokenBalanceUSD`);
+                
+                if (balanceAmount) balanceAmount.textContent = '0.00';
+                if (balanceUSD) balanceUSD.textContent = '$0.00';
+            });
+            
+            this.debug('Reset all balance displays to initial state');
+        } catch (error) {
+            this.error('Error resetting balance displays:', error);
+        }
+    }
+
+
 
     setupCreateOrderListener() {
         const createOrderBtn = document.getElementById('createOrderBtn');
@@ -407,35 +442,42 @@ export class CreateOrder extends BaseComponent {
         // Setup taker toggle functionality
         const takerToggle = document.querySelector('.taker-toggle');
         if (takerToggle) {
-            console.log('[CreateOrder] Setting up taker toggle functionality');
+            this.debug('Setting up taker toggle functionality');
             // Remove existing listeners using clone technique
             const newTakerToggle = takerToggle.cloneNode(true);
             takerToggle.parentNode.replaceChild(newTakerToggle, takerToggle);
             
             // Add click listener
-            newTakerToggle.addEventListener('click', function(e) {
-                console.log('[CreateOrder] Taker toggle clicked');
+            newTakerToggle.addEventListener('click', (e) => {
+                this.debug('Taker toggle clicked');
                 e.preventDefault();
                 e.stopPropagation();
                 
-                this.classList.toggle('active');
+                newTakerToggle.classList.toggle('active');
                 const takerInputContent = document.querySelector('.taker-input-content');
                 if (takerInputContent) {
                     takerInputContent.classList.toggle('hidden');
                 }
                 
                 // Update chevron direction
-                const chevron = this.querySelector('.chevron-down');
+                const chevron = newTakerToggle.querySelector('.chevron-down');
                 if (chevron) {
-                    if (this.classList.contains('active')) {
+                    if (newTakerToggle.classList.contains('active')) {
                         chevron.style.transform = 'rotate(180deg)';
+                        // Focus on taker address input when toggle is activated
+                        setTimeout(() => {
+                            const takerAddressInput = document.getElementById('takerAddress');
+                            if (takerAddressInput) {
+                                takerAddressInput.focus();
+                            }
+                        }, 100); // Small delay to ensure DOM is updated
                     } else {
                         chevron.style.transform = 'rotate(0deg)';
                     }
                 }
             });
         } else {
-            console.log('[CreateOrder] Taker toggle button not found');
+            this.debug('Taker toggle button not found');
         }
     }
 
@@ -493,6 +535,18 @@ export class CreateOrder extends BaseComponent {
             if (this.sellToken.address.toLowerCase() === this.buyToken.address.toLowerCase()) {
                 this.showError(`Cannot create an order with the same token (${this.sellToken.symbol}) for both buy and sell. Please select different tokens.`);
                 return;
+            }
+
+            // Validate that one of the tokens must be Liberdus (LIB) - controlled by debug flag
+            if (window.DEBUG_CONFIG?.LIBERDUS_VALIDATION) {
+                const sellTokenIsLiberdus = this.isLiberdusToken(this.sellToken.address);
+                const buyTokenIsLiberdus = this.isLiberdusToken(this.buyToken.address);
+                
+                if (!sellTokenIsLiberdus && !buyTokenIsLiberdus) {
+                    this.debug('Liberdus validation failed');
+                    this.showError('One of the tokens must be Liberdus (LIB). Please select Liberdus as either the buy or sell token.');
+                    return;
+                }
             }
 
             // Validate that both tokens are allowed in the contract
@@ -627,7 +681,29 @@ export class CreateOrder extends BaseComponent {
                     if (!tx) return; // User rejected the transaction
 
                     this.showInfo('Waiting for confirmation...');
-                    await tx.wait();
+                    
+                    // Add timeout handling for tx.wait()
+                    const waitPromise = tx.wait();
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Transaction timeout - please check your wallet')), 30000)
+                    );
+                    
+                    const receipt = await Promise.race([waitPromise, timeoutPromise]);
+                    
+                    // Verify transaction was actually successful
+                    if (!receipt || receipt.status === 0) {
+                        throw new Error('Transaction failed on-chain');
+                    }
+                    
+                    this.debug('Transaction confirmed successfully:', receipt);
+                    
+                    // After success: clear cached balances and refresh any open token modals
+                    try {
+                        clearTokenCaches();
+                        this.refreshOpenTokenModals();
+                    } catch (e) {
+                        this.debug('Post-order cache clear/refresh failed:', e);
+                    }
                     
                     // Force a sync of all orders after successful creation
                     if (window.webSocket) {
@@ -641,6 +717,18 @@ export class CreateOrder extends BaseComponent {
                     retryCount++;
                     this.debug(`Create order attempt ${retryCount} failed:`, error);
 
+                    // Handle timeout specifically
+                    if (error.message?.includes('Transaction timeout')) {
+                        this.showError('Transaction timed out. Please check your wallet and try again.');
+                        return; // Don't retry timeouts, let user try manually
+                    }
+
+                    // Handle on-chain failures
+                    if (error.message?.includes('Transaction failed on-chain')) {
+                        this.showError('Transaction failed on-chain. Please check your balance and try again.');
+                        return; // Don't retry on-chain failures
+                    }
+
                     if (retryCount <= maxRetries && 
                         (error.message?.includes('nonce') || 
                          error.message?.includes('replacement fee too low'))) {
@@ -653,43 +741,16 @@ export class CreateOrder extends BaseComponent {
             }
 
             this.showSuccess('Order created successfully!');
-            this.resetForm();
+            // this.resetForm();  // Commented out - not resetting form
             
             // Reload orders if needed
             if (window.app?.loadOrders) {
                 window.app.loadOrders();
             }
-
-            // Clear form inputs
-            document.getElementById('sellAmount').value = '';
-            document.getElementById('buyAmount').value = '';
-            document.getElementById('takerAddress').value = '';
-            
-            // Reset token selectors if needed
-            this.sellToken = null;
-            this.buyToken = null;
-            
-            // Update UI to reflect cleared state
-            const sellTokenSelector = document.getElementById('sellTokenSelector');
-            const buyTokenSelector = document.getElementById('buyTokenSelector');
-            
-            if (sellTokenSelector) {
-                sellTokenSelector.innerHTML = 'Select Token';
-            }
-            if (buyTokenSelector) {
-                buyTokenSelector.innerHTML = 'Select Token';
-            }
-            
-            // Reset any other UI elements
-            this.updateCreateButtonState();
-            
-            // Show success message
-            this.showSuccess('Order created successfully!');
-
         } catch (error) {
             this.debug('Create order error:', error);
-            const userMessage = this.getUserFriendlyError(error);
-            this.showError(userMessage);
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'order creation');
         } finally {
             this.isSubmitting = false;
             createOrderBtn.disabled = false;
@@ -722,6 +783,12 @@ export class CreateOrder extends BaseComponent {
             case -32603:
                 return 'Network error. Please check your connection';
             case 'UNPREDICTABLE_GAS_LIMIT':
+                // For contract revert errors, extract the actual revert message
+                if (error.error?.data?.message) {
+                    return error.error.data.message;
+                } else if (error.reason) {
+                    return error.reason;
+                }
                 return 'Error estimating gas. The transaction may fail';
             default:
                 return error.reason || error.message || 'Error creating order';
@@ -730,57 +797,54 @@ export class CreateOrder extends BaseComponent {
 
     resetForm() {
         // Clear token inputs and amounts
-        document.getElementById('sellToken').value = '';
-        document.getElementById('sellAmount').value = '';
-        document.getElementById('buyToken').value = '';
-        document.getElementById('buyAmount').value = '';
+        // document.getElementById('sellToken').value = '';  // Commented out - not resetting form
+        // document.getElementById('sellAmount').value = '';  // Commented out - not resetting form
+        // document.getElementById('buyToken').value = '';  // Commented out - not resetting form
+        // document.getElementById('buyAmount').value = '';  // Commented out - not resetting form
         
         // Clear taker address input
-        const takerInput = document.getElementById('takerAddress');
-        if (takerInput) {
-            takerInput.value = '';
-        }
+        // const takerInput = document.getElementById('takerAddress');  // Commented out - not resetting form
+        // if (takerInput) {  // Commented out - not resetting form
+        //     takerInput.value = '';  // Commented out - not resetting form
+        // }  // Commented out - not resetting form
         
-        // Clear token balances
-        const sellTokenBalance = document.getElementById('sellTokenBalance');
-        const buyTokenBalance = document.getElementById('buyTokenBalance');
-        if (sellTokenBalance) sellTokenBalance.textContent = '';
-        if (buyTokenBalance) buyTokenBalance.textContent = '';
+        // Clear balance displays
+        // this.resetBalanceDisplays();  // Commented out - not resetting form
         
         // Clear component state
-        this.sellToken = null;
-        this.buyToken = null;
+        // this.sellToken = null;  // Commented out - not resetting form
+        // this.buyToken = null;  // Commented out - not resetting form
         
         // Reset token selectors to default state
-        ['sell', 'buy'].forEach(type => {
-            const selector = document.getElementById(`${type}TokenSelector`);
-            if (selector) {
-                selector.innerHTML = `
-                    <span class="token-selector-content">
-                        <span>Select Token</span>
-                        <svg width="12" height="12" viewBox="0 0 12 12">
-                            <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        </svg>
-                    </span>
-                `;
-            }
-        });
+        // ['sell', 'buy'].forEach(type => {  // Commented out - not resetting form
+        //     const selector = document.getElementById(`${type}TokenSelector`);  // Commented out - not resetting form
+        //     if (selector) {  // Commented out - not resetting form
+        //         selector.innerHTML = `  // Commented out - not resetting form
+        //             <span class="token-selector-content">  // Commented out - not resetting form
+        //                 <span>Select Token</span>  // Commented out - not resetting form
+        //                 <svg width="12" height="12" viewBox="0 0 12 12">  // Commented out - not resetting form
+        //                     <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>  // Commented out - not resetting form
+        //                 </svg>  // Commented out - not resetting form
+        //             </span>  // Commented out - not resetting form
+        //         `;  // Commented out - not resetting form
+        //     }  // Commented out - not resetting form
+        // });  // Commented out - not resetting form
         
         // Remove any token address tooltips
-        document.querySelectorAll('.token-address-tooltip').forEach(tooltip => {
-            tooltip.remove();
-        });
+        // document.querySelectorAll('.token-address-tooltip').forEach(tooltip => {  // Commented out - not resetting form
+        //     tooltip.remove();  // Commented out - not resetting form
+        // });  // Commented out - not resetting form
         
         // Remove USD amount displays
-        ['sell', 'buy'].forEach(type => {
-            const usdDisplay = document.getElementById(`${type}AmountUSD`);
-            if (usdDisplay) {
-                usdDisplay.remove();
-            }
-        });
+        // ['sell', 'buy'].forEach(type => {  // Commented out - not resetting form
+        //     const usdDisplay = document.getElementById(`${type}AmountUSD`);  // Commented out - not resetting form
+        //     if (usdDisplay) {  // Commented out - not resetting form
+        //         usdDisplay.remove();  // Commented out - not resetting form
+        //     }  // Commented out - not resetting form
+        // });  // Commented out - not resetting form
         
         // Update create button state
-        this.updateCreateButtonState();
+        // this.updateCreateButtonState();  // Commented out - not resetting form
     }
 
     async loadContractTokens() {
@@ -795,6 +859,24 @@ export class CreateOrder extends BaseComponent {
             
             this.debug('Loaded allowed tokens:', allowed);
             this.debug('Loaded not allowed tokens:', notAllowed);
+            
+            // Trigger price fetching for allowed tokens
+            if (window.pricingService && allowed.length > 0) {
+                try {
+                    this.debug('Triggering price fetching for allowed tokens...');
+                    const allowedAddresses = allowed.map(token => token.address);
+                    await window.pricingService.fetchPricesForTokens(allowedAddresses);
+                    this.debug('Price fetching completed for allowed tokens');
+                } catch (error) {
+                    this.debug('Error fetching prices for allowed tokens:', error);
+                    // Continue with token loading even if price fetching fails
+                }
+            }
+            
+            // Debug: Check if tokens have iconUrl
+            for (const token of allowed) {
+                this.debug(`Token ${token.symbol} has iconUrl: ${!!token.iconUrl}`, token.iconUrl);
+            }
 
             ['sell', 'buy'].forEach(type => {
                 const modal = document.getElementById(`${type}TokenModal`);
@@ -849,6 +931,13 @@ export class CreateOrder extends BaseComponent {
             // Assemble input wrapper
             inputWrapper.appendChild(label);
             inputWrapper.appendChild(amountInput);
+            // Pre-create USD display to preserve layout; keep hidden until valid
+            const usdDisplayStatic = document.createElement('div');
+            usdDisplayStatic.id = `${type}AmountUSD`;
+            usdDisplayStatic.className = 'amount-usd is-hidden';
+            usdDisplayStatic.setAttribute('aria-hidden', 'true');
+            usdDisplayStatic.textContent = '≈ $0.00';
+            inputWrapper.appendChild(usdDisplayStatic);
             
             // Create token selector button
             const tokenSelector = document.createElement('button');
@@ -868,18 +957,37 @@ export class CreateOrder extends BaseComponent {
             tokenInput.type = 'hidden';
             tokenInput.id = `${type}Token`;
             
+            // Create a selector container to hold only the selector button
+            const tokenSelectorContainer = document.createElement('div');
+            tokenSelectorContainer.className = 'token-selector';
+            tokenSelectorContainer.appendChild(tokenSelector);
+
+            // Create balance display (hidden until a token is selected) AS A SIBLING UNDER THE SELECTOR
+            const balanceDisplay = document.createElement('div');
+            balanceDisplay.id = `${type}TokenBalanceDisplay`;
+            balanceDisplay.className = 'token-balance-display is-hidden';
+            balanceDisplay.setAttribute('aria-hidden', 'true');
+            balanceDisplay.innerHTML = `
+                <button id="${type}TokenBalanceBtn" class="balance-clickable" aria-label="Click to fill ${type} amount with available balance">
+                    <span class="balance-amount" id="${type}TokenBalanceAmount">0.00</span>
+                    <span class="balance-usd" id="${type}TokenBalanceUSD">• $0.00</span>
+                </button>
+            `;
+
+            // Group selector and balance vertically so balance sits under the button
+            const selectorGroup = document.createElement('div');
+            selectorGroup.className = 'token-selector-group';
+            selectorGroup.appendChild(tokenSelectorContainer);
+            selectorGroup.appendChild(balanceDisplay);
+
             // Assemble the components
             container.appendChild(inputWrapper);
-            container.appendChild(tokenSelector);
+            container.appendChild(selectorGroup);
             container.appendChild(tokenInput);
-            
-            // Create balance display
-            const balanceDisplay = document.createElement('div');
-            balanceDisplay.id = `${type}TokenBalance`;
-            balanceDisplay.className = 'token-balance-display';
-            
+
+            // Clear the container and add the new structure
+            currentContainer.innerHTML = '';
             currentContainer.appendChild(container);
-            currentContainer.appendChild(balanceDisplay);
             
             // Add event listeners
             tokenSelector.addEventListener('click', () => {
@@ -903,7 +1011,7 @@ export class CreateOrder extends BaseComponent {
         modal.innerHTML = `
             <div class="token-modal-content">
                 <div class="token-modal-header">
-                    <h3>Select Token</h3>
+                    <h3>Select ${type.charAt(0).toUpperCase() + type.slice(1)} Token</h3>
                     <button class="token-modal-close">&times;</button>
                 </div>
                 <div class="token-modal-search">
@@ -989,14 +1097,14 @@ export class CreateOrder extends BaseComponent {
                         };
 
                         // Get USD price and calculate USD value
-                        const usdPrice = window.pricingService?.getPrice(token.address) || 0;
-                        const usdValue = Number(token.balance) * usdPrice;
-                        const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                        const usdPrice = window.pricingService?.getPrice(token.address);
+                        const usdValue = usdPrice !== undefined ? Number(token.balance) * usdPrice : 0;
+                        const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                             style: 'currency',
                             currency: 'USD',
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2
-                        });
+                        }) : 'N/A';
 
                         // Format balance
                         const formattedBalance = Number(token.balance).toLocaleString(undefined, { 
@@ -1012,7 +1120,7 @@ export class CreateOrder extends BaseComponent {
                                     <div class="token-item ${isAllowed ? 'token-allowed' : 'token-not-allowed'}" data-address="${token.address}">
                                         <div class="token-item-left">
                                             <div class="token-icon">
-                                                ${this.getTokenIcon(token)}
+                                                <div class="loading-spinner"></div>
                                             </div>
                                             <div class="token-item-info">
                                                 <div class="token-item-symbol">
@@ -1055,6 +1163,10 @@ export class CreateOrder extends BaseComponent {
                             tokenItem.style.cursor = 'not-allowed';
                             tokenItem.title = 'This token is not allowed for trading';
                         }
+
+                        // Render token icon asynchronously
+                        const iconContainer = tokenItem.querySelector('.token-icon');
+                        this.renderTokenIcon(token, iconContainer);
                     }
                 } catch (error) {
                     contractResult.innerHTML = `
@@ -1085,20 +1197,20 @@ export class CreateOrder extends BaseComponent {
                                         maximumFractionDigits: 4,
                                         useGrouping: true
                                     });
-                                    const usdPrice = window.pricingService?.getPrice(token.address) || 0;
-                                    const usdValue = balance * usdPrice;
-                                    const formattedUsdValue = usdValue.toLocaleString(undefined, {
+                                    const usdPrice = window.pricingService?.getPrice(token.address);
+                                    const usdValue = usdPrice !== undefined ? balance * usdPrice : 0;
+                                    const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                                         style: 'currency',
                                         currency: 'USD',
                                         minimumFractionDigits: 2,
                                         maximumFractionDigits: 2
-                                    });
+                                    }) : 'N/A';
 
                                     return `
                                         <div class="token-item token-allowed" data-address="${token.address}">
                                             <div class="token-item-left">
                                                 <div class="token-icon">
-                                                    ${this.getTokenIcon(token)}
+                                                    <div class="loading-spinner"></div>
                                                 </div>
                                                 <div class="token-item-info">
                                                     <div class="token-item-symbol">
@@ -1132,8 +1244,12 @@ export class CreateOrder extends BaseComponent {
 
                     // Add click handlers for search results
                     const tokenItems = contractResult.querySelectorAll('.token-item');
-                    tokenItems.forEach(item => {
+                    tokenItems.forEach((item, index) => {
                         item.addEventListener('click', () => this.handleTokenItemClick(type, item));
+                        
+                        // Render token icon asynchronously
+                        const iconContainer = item.querySelector('.token-icon');
+                        this.renderTokenIcon(searchResults[index], iconContainer);
                     });
                 } else {
                     contractResult.innerHTML = `
@@ -1188,7 +1304,12 @@ export class CreateOrder extends BaseComponent {
             const balance = Number(token.balance) || 0;
             const hasBalance = balance > 0;
             
-            tokenElement.className = `token-item ${hasBalance ? 'token-has-balance' : 'token-no-balance'}`;
+            // For buy tokens, don't grey out tokens with no balance and don't add border classes
+            if (type === 'buy') {
+                tokenElement.className = 'token-item';
+            } else {
+                tokenElement.className = `token-item ${hasBalance ? 'token-has-balance' : 'token-no-balance'}`;
+            }
             
             // For sell tokens, add disabled class if no balance
             if (type === 'sell' && !hasBalance) {
@@ -1204,14 +1325,14 @@ export class CreateOrder extends BaseComponent {
             });
             
             // Get USD price and calculate USD value
-            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
-            const usdValue = balance * usdPrice;
-            const formattedUsdValue = usdValue.toLocaleString(undefined, {
+            const usdPrice = window.pricingService?.getPrice(token.address);
+            const usdValue = usdPrice !== undefined ? balance * usdPrice : 0;
+            const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                 style: 'currency',
                 currency: 'USD',
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
-            });
+            }) : 'N/A';
 
             // Generate background color for fallback icon
             const colors = [
@@ -1227,8 +1348,8 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-item-content">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.logoURI ? `
-                                <img src="${token.logoURI}" 
+                            ${token.iconUrl && token.iconUrl !== 'fallback' ? `
+                                <img src="${token.iconUrl}" 
                                     alt="${token.symbol}" 
                                     class="token-icon-image"
                                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
@@ -1332,14 +1453,14 @@ export class CreateOrder extends BaseComponent {
             });
             
             // Get USD price and calculate USD value
-            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
-            const usdValue = balance * usdPrice;
-            const formattedUsdValue = usdValue.toLocaleString(undefined, {
+            const usdPrice = window.pricingService?.getPrice(token.address);
+            const usdValue = usdPrice !== undefined ? balance * usdPrice : 0;
+            const formattedUsdValue = usdPrice !== undefined ? usdValue.toLocaleString(undefined, {
                 style: 'currency',
                 currency: 'USD',
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
-            });
+            }) : 'N/A';
 
             // Generate background color for fallback icon
             const colors = [
@@ -1355,8 +1476,8 @@ export class CreateOrder extends BaseComponent {
                 <div class="token-item-content">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.logoURI ? `
-                                <img src="${token.logoURI}" 
+                            ${token.iconUrl && token.iconUrl !== 'fallback' ? `
+                                <img src="${token.iconUrl}" 
                                     alt="${token.symbol}" 
                                     class="token-icon-image"
                                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
@@ -1412,35 +1533,60 @@ export class CreateOrder extends BaseComponent {
         return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
     }
 
+    // Helper method to check if a token is Liberdus
+    isLiberdusToken(tokenAddress) {
+        return tokenAddress.toLowerCase() === CreateOrder.LIBERDUS_ADDRESS.toLowerCase();
+    }
+
     // Add helper method for token icons
-    getTokenIcon(token) {
-        if (token.iconUrl) {
+    async getTokenIcon(token) {
+        try {
+            this.debug(`Getting icon for token ${token.symbol} (${token.address})`);
+            this.debug(`Token object:`, token);
+            
+            // If token already has an iconUrl, use it
+            if (token.iconUrl) {
+                this.debug('Using existing iconUrl for token:', token.symbol, token.iconUrl);
+                return generateTokenIconHTML(token.iconUrl, token.symbol, token.address);
+            }
+            
+            // Otherwise, get icon URL from token icon service
+            const chainId = walletManager.chainId ? parseInt(walletManager.chainId, 16) : 137; // Default to Polygon
+            const iconUrl = await tokenIconService.getIconUrl(token.address, chainId);
+            
+            // Generate HTML using the utility function
+            return generateTokenIconHTML(iconUrl, token.symbol, token.address);
+        } catch (error) {
+            this.debug('Error getting token icon:', error);
+            // Fallback to basic fallback icon
+            const fallbackData = getFallbackIconData(token.address, token.symbol);
             return `
                 <div class="token-icon">
-                    <img src="${token.iconUrl}" alt="${token.symbol}" class="token-icon-image">
+                    <div class="token-icon-fallback" style="background: ${fallbackData.backgroundColor}">
+                        ${fallbackData.text}
+                    </div>
                 </div>
             `;
         }
+    }
 
-        // Fallback to letter-based icon
-        const symbol = token.symbol || '?';
-        const firstLetter = symbol.charAt(0).toUpperCase();
-        const colors = [
-            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
-            '#FFEEAD', '#D4A5A5', '#9B59B6', '#3498DB'
-        ];
-        
-        // Generate consistent color based on address
-        const colorIndex = parseInt(token.address.slice(-6), 16) % colors.length;
-        const backgroundColor = colors[colorIndex];
-        
-        return `
-            <div class="token-icon">
-                <div class="token-icon-fallback" style="background: ${backgroundColor}">
-                    ${firstLetter}
+    // Helper method to render token icon asynchronously
+    async renderTokenIcon(token, container) {
+        try {
+            const iconHtml = await this.getTokenIcon(token);
+            container.innerHTML = iconHtml;
+        } catch (error) {
+            this.debug('Error rendering token icon:', error);
+            // Fallback to basic icon
+            const fallbackData = getFallbackIconData(token.address, token.symbol);
+            container.innerHTML = `
+                <div class="token-icon">
+                    <div class="token-icon-fallback" style="background: ${fallbackData.backgroundColor}">
+                        ${fallbackData.text}
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        }
     }
 
     cleanup() {
@@ -1448,6 +1594,11 @@ export class CreateOrder extends BaseComponent {
         if (this.expiryTimers) {
             this.expiryTimers.forEach(timerId => clearInterval(timerId));
             this.expiryTimers.clear();
+        }
+        // Remove global click handler for modals if present
+        if (this.boundWindowClickHandler) {
+            window.removeEventListener('click', this.boundWindowClickHandler);
+            this.boundWindowClickHandler = null;
         }
     }
 
@@ -1472,7 +1623,7 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    showSuccess(message, duration = 5000) {
+    showSuccess(message, duration = 3000) {
         this.debug('Showing success toast:', message);
         if (window.showSuccess) {
             return window.showSuccess(message, duration);
@@ -1582,16 +1733,11 @@ export class CreateOrder extends BaseComponent {
             this.debug(`Current allowance: ${currentAllowance.toString()}`);
             this.debug(`Required amount: ${requiredAmount.toString()}`);
 
-            // If allowance is insufficient, reset and approve new amount
+            // If allowance is insufficient, approve only what's needed
             if (currentAllowance.lt(requiredAmount)) {
-                if (!currentAllowance.isZero()) {
-                    this.debug('Resetting existing allowance');
-                    const resetTx = await tokenContract.approve(this.contract.address, 0);
-                    await resetTx.wait();
-                    this.debug('Allowance reset successful');
-                }
-
-                this.showInfo('Requesting token approval...');
+                const additionalAmount = requiredAmount.sub(currentAllowance);
+                
+                this.showInfo(`Requesting additional token approval (${ethers.utils.formatUnits(additionalAmount, await this.getTokenDecimals(tokenAddress))} more needed)...`);
                 const approveTx = await tokenContract.approve(this.contract.address, requiredAmount);
                 this.showInfo('Please confirm the approval in your wallet...');
                 
@@ -1605,10 +1751,15 @@ export class CreateOrder extends BaseComponent {
             return true;
         } catch (error) {
             this.debug('Token approval error:', error);
-            const userMessage = this.getUserFriendlyError(error);
-            this.showError(userMessage);
+            // Use utility function for consistent error handling
+            handleTransactionError(error, this, 'token approval');
             return false;
         }
+    }
+
+    // Helper method to check if Liberdus validation is enabled
+    isLiberdusValidationEnabled() {
+        return window.DEBUG_CONFIG?.LIBERDUS_VALIDATION === true;
     }
 
     // Add new helper method for user-friendly error messages
@@ -1616,6 +1767,16 @@ export class CreateOrder extends BaseComponent {
         // Check for common error codes and messages
         if (error.code === 4001 || error.code === 'ACTION_REJECTED') {
             return 'Transaction was declined';
+        }
+        
+        // Handle timeout specifically
+        if (error.message?.includes('Transaction timeout')) {
+            return 'Transaction timed out. Please check your wallet and try again.';
+        }
+        
+        // Handle on-chain failures
+        if (error.message?.includes('Transaction failed on-chain')) {
+            return 'Transaction failed on-chain. Please check your balance and try again.';
         }
         
         // Handle contract revert errors with detailed messages
@@ -1643,6 +1804,35 @@ export class CreateOrder extends BaseComponent {
         return 'Transaction failed - please try again';
     }
 
+    // Helper method to verify transaction status
+    async verifyTransactionStatus(txHash) {
+        try {
+            const provider = walletManager.getProvider();
+            if (!provider) {
+                throw new Error('Provider not available');
+            }
+
+            // Wait a bit for transaction to be mined
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Get transaction receipt
+            const receipt = await provider.getTransactionReceipt(txHash);
+            
+            if (!receipt) {
+                throw new Error('Transaction not found on-chain');
+            }
+
+            if (receipt.status === 0) {
+                throw new Error('Transaction failed on-chain');
+            }
+
+            return receipt;
+        } catch (error) {
+            this.debug('Transaction verification failed:', error);
+            throw error;
+        }
+    }
+
     // Update the fee display in the UI
     updateFeeDisplay() {
         if (!this.feeToken?.amount || !this.feeToken?.symbol || !this.feeToken?.decimals) {
@@ -1657,30 +1847,54 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
-    handleTokenSelect(type, token) {
+    async handleTokenSelect(type, token) {
         try {
             this.debug(`Token selected for ${type}:`, token);
             
-            // Clear USD display if no token is selected
+            // Hide USD display if no token is selected (preserve layout)
             if (!token) {
                 this[`${type}Token`] = null;
                 const usdDisplay = document.getElementById(`${type}AmountUSD`);
                 if (usdDisplay) {
-                    usdDisplay.remove();
+                    setVisibility(usdDisplay, false);
                 }
+                // Hide balance display when no token is selected
+                this.hideBalanceDisplay(type);
                 return;
             }
             
-            // Get USD price from pricing service
+            // Enhanced price fetching with loading states
             this.debug('Pricing service state:', {
                 exists: !!window.pricingService,
                 hasGetPrice: !!window.pricingService?.getPrice,
                 tokenAddress: token.address
             });
-            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+            
+            let usdPrice = 0;
+            let isPriceEstimated = true;
+            
+            if (window.pricingService) {
+                usdPrice = window.pricingService.getPrice(token.address);
+                isPriceEstimated = window.pricingService.isPriceEstimated(token.address);
+                
+                // If price is estimated, fetch it in the background (non-blocking)
+                if (isPriceEstimated) {
+                    this.debug(`Price for ${token.symbol} is estimated, fetching in background...`);
+                    window.pricingService.fetchPricesForTokens([token.address])
+                        .then(() => {
+                            // Update price display after fetching
+                            const updatedPrice = window.pricingService.getPrice(token.address);
+                            this.updateTokenAmounts(type);
+                            this.debug(`Updated price for ${token.symbol}: $${updatedPrice}`);
+                        })
+                        .catch(error => {
+                            this.debug(`Failed to fetch price for ${token.symbol}:`, error);
+                        });
+                }
+            }
             // Handle zero balance case
             const balance = parseFloat(token.balance) || 0;
-            const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
+            const balanceUSD = (balance > 0 && usdPrice !== undefined) ? (balance * usdPrice).toFixed(2) : (usdPrice !== undefined ? '0.00' : 'N/A');
             const formattedBalance = balance.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 4,
@@ -1693,7 +1907,6 @@ export class CreateOrder extends BaseComponent {
                 symbol: token.symbol,
                 decimals: token.decimals || 18,
                 balance: token.balance || '0',
-                logoURI: token.logoURI,
                 usdPrice: usdPrice
             };
 
@@ -1714,8 +1927,8 @@ export class CreateOrder extends BaseComponent {
                     <div class="token-selector-content">
                         <div class="token-selector-left">
                             <div class="token-icon small">
-                                ${token.logoURI ? `
-                                    <img src="${token.logoURI}" 
+                                ${token.iconUrl && token.iconUrl !== 'fallback' ? `
+                                    <img src="${token.iconUrl}" 
                                         alt="${token.symbol}" 
                                         class="token-icon-image"
                                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
@@ -1729,12 +1942,6 @@ export class CreateOrder extends BaseComponent {
                             </div>
                             <div class="token-info">
                                 <span class="token-symbol">${token.symbol}</span>
-                                <div class="token-balance-info">
-                                    <div class="amount-container">
-                                        <span class="token-balance">${formattedBalance}</span>
-                                        <span class="token-balance-usd">$${balanceUSD}</span>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                         <svg width="12" height="12" viewBox="0 0 12 12">
@@ -1743,6 +1950,9 @@ export class CreateOrder extends BaseComponent {
                     </div>
                 `;
             }
+
+            // Update the new balance display elements
+            this.updateBalanceDisplay(type, formattedBalance, balanceUSD);
 
             // Update amount USD value immediately
             this.updateTokenAmounts(type);
@@ -1755,6 +1965,11 @@ export class CreateOrder extends BaseComponent {
                 amountInput.parentNode.replaceChild(newInput, amountInput);
                 // Add new listener
                 newInput.addEventListener('input', () => this.updateTokenAmounts(type));
+                
+                // Focus on the input field after token selection
+                setTimeout(() => {
+                    newInput.focus();
+                }, 100); // Small delay to ensure DOM is updated
             }
         } catch (error) {
             this.debug('Error in handleTokenSelect:', error);
@@ -1798,25 +2013,23 @@ export class CreateOrder extends BaseComponent {
                     }
                 }
                 
-                // Validate that the token is allowed in the contract
+                // Add loading state to token item
+                tokenItem.style.opacity = '0.6';
+                tokenItem.style.pointerEvents = 'none';
+                
                 try {
-                    const isAllowed = await contractService.isTokenAllowed(address);
-                    
-                    if (!isAllowed) {
-                        this.showError(`Token ${token.symbol} is not allowed for trading. Please select an allowed token.`);
-                        return;
-                    }
-                    
-                    this.handleTokenSelect(type, token);
+                    // Token is already validated since it's in the allowed tokens list
+                    await this.handleTokenSelect(type, token);
                     
                     // Close the modal after selection
                     const modal = document.getElementById(`${type}TokenModal`);
                     if (modal) {
                         modal.style.display = 'none';
                     }
-                } catch (validationError) {
-                    this.debug('Token validation error:', validationError);
-                    this.showError('Unable to validate token. Please try again.');
+                } finally {
+                    // Remove loading state
+                    tokenItem.style.opacity = '1';
+                    tokenItem.style.pointerEvents = 'auto';
                 }
             }
         } catch (error) {
@@ -1878,25 +2091,24 @@ export class CreateOrder extends BaseComponent {
             // Find USD display element
             let usdDisplay = document.getElementById(`${type}AmountUSD`);
             
-            // If no token selected or amount is 0/empty, remove the USD display
+            // If no token selected or amount is 0/empty, hide the USD display without removing
             if (!token || !amount || amount === '0') {
                 if (usdDisplay) {
-                    usdDisplay.remove();
+                    setVisibility(usdDisplay, false);
                 }
                 return;
             }
             
             if (token && amount) {
-                const usdValue = Number(amount) * token.usdPrice;
-                // Create USD display element if it doesn't exist
+                const usdValue = token.usdPrice !== undefined ? Number(amount) * token.usdPrice : 0;
+                // Ensure USD display element exists (in template) and update it
                 if (!usdDisplay) {
-                    usdDisplay = document.createElement('div');
-                    usdDisplay.id = `${type}AmountUSD`;
-                    usdDisplay.className = 'amount-usd';
-                    const amountInput = document.getElementById(`${type}Amount`);
-                    amountInput.parentNode.insertBefore(usdDisplay, amountInput.nextSibling);
+                    usdDisplay = document.getElementById(`${type}AmountUSD`);
                 }
-                usdDisplay.textContent = `$${usdValue.toFixed(2)}`;
+                if (usdDisplay) {
+                    usdDisplay.textContent = token.usdPrice !== undefined ? `$${usdValue.toFixed(2)}` : 'N/A';
+                    setVisibility(usdDisplay, true);
+                }
             }
             
             this.updateCreateButtonState();
@@ -1918,7 +2130,7 @@ export class CreateOrder extends BaseComponent {
                 }
 
                 // Create new listener for opening modal
-                this.tokenSelectorListeners[type] = () => {
+                this.tokenSelectorListeners[type] = async () => {
                     modal.style.display = 'block';
                 };
 
@@ -1932,12 +2144,15 @@ export class CreateOrder extends BaseComponent {
                     };
                 }
 
-                // Close modal when clicking outside
-                window.addEventListener('click', (event) => {
-                    if (event.target.classList.contains('token-modal')) {
-                        event.target.style.display = 'none';
-                    }
-                });
+                // Close modal when clicking outside (register once)
+                if (!this.boundWindowClickHandler) {
+                    this.boundWindowClickHandler = (event) => {
+                        if (event.target.classList?.contains('token-modal')) {
+                            event.target.style.display = 'none';
+                        }
+                    };
+                    window.addEventListener('click', this.boundWindowClickHandler);
+                }
             }
         });
     }
@@ -1947,16 +2162,16 @@ export class CreateOrder extends BaseComponent {
         if (!modalContent) return;
 
         modalContent.innerHTML = tokens.map(token => {
-            const usdPrice = window.pricingService?.getPrice(token.address) || 0;
+            const usdPrice = window.pricingService?.getPrice(token.address);
             const balance = parseFloat(token.balance) || 0;
-            const balanceUSD = balance > 0 ? (balance * usdPrice).toFixed(2) : '0.00';
+            const balanceUSD = (balance > 0 && usdPrice !== undefined) ? (balance * usdPrice).toFixed(2) : (usdPrice !== undefined ? '0.00' : 'N/A');
             
             return `
                 <div class="token-item" data-address="${token.address}">
                     <div class="token-item-left">
                         <div class="token-icon">
-                            ${token.logoURI ? 
-                                `<img src="${token.logoURI}" alt="${token.symbol}" class="token-icon-image">` :
+                            ${token.iconUrl && token.iconUrl !== 'fallback' ? 
+                                `<img src="${token.iconUrl}" alt="${token.symbol}" class="token-icon-image">` :
                                 `<div class="token-icon-fallback">${token.symbol.charAt(0)}</div>`
                             }
                         </div>
@@ -1983,9 +2198,97 @@ export class CreateOrder extends BaseComponent {
         ['sell', 'buy'].forEach(type => {
             const amountInput = document.getElementById(`${type}Amount`);
             if (amountInput) {
-                amountInput.addEventListener('input', () => this.updateTokenAmounts(type));
+                // Remove prior listener if present
+                if (this.amountInputListeners[type]) {
+                    amountInput.removeEventListener('input', this.amountInputListeners[type]);
+                }
+                // Create and store new listener
+                this.amountInputListeners[type] = () => this.updateTokenAmounts(type);
+                amountInput.addEventListener('input', this.amountInputListeners[type]);
             }
         });
+
+        // Initialize balance click handlers for auto-fill functionality
+        this.initializeBalanceClickHandlers();
+    }
+
+    /**
+     * Initialize click handlers for balance auto-fill functionality
+     */
+    initializeBalanceClickHandlers() {
+        ['sell', 'buy'].forEach(type => {
+            const balanceBtn = document.getElementById(`${type}TokenBalanceBtn`);
+            if (balanceBtn) {
+                // Remove existing listeners using clone technique to prevent duplicates
+                const newBalanceBtn = balanceBtn.cloneNode(true);
+                balanceBtn.parentNode.replaceChild(newBalanceBtn, balanceBtn);
+                
+                // Add click handler for auto-fill functionality
+                newBalanceBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.handleBalanceClick(type);
+                });
+
+                // Add keyboard support for accessibility
+                newBalanceBtn.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this.handleBalanceClick(type);
+                    }
+                });
+
+                this.debug(`Initialized balance click handler for ${type} token`);
+            }
+        });
+    }
+
+    /**
+     * Handle balance click to auto-fill amount input
+     * @param {string} type - 'sell' or 'buy'
+     */
+    handleBalanceClick(type) {
+        try {
+            const token = this[`${type}Token`];
+            if (!token) {
+                this.debug(`No ${type} token selected`);
+                return;
+            }
+
+            const balance = parseFloat(token.balance) || 0;
+            if (balance <= 0) {
+                this.debug(`${type} token has no balance`);
+                return;
+            }
+
+            const amountInput = document.getElementById(`${type}Amount`);
+            if (amountInput) {
+                // Format balance for input (remove grouping, keep decimals)
+                const formattedBalance = balance.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 4,
+                    useGrouping: false
+                });
+
+                // Set the input value
+                amountInput.value = formattedBalance;
+                
+                // Trigger input event to update calculations
+                amountInput.dispatchEvent(new Event('input', { bubbles: true }));
+                
+                // Focus the input for better UX
+                amountInput.focus();
+                
+                this.debug(`Auto-filled ${type} amount with balance: ${formattedBalance}`);
+                
+                // Show success feedback
+                /* this.showSuccess(`Filled ${type} amount with available balance`); */
+            }
+        } catch (error) {
+            this.error(`Error handling ${type} balance click:`, error);
+            this.showError(`Failed to fill ${type} amount`);
+        }
     }
 
     // Add new render method
@@ -2000,11 +2303,17 @@ export class CreateOrder extends BaseComponent {
                             <input type="number" id="sellAmount" placeholder="0.0" />
                             <button id="sellAmountMax" class="max-button">MAX</button>
                         </div>
-                        <div class="amount-usd" id="sellAmountUSD">≈ $0.00</div>
+                        <div class="amount-usd is-hidden" id="sellAmountUSD" aria-hidden="true">≈ $0.00</div>
                         <div id="sellTokenSelector" class="token-selector">
                             <div class="token-selector-content">
                                 <span>Select Token</span>
                             </div>
+                        </div>
+                        <div id="sellTokenBalanceDisplay" class="token-balance-display is-hidden" aria-hidden="true">
+                            <button id="sellTokenBalanceBtn" class="balance-clickable" aria-label="Click to fill sell amount with available balance">
+                                <span class="balance-amount" id="sellTokenBalanceAmount">0.00</span>
+                                <span class="balance-usd" id="sellTokenBalanceUSD">• $0.00</span>
+                            </button>
                         </div>
                     </div>
 
@@ -2020,11 +2329,17 @@ export class CreateOrder extends BaseComponent {
                         <div class="amount-input-wrapper">
                             <input type="number" id="buyAmount" placeholder="0.0" />
                         </div>
-                        <div class="amount-usd" id="buyAmountUSD">≈ $0.00</div>
+                        <div class="amount-usd is-hidden" id="buyAmountUSD" aria-hidden="true">≈ $0.00</div>
                         <div id="buyTokenSelector" class="token-selector">
                             <div class="token-selector-content">
                                 <span>Select Token</span>
                             </div>
+                        </div>
+                        <div id="buyTokenBalanceDisplay" class="token-balance-display is-hidden" aria-hidden="true">
+                            <button id="buyTokenBalanceBtn" class="balance-clickable" aria-label="Click to fill buy amount with available balance">
+                                <span class="balance-amount" id="buyTokenBalanceAmount">0.00</span>
+                                <span class="balance-usd" id="buyTokenBalanceUSD">• $0.00</span>
+                            </button>
                         </div>
                     </div>
 
@@ -2086,6 +2401,23 @@ export class CreateOrder extends BaseComponent {
                 </div>
             </div>
         `;
+    }
+
+    // Refresh token modal lists if open (balances/icons may have changed)
+    refreshOpenTokenModals() {
+        try {
+            ['sell', 'buy'].forEach(type => {
+                const modal = document.getElementById(`${type}TokenModal`);
+                if (modal && modal.style.display === 'block') {
+                    const allowedTokensList = modal.querySelector(`#${type}AllowedTokenList`);
+                    if (allowedTokensList && Array.isArray(this.allowedTokens)) {
+                        this.displayTokens(this.allowedTokens, allowedTokensList, type);
+                    }
+                }
+            });
+        } catch (error) {
+            this.debug('Error refreshing open token modals:', error);
+        }
     }
 }
 

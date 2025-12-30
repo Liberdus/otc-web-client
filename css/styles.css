@@ -104,6 +104,11 @@ body {
   display: none !important;
 }
 
+/* Preserve layout while hiding visually */
+.is-hidden {
+  visibility: hidden !important;
+}
+
 .main-content {
   display: none; /* Hide initially */
   padding: 0;
@@ -547,6 +552,17 @@ body {
 /* Secondary text */
 .text-secondary {
   color: var(--text-secondary);
+}
+
+/* Intro page spacing and contrast improvements */
+.intro-lead {
+  color: var(--text-tertiary); /* stronger contrast in dark mode */
+  opacity: 0.9; /* keep it slightly softer than pure white */
+  margin-bottom: 16px; /* add space before subtitle */
+}
+
+.intro-subtitle {
+  margin-top: 0;
 }
 
 /* Tertiary text */

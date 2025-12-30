@@ -38,13 +38,17 @@ export class DebugPanel {
 
     loadDebugSettings() {
         const savedSettings = localStorage.getItem('debug');
+        let settings = {};
+        
         if (savedSettings) {
-            const settings = JSON.parse(savedSettings);
-            this.checkboxes.forEach(checkbox => {
-                const debugKey = checkbox.getAttribute('data-debug');
-                checkbox.checked = settings[debugKey] || false;
-            });
+            settings = JSON.parse(savedSettings);
         }
+        
+        this.checkboxes.forEach(checkbox => {
+            const debugKey = checkbox.getAttribute('data-debug');
+            // Use saved setting if available, otherwise use default from DEBUG_CONFIG
+            checkbox.checked = settings[debugKey] ?? window.DEBUG_CONFIG?.[debugKey] ?? false;
+        });
     }
 
     toggleAll() {
