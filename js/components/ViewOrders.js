@@ -650,7 +650,7 @@ export class ViewOrders extends BaseComponent {
             const pageInfo = controls.querySelector('.page-info');
             
             prevButton.addEventListener('click', () => {
-                console.log('Previous clicked, current page:', this.currentPage);
+                this.debug('Previous clicked, current page:', this.currentPage);
                 if (this.currentPage > 1) {
                     this.currentPage--;
                     this.updatePageInfo(pageInfo);
@@ -660,7 +660,7 @@ export class ViewOrders extends BaseComponent {
             
             nextButton.addEventListener('click', () => {
                 const pageSize = parseInt(this.container.querySelector('#page-size-select').value);
-                console.log('Next clicked, current page:', this.currentPage, 'total orders:', this.totalOrders, 'page size:', pageSize);
+                this.debug('Next clicked, current page:', this.currentPage, 'total orders:', this.totalOrders, 'page size:', pageSize);
                 const totalPages = Math.ceil(this.totalOrders / pageSize);
                 if (this.currentPage < totalPages) {
                     this.currentPage++;
@@ -1199,7 +1199,7 @@ export class ViewOrders extends BaseComponent {
     getExplorerUrl(address) {
         const networkConfig = getNetworkConfig();
         if (!networkConfig?.explorer) {
-            console.warn('Explorer URL not configured');
+            this.warn('Explorer URL not configured');
             return '#';
         }
         return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;

@@ -739,7 +739,7 @@ export class MyOrders extends ViewOrders {
             const pageInfo = container.querySelector('.page-info');
             
             if (!prevButton || !nextButton || !pageInfo) {
-                console.warn('Pagination controls not found');
+                this.warn('Pagination controls not found');
                 return;
             }
             

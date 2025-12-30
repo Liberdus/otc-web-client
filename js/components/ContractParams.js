@@ -1,15 +1,17 @@
 import { BaseComponent } from './BaseComponent.js';
-import { isDebugEnabled } from '../config.js';
+import { createLogger } from '../services/LogService.js';
 import { ethers } from 'ethers';
 
 export class ContractParams extends BaseComponent {
     constructor() {
         super('contract-params');
-        this.debug = (message, ...args) => {
-            if (isDebugEnabled('CONTRACT_PARAMS')) {
-                console.log('[ContractParams]', message, ...args);
-            }
-        };
+        
+        // Use centralized LogService instead of manual isDebugEnabled check
+        const logger = createLogger('CONTRACT_PARAMS');
+        this.debug = logger.debug.bind(logger);
+        this.error = logger.error.bind(logger);
+        this.warn = logger.warn.bind(logger);
+        
         this.isInitializing = false;
         this.isInitialized = false;
         this.cachedParams = null;

@@ -71,7 +71,7 @@ This allows gradual migration without breaking existing code.
 
 ---
 
-## Current State (Post Phase 5)
+## Current State (Post Phase 6)
 
 ### Wallet / Signer / Account
 
@@ -175,7 +175,7 @@ This allows gradual migration without breaking existing code.
 | Debug config | `DEBUG_CONFIG` from config.js, `isDebugEnabled(name)` | |
 | Storage | `localStorage.getItem('debug')` | JSON object of enabled flags |
 
-**Issue:** `ContractParams` uses `isDebugEnabled()` + `console.log` instead of `createLogger()`.
+**Resolved in Phase 6:** All components now use `createLogger()` instead of direct `console.log/error/warn` calls. `ContractParams` updated to use LogService.
 
 ---
 

@@ -146,7 +146,7 @@ export class WalletUI extends BaseComponent {
                     window.app.handleWalletDisconnect();
                 }
             } catch (error) {
-                console.error('[WalletUI] Error disconnecting:', error);
+                this.error('[WalletUI] Error disconnecting:', error);
             }
         };
         this.disconnectButton.addEventListener('click', this._boundDisconnectHandler);
@@ -280,7 +280,7 @@ export class WalletUI extends BaseComponent {
             
             this.debug('UI updated successfully');
         } catch (error) {
-            console.error('[WalletUI] Error in updateUI:', error);
+            this.error('[WalletUI] Error in updateUI:', error);
         }
     }
 
@@ -293,7 +293,7 @@ export class WalletUI extends BaseComponent {
             document.querySelector('.swap-section')?.classList.remove('wallet-connected');
             this.debug('Connect button shown');
         } catch (error) {
-            console.error('[WalletUI] Error in showConnectButton:', error);
+            this.error('[WalletUI] Error in showConnectButton:', error);
         }
     }
 
@@ -302,7 +302,7 @@ export class WalletUI extends BaseComponent {
             this.debug('Updating network badge for chain:', chainId);
             const networkBadge = document.querySelector('.network-badge');
             if (!networkBadge) {
-                console.error('[WalletUI] Network badge element not found');
+                this.error('[WalletUI] Network badge element not found');
                 return;
             }
 
@@ -319,7 +319,7 @@ export class WalletUI extends BaseComponent {
             }
             this.debug('Network badge updated');
         } catch (error) {
-            console.error('[WalletUI] Error updating network badge:', error);
+            this.error('[WalletUI] Error updating network badge:', error);
         }
     }
 }

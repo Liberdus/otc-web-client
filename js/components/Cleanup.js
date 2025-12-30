@@ -459,12 +459,12 @@ export class Cleanup extends BaseComponent {
             });
 
             // Execute cleanup transaction
-            console.log('[Cleanup] Sending transaction with options:', txOptions);
+            this.debug('Sending transaction with options:', txOptions);
             const tx = await contractWithSigner.cleanupExpiredOrders(txOptions);
-            console.log('[Cleanup] Transaction sent:', tx.hash);
+            this.debug('Transaction sent:', tx.hash);
 
             const receipt = await tx.wait();
-            console.log('[Cleanup] Transaction confirmed:', receipt);
+            this.debug('Transaction confirmed:', receipt);
 
             if (receipt.status === 1) {
                 // Enhanced event parsing with detailed feedback

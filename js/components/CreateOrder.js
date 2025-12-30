@@ -771,7 +771,7 @@ export class CreateOrder extends BaseComponent {
             const allowance = await tokenContract.allowance(owner, this.contract.address);
             return allowance.gte(amount);
         } catch (error) {
-            console.error('[CreateOrder] Error checking allowance:', error);
+            this.error('Error checking allowance:', error);
             return false;
         }
     }
@@ -1530,7 +1530,7 @@ export class CreateOrder extends BaseComponent {
     getExplorerUrl(address) {
         const networkConfig = getNetworkConfig();
         if (!networkConfig?.explorer) {
-            console.warn('Explorer URL not configured');
+            this.warn('Explorer URL not configured');
             return '#';
         }
         return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
