@@ -26,6 +26,10 @@ All components extending `BaseComponent` follow this lifecycle:
 - Should NOT clear rendered content (preserve for quick tab switches)
 - Must be reversible (component can be re-initialized after cleanup)
 
+### 2.5 `setContext(ctx)` (optional)
+- Called by App to inject dependencies
+- Provides access to wallet, websocket, pricing, toast services via `this.ctx`
+
 ### Initialization Flags
 - `this.initialized`: true after first successful `initialize()`
 - `this.initializing`: true while `initialize()` is running
@@ -34,7 +38,40 @@ For backward compatibility, `isInitialized`/`isInitializing` getters are provide
 
 ---
 
-## Current State (Post Phase 1)
+## AppContext (Phase 2)
+
+The `AppContext` is a centralized dependency container that replaces scattered `window.*` globals.
+
+### Location
+- `js/services/AppContext.js`
+
+### Creation Flow
+1. App creates context: `this.ctx = createAppContext()`
+2. App sets global: `setGlobalContext(this.ctx)` (exposes as `window.appContext`)
+3. App populates services as they initialize:
+   - `this.ctx.wallet = walletManager`
+   - `this.ctx.ws = window.webSocket`
+   - `this.ctx.pricing = window.pricingService`
+   - `this.ctx.toast = { showError, showSuccess, ... }`
+4. App passes to components: `component.setContext(this.ctx)`
+
+### Component Access
+- Via injection: `this.ctx` (set by `setContext()`)
+- Via fallback: `getAppContext()` (global singleton)
+- Access services: `this.ctx.getWallet()`, `this.ctx.getWebSocket()`, `this.ctx.getPricing()`
+- Toast helpers: `this.ctx.showError()`, `this.ctx.showSuccess()`, etc.
+
+### Backward Compatibility
+All context methods have global fallbacks:
+- `ctx.getWallet()` → returns `ctx.wallet || window.walletManager`
+- `ctx.getWebSocket()` → returns `ctx.ws || window.webSocket`
+- `ctx.showError()` → uses `ctx.toast.showError || window.showError`
+
+This allows gradual migration without breaking existing code.
+
+---
+
+## Current State (Post Phase 2)
 
 ### Wallet / Signer / Account
 
@@ -47,6 +84,7 @@ For backward compatibility, `isInitialized`/`isInitializing` getters are provide
 | Chain ID | `walletManager.chainId` | |
 
 **Access patterns in components:**
+- **Preferred:** `this.ctx.getWallet()` (via AppContext)
 - Import: `import { walletManager } from '../config.js'`
 - Global: `window.walletManager`
 - Direct: `window.ethereum` (some components create their own provider)
@@ -64,6 +102,7 @@ For backward compatibility, `isInitialized`/`isInitializing` getters are provide
 | Contract constants | `WebSocketService.orderExpiry`, `WebSocketService.gracePeriod` | |
 
 **Access patterns:**
+- **Preferred:** `this.ctx.getWebSocket()` (via AppContext)
 - Global: `window.webSocket.contract`, `window.webSocket.provider`
 - Via service: `contractService.getContract()` (thin wrapper over webSocket)
 
@@ -105,6 +144,10 @@ For backward compatibility, `isInitialized`/`isInitializing` getters are provide
 | Get price | `window.pricingService.getPrice(address)` | |
 | Subscribe to updates | `window.pricingService.subscribe(callback)` | |
 
+**Access patterns:**
+- **Preferred:** `this.ctx.getPricing()` (via AppContext)
+- Global: `window.pricingService`
+
 ---
 
 ### Toast Notifications
@@ -114,6 +157,11 @@ For backward compatibility, `isInitialized`/`isInitializing` getters are provide
 | Toast instance | `Toast` class, singleton via `getToast()` | |
 | Show functions | `showError`, `showSuccess`, `showWarning`, `showInfo` | Exported from Toast.js |
 | Global access | `window.showError`, etc. | Set in app.js |
+
+**Access patterns:**
+- **Preferred:** `this.ctx.showError()`, `this.ctx.showSuccess()`, etc. (via AppContext)
+- Global: `window.showError()`, etc.
+- Import: `import { showError } from '../components/Toast.js'`
 
 **Issue:** Some components override toast methods (CreateOrder, Cleanup) with slightly different implementations.
 
@@ -159,6 +207,7 @@ For backward compatibility, `isInitialized`/`isInitializing` getters are provide
 |------|----------------------|
 | `js/config.js` | Network config, WalletManager class |
 | `js/app.js` | App orchestration, component lifecycle, global setup |
+| `js/services/AppContext.js` | Dependency injection container for services |
 | `js/services/WebSocket.js` | WebSocket provider, contract, order cache, token cache |
 | `js/services/ContractService.js` | Thin facade over webSocket contract (mostly unused) |
 | `js/services/PricingService.js` | Token price fetching and caching |

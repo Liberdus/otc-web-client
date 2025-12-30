@@ -16,6 +16,7 @@ import { getToast, showError, showSuccess, showWarning, showInfo } from './compo
 import { Footer } from './components/Footer.js';
 import { Intro } from './components/Intro.js';
 import { versionService } from './services/VersionService.js';
+import { createAppContext, setGlobalContext } from './services/AppContext.js';
 
 class App {
 	constructor() {
@@ -33,9 +34,20 @@ class App {
 	async load () {
 		this.debug('Loading app components...');
 
+		// Create application context for dependency injection
+		this.ctx = createAppContext();
+		setGlobalContext(this.ctx);
+		this.debug('AppContext created');
+
 		// Initialize toast component
 		this.toast = getToast();
 		this.debug('Toast component initialized');
+		
+		// Populate context with toast functions
+		this.ctx.toast.showError = showError;
+		this.ctx.toast.showSuccess = showSuccess;
+		this.ctx.toast.showWarning = showWarning;
+		this.ctx.toast.showInfo = showInfo;
 
 		// Set brand in document title, header, and favicon from constants
 		try {
@@ -83,8 +95,17 @@ class App {
 			'intro': new Intro()
 		};
 
+		// Pass context to all components
+		Object.values(this.components).forEach(component => {
+			if (component && typeof component.setContext === 'function') {
+				component.setContext(this.ctx);
+			}
+		});
+		this.debug('Context passed to all components');
+
 		// Initialize wallet UI and store reference
 		this.walletUI = new WalletUI();
+		this.walletUI.setContext(this.ctx);
 		this.components['wallet-info'] = this.walletUI;
 		
 		// Initialize wallet UI early (it's always visible, not a tab)
@@ -97,6 +118,7 @@ class App {
 		// Initialize footer (persists across tabs)
 		try {
 			this.footer = new Footer('app-footer');
+			this.footer.setContext(this.ctx);
 			this.footer.initialize();
 		} catch (e) {
 			this.warn('Footer failed to initialize', e);
@@ -338,6 +360,10 @@ class App {
 			this.debug('Initializing wallet manager...');
 			window.walletManager = walletManager;
 			await walletManager.init(true);
+			
+			// Add to context
+			this.ctx.wallet = walletManager;
+			
 			this.debug('Wallet manager initialized');
 		} catch (error) {
 			this.debug('Wallet manager initialization error:', error);
@@ -350,6 +376,7 @@ class App {
 			// Ensure contract service is initialized before use
 			try {
 				contractService.initialize();
+				this.ctx.contractService = contractService;
 			} catch (e) {
 				this.debug('ContractService initialize skipped/failed:', e);
 			}
@@ -360,6 +387,10 @@ class App {
 			// The pricing service will refresh later when WebSocket finishes init
 			
 			await window.pricingService.initialize();
+			
+			// Add to context
+			this.ctx.pricing = window.pricingService;
+			
 			this.debug('Pricing service initialized');
 		} catch (error) {
 			this.debug('Pricing service initialization error:', error);
@@ -397,6 +428,10 @@ class App {
 				// Still remove overlay in case of failure
 				this.loadingOverlay.remove();
 			}
+			
+			// Add to context
+			this.ctx.ws = window.webSocket;
+			
 			this.debug('WebSocket initialized');
 		} catch (error) {
 			this.debug('WebSocket initialization error:', error);

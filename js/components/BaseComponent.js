@@ -2,6 +2,7 @@ import { walletManager } from '../config.js';
 import { ethers } from 'ethers';
 import { erc20Abi } from '../abi/erc20.js';
 import { createLogger } from '../services/LogService.js';
+import { getAppContext } from '../services/AppContext.js';
 
 /**
  * BaseComponent - Base class for all UI components
@@ -13,13 +14,17 @@ import { createLogger } from '../services/LogService.js';
  *    - Sets up container reference and default state
  *    - Initializes logger
  * 
- * 2. initialize(readOnlyMode = true)
+ * 2. setContext(ctx) [optional]
+ *    - Called by App to inject dependencies
+ *    - Provides access to wallet, websocket, pricing, toast services
+ * 
+ * 3. initialize(readOnlyMode = true)
  *    - Called by App when component should set up
  *    - Handles rendering, event subscriptions, data loading
  *    - readOnlyMode=true means no wallet connected
  *    - Should be idempotent (safe to call multiple times)
  * 
- * 3. cleanup()
+ * 4. cleanup()
  *    - Called by App before switching away from component
  *    - Removes event listeners, clears timers, unsubscribes from services
  *    - Should NOT clear rendered content (preserve for quick tab switches)
@@ -49,10 +54,29 @@ export class BaseComponent {
         this.initialized = false;
         this.initializing = false;
         
+        // App context (injected via setContext, falls back to global)
+        this._ctx = null;
+        
         // Initialize the token cache
         this.tokenCache = new Map();
         // Initialize provider from window.walletManager if available
         this.provider = window.walletManager?.provider || null;
+    }
+    
+    /**
+     * Set the application context for this component
+     * @param {import('../services/AppContext.js').AppContext} ctx
+     */
+    setContext(ctx) {
+        this._ctx = ctx;
+    }
+    
+    /**
+     * Get the application context (injected or global fallback)
+     * @returns {import('../services/AppContext.js').AppContext}
+     */
+    get ctx() {
+        return this._ctx || getAppContext();
     }
 
     // Backward compatibility getters for components using isInitialized/isInitializing
