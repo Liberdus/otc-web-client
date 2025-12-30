@@ -33,7 +33,7 @@ import { getAppContext } from '../services/AppContext.js';
  * - this.initialized: true after first successful initialize()
  * - this.initializing: true while initialize() is running (prevents concurrent calls)
  * 
- * For backward compatibility, isInitialized/isInitializing getters are provided.
+ * Note: Components use isInitialized/isInitializing properties via getters/setters for consistency.
  */
 export class BaseComponent {
     constructor(containerId) {
@@ -74,11 +74,20 @@ export class BaseComponent {
     }
     
     /**
-     * Get the application context (injected or global fallback)
+     * Get the application context (must be injected via setContext())
      * @returns {import('../services/AppContext.js').AppContext}
+     * @throws {Error} if context not set
      */
     get ctx() {
-        return this._ctx || getAppContext();
+        if (!this._ctx) {
+            // Fallback to global context as last resort (shouldn't be needed)
+            const globalCtx = getAppContext();
+            if (!globalCtx || !globalCtx.isReady()) {
+                this.error('AppContext not set on component. Call setContext() before using this component.');
+            }
+            return globalCtx;
+        }
+        return this._ctx;
     }
     
     /**
@@ -103,7 +112,7 @@ export class BaseComponent {
         this._provider = value;
     }
 
-    // Backward compatibility getters for components using isInitialized/isInitializing
+    // Standardized initialization state accessors
     get isInitialized() {
         return this.initialized;
     }
@@ -198,7 +207,7 @@ export class BaseComponent {
                 return null;
             }
 
-            await window.walletInitialized;
+            // Wallet should be initialized by this point (app initializes wallet before components)
             const contract = await wallet.getContract();
             if (!contract) {
                 this.warn('Contract not initialized');

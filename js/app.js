@@ -155,7 +155,8 @@ class App {
 		});
 
         // Treat presence of signer as connected for initial render to avoid flicker
-        const isInitiallyConnected = !!window.walletManager?.getSigner?.();
+        const wallet = this.ctx.getWallet();
+        const isInitiallyConnected = !!wallet?.getSigner?.();
         this.currentTab = isInitiallyConnected ? 'create-order' : 'view-orders';
 
 		// Add wallet connect button handler
@@ -225,20 +226,23 @@ class App {
 		this.initializeEventListeners();
 
 		// Add WebSocket event handlers for order updates
-		window.webSocket?.subscribe('OrderCreated', () => {
-			this.debug('Order created, refreshing components...');
-			this.refreshActiveComponent();
-		});
+		const ws = this.ctx.getWebSocket();
+		if (ws) {
+			ws.subscribe('OrderCreated', () => {
+				this.debug('Order created, refreshing components...');
+				this.refreshActiveComponent();
+			});
 
-		window.webSocket?.subscribe('OrderFilled', () => {
-			this.debug('Order filled, refreshing components...');
-			this.refreshActiveComponent();
-		});
+			ws.subscribe('OrderFilled', () => {
+				this.debug('Order filled, refreshing components...');
+				this.refreshActiveComponent();
+			});
 
-		window.webSocket?.subscribe('OrderCanceled', () => {
-			this.debug('Order canceled, refreshing components...');
-			this.refreshActiveComponent();
-		});
+			ws.subscribe('OrderCanceled', () => {
+				this.debug('Order canceled, refreshing components...');
+				this.refreshActiveComponent();
+			});
+		}
 
 		// Initialize debug panel
 		const debugPanel = new DebugPanel();
@@ -293,10 +297,13 @@ class App {
 		// Initialize theme handling
 		this.initializeTheme();
 
-		await window.webSocket.syncAllOrders();
+		// Sync orders with WebSocket
+		if (ws) {
+			await ws.syncAllOrders();
+		}
 
 		// Initialize components based on connection (read-only if not connected)
-		const readOnlyMode = !window.walletManager?.isWalletConnected();
+		const readOnlyMode = !wallet?.isWalletConnected();
 		// Prefer signer presence for initial render
 		const initialReadOnlyMode = !isInitiallyConnected;
 		await this.initializeComponents(initialReadOnlyMode);
@@ -373,23 +380,17 @@ class App {
 	async initializePricingService() {
 		try {
 			this.debug('Initializing pricing service...');
-			// Ensure contract service is initialized before use
-			try {
-				contractService.initialize();
-				this.ctx.contractService = contractService;
-			} catch (e) {
-				this.debug('ContractService initialize skipped/failed:', e);
-			}
-			// Initialize PricingService first and make it globally available
-			window.pricingService = new PricingService();
+			// Initialize PricingService first (before WebSocket since WS needs it)
+			const pricingService = new PricingService();
+			window.pricingService = pricingService; // Keep for backward compatibility
 			
 			// Defer allowed token fetch until WebSocket/contract is ready
 			// The pricing service will refresh later when WebSocket finishes init
 			
-			await window.pricingService.initialize();
+			await pricingService.initialize();
 			
 			// Add to context
-			this.ctx.pricing = window.pricingService;
+			this.ctx.pricing = pricingService;
 			
 			this.debug('Pricing service initialized');
 		} catch (error) {
@@ -400,20 +401,22 @@ class App {
 	async initializeWebSocket() {
 		try {
 			this.debug('Initializing WebSocket...');
-			// Initialize WebSocket with the global pricingService
-			window.webSocket = new WebSocketService({
-				pricingService: window.pricingService
+			// Initialize WebSocket with injected pricingService
+			const pricingService = this.ctx.getPricing();
+			const webSocketService = new WebSocketService({
+				pricingService: pricingService
 			});
+			window.webSocket = webSocketService; // Keep for backward compatibility
 
 			// Subscribe to orderSyncComplete event before initialization
-			window.webSocket.subscribe('orderSyncComplete', () => {
+			webSocketService.subscribe('orderSyncComplete', () => {
 				this.wsInitialized = true;
 				this.loadingOverlay.remove();
 				this.debug('WebSocket order sync complete, showing content');
 			});
 
 			// Subscribe to order sync progress updates for UX
-			window.webSocket.subscribe('orderSyncProgress', ({ fetched, total, batch, totalBatches }) => {
+			webSocketService.subscribe('orderSyncProgress', ({ fetched, total, batch, totalBatches }) => {
 				try {
 					const textEl = this.loadingOverlay?.querySelector?.('.loading-text');
 					if (textEl && typeof fetched === 'number' && typeof total === 'number') {
@@ -422,15 +425,28 @@ class App {
 				} catch (_) {}
 			});
 
-			const wsInitialized = await window.webSocket.initialize();
+			const wsInitialized = await webSocketService.initialize();
 			if (!wsInitialized) {
 				this.debug('WebSocket initialization failed, falling back to HTTP');
 				// Still remove overlay in case of failure
 				this.loadingOverlay.remove();
 			}
 			
-			// Add to context
-			this.ctx.ws = window.webSocket;
+			// Add to context and update pricing service with webSocket reference
+			this.ctx.ws = webSocketService;
+			
+			// Update PricingService with WebSocket reference for deal updates
+			if (pricingService) {
+				pricingService.webSocket = webSocketService;
+			}
+			
+			// Update ContractService with WebSocket reference
+			try {
+				contractService.initialize({ webSocket: webSocketService });
+				this.ctx.contractService = contractService;
+			} catch (e) {
+				this.debug('ContractService initialize skipped/failed:', e);
+			}
 			
 			this.debug('WebSocket initialized');
 		} catch (error) {
@@ -628,9 +644,10 @@ class App {
 				// Initialize component for this tab
 				const component = this.components[tabId];
 				if (component?.initialize) {
+					const wallet = this.ctx.getWallet();
 					const computedReadOnly = readOnlyOverride !== null
 						? !!readOnlyOverride
-						: !window.walletManager?.isWalletConnected();
+						: !wallet?.isWalletConnected();
 					await component.initialize(computedReadOnly);
 				}
 				
@@ -671,9 +688,10 @@ class App {
 			});
 			
 			// Optionally clean up WebSocket service (clears order cache). Preserve on account/chain change.
-			if (!preserveOrders && window.webSocket?.cleanup) {
+			const ws = this.ctx.getWebSocket();
+			if (!preserveOrders && ws?.cleanup) {
 				try {
-					window.webSocket.cleanup();
+					ws.cleanup();
 				} catch (error) {
 					console.warn(`Error cleaning up WebSocket service:`, error);
 				}
@@ -691,11 +709,11 @@ class App {
 			await this.initializeComponents(false);
 			
 			// Ensure WebSocket is initialized and synced when preserving orders
-			if (preserveOrders && window.webSocket) {
+			if (preserveOrders && ws) {
 				try {
-					await window.webSocket.waitForInitialization();
-					if (window.webSocket.orderCache.size === 0) {
-						await window.webSocket.syncAllOrders();
+					await ws.waitForInitialization();
+					if (ws.orderCache.size === 0) {
+						await ws.syncAllOrders();
 					}
 				} catch (e) {
 					this.debug('WebSocket not ready during reinit (preserveOrders)', e);
@@ -703,7 +721,8 @@ class App {
 			}
 			
 			// Re-show the current tab
-			await this.showTab(this.currentTab, !window.walletManager?.isWalletConnected());
+			const wallet = this.ctx.getWallet();
+			await this.showTab(this.currentTab, !wallet?.isWalletConnected());
 			
 			this.debug('Components reinitialized');
 		} catch (error) {
@@ -754,12 +773,9 @@ class App {
 
 window.app = new App();
 
-// Make toast functions globally available for all components
-window.showError = showError;
-window.showSuccess = showSuccess;
-window.showWarning = showWarning;
-window.showInfo = showInfo;
-window.getToast = getToast;
+// Toast functions are now accessed via AppContext (this.ctx.showError, etc.)
+// Removed window.* assignments - all components use ctx or BaseComponent methods
+window.getToast = getToast; // Keep for external/debug access if needed
 
 // Make DEBUG_CONFIG globally available for debug panel
 window.DEBUG_CONFIG = DEBUG_CONFIG;
@@ -774,8 +790,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 		window.addEventListener('error', (event) => {
 			if (event.error && event.error.message && event.error.message.includes('callback')) {
 				console.warn('WebSocket callback error detected, attempting to reconnect...');
-				if (window.webSocket && window.webSocket.reconnect) {
-					window.webSocket.reconnect();
+				// Access via window.app.ctx since app is now initialized
+				if (window.app?.ctx) {
+					const ws = window.app.ctx.getWebSocket();
+					if (ws && ws.reconnect) {
+						ws.reconnect();
+					}
 				}
 			}
 		});
@@ -830,7 +850,9 @@ const populateNetworkOptions = () => {
 					networkDropdown.classList.add('hidden');
 				}
 				
-				if (window.walletManager && window.walletManager.isConnected()) {
+				// Access wallet via app context if available
+				const wallet = window.app?.ctx?.getWallet() || window.walletManager;
+				if (wallet && wallet.isConnected()) {
 					const chainId = option.dataset.chainId;
 					await window.ethereum.request({
 						method: 'wallet_switchEthereumChain',

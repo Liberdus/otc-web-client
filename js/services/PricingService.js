@@ -3,13 +3,16 @@ import { createLogger } from './LogService.js';
 import { contractService } from './ContractService.js';
 
 export class PricingService {
-    constructor() {
+    constructor(options = {}) {
         this.prices = new Map();
         this.lastUpdate = null;
         this.updating = false;
         this.subscribers = new Set();
         this.rateLimitDelay = 250; // Ensure we stay under 300 requests/minute
         this.networkConfig = getNetworkConfig();
+        
+        // Injected dependencies (preferred over window globals)
+        this.webSocket = options.webSocket || null;
         
         // Simplified: Track allowed tokens for pre-fetching
         this.allowedTokens = new Set();
@@ -197,8 +200,9 @@ export class PricingService {
                     this.prices.set(address, data.price);
                 }
                 
-                if (window.webSocket) {
-                    await window.webSocket.updateAllDeals();
+                const ws = this.webSocket || window.webSocket;
+                if (ws) {
+                    await ws.updateAllDeals();
                 }
                 
                 this.lastUpdate = Date.now();
@@ -390,7 +394,8 @@ export class PricingService {
         try {
             this.debug('Fetching allowed tokens from contract...');
             // If WebSocket/contract not ready yet, return empty list gracefully
-            if (!window.webSocket?.contract) {
+            const ws = this.webSocket || window.webSocket;
+            if (!ws?.contract) {
                 this.warn('Contract not available yet; skipping allowed tokens fetch');
                 this.allowedTokens.clear();
                 this.allowedTokensLastFetched = Date.now();

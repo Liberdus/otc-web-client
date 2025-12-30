@@ -5,6 +5,7 @@ import { createLogger } from './LogService.js';
 class ContractService {
     constructor() {
         this.initialized = false;
+        this.webSocket = null; // Injected dependency
         // Initialize logger per instance
         const logger = createLogger('CONTRACT_SERVICE');
         this.debug = logger.debug.bind(logger);
@@ -14,8 +15,13 @@ class ContractService {
 
     /**
      * Initialize the contract service (uses existing WebSocket instances)
+     * @param {Object} options - Optional initialization options
+     * @param {Object} options.webSocket - WebSocket service instance
      */
-    initialize() {
+    initialize(options = {}) {
+        if (options.webSocket) {
+            this.webSocket = options.webSocket;
+        }
         this.initialized = true;
         this.debug('Contract service initialized');
     }
@@ -28,10 +34,11 @@ class ContractService {
         if (!this.initialized) {
             throw new Error('Contract service not initialized');
         }
-        if (!window.webSocket?.contract) {
+        const ws = this.webSocket || window.webSocket;
+        if (!ws?.contract) {
             throw new Error('WebSocket contract not available');
         }
-        return window.webSocket.contract;
+        return ws.contract;
     }
 
     /**
@@ -42,10 +49,11 @@ class ContractService {
         if (!this.initialized) {
             throw new Error('Contract service not initialized');
         }
-        if (!window.webSocket?.provider) {
+        const ws = this.webSocket || window.webSocket;
+        if (!ws?.provider) {
             throw new Error('WebSocket provider not available');
         }
-        return window.webSocket.provider;
+        return ws.provider;
     }
 
     /**

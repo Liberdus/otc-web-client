@@ -172,12 +172,7 @@ export async function getContractAllowedTokens() {
 
     } catch (err) {
         error('Failed to get contract allowed tokens:', err);
-        
-        // Show toast error and return empty list as per migration plan
-        if (window.showError) {
-            window.showError('Unable to retrieve token list from contract');
-        }
-        
+        // Note: Toast notifications should be handled by calling components
         return [];
     }
 }
@@ -474,13 +469,7 @@ export function clearTokenCaches() {
     debug('Token caches cleared');
 }
 
-/**
- * Reset rate limiting state (useful when switching networks or after errors)
- */
-// Deprecated: rate limiting reset (no-op retained for API compatibility)
-export function resetRateLimiting() {
-    debug('resetRateLimiting called (no-op)');
-}
+// Removed deprecated resetRateLimiting() - no longer needed with multicall + caching
 
 /**
  * Get current rate limiting status for debugging

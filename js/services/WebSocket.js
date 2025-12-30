@@ -6,7 +6,7 @@ import { createLogger } from './LogService.js';
 import { tokenIconService } from './TokenIconService.js';
 
 export class WebSocketService {
-    constructor() {
+    constructor(options = {}) {
         this.provider = null;
         this.subscribers = new Map();
         this.reconnectAttempts = 0;
@@ -17,6 +17,9 @@ export class WebSocketService {
         this.contractAddress = null;
         this.contractABI = null;
         this.contract = null;
+        
+        // Injected dependencies (preferred over window globals)
+        this.pricingService = options.pricingService || null;
         
         // Add rate limiting properties
         this.requestQueue = [];
@@ -138,16 +141,17 @@ export class WebSocketService {
                 });
                 
                 // Subscribe to pricing service after everything else is ready
-                if (window.pricingService) {
+                const pricing = this.pricingService || window.pricingService;
+                if (pricing) {
                     this.debug('Subscribing to pricing service...');
-                    window.pricingService.subscribe(() => {
+                    pricing.subscribe(() => {
                         this.debug('Price update received, updating all deals...');
                         this.updateAllDeals();
                     });
                     // Trigger initial allowed token price fetch after contract is ready
                     try {
-                        await window.pricingService.getAllowedTokens();
-                        await window.pricingService.fetchAllowedTokensPrices();
+                        await pricing.getAllowedTokens();
+                        await pricing.fetchAllowedTokensPrices();
                     } catch (err) {
                         this.debug('Initial allowed token fetch after WS init failed:', err);
                     }
@@ -778,8 +782,13 @@ export class WebSocketService {
     async calculateDealMetrics(orderData) {
         const buyTokenInfo = await this.getTokenInfo(orderData.buyToken); // person who created order set this
         const sellTokenInfo = await this.getTokenInfo(orderData.sellToken);// person who created order set this
-        const buyTokenUsdPrice = window.pricingService.getPrice(orderData.buyToken);
-        const sellTokenUsdPrice = window.pricingService.getPrice(orderData.sellToken);
+        const pricing = this.pricingService || window.pricingService;
+        if (!pricing) {
+            this.debug('PricingService not available for deal calculation');
+            return orderData;
+        }
+        const buyTokenUsdPrice = pricing.getPrice(orderData.buyToken);
+        const sellTokenUsdPrice = pricing.getPrice(orderData.sellToken);
         if (buyTokenUsdPrice === undefined || sellTokenUsdPrice === undefined || buyTokenUsdPrice === 0 || sellTokenUsdPrice === 0) {
             this.debug('Missing price data, skipping deal calculation for order:', orderData.id);
             return orderData;
@@ -801,8 +810,13 @@ export class WebSocketService {
             const buyTokenInfo = await this.getTokenInfo(orderData.buyToken);
             const sellTokenInfo = await this.getTokenInfo(orderData.sellToken);
 
-            const buyTokenUsdPrice = window.pricingService.getPrice(orderData.buyToken);
-            const sellTokenUsdPrice = window.pricingService.getPrice(orderData.sellToken);
+            const pricing = this.pricingService || window.pricingService;
+            if (!pricing) {
+                this.debug('PricingService not available for deal update');
+                return orderData;
+            }
+            const buyTokenUsdPrice = pricing.getPrice(orderData.buyToken);
+            const sellTokenUsdPrice = pricing.getPrice(orderData.sellToken);
 
             // Check if we have valid price data
             if (buyTokenUsdPrice === undefined || sellTokenUsdPrice === undefined) {
@@ -926,7 +940,8 @@ export class WebSocketService {
     // Update all deals when prices change
     // Will be used with refresh button in the UI 
     async updateAllDeals() {
-        if (!window.pricingService) {
+        const pricing = this.pricingService || window.pricingService;
+        if (!pricing) {
             this.debug('Cannot update deals: PricingService not available');
             return;
         }
