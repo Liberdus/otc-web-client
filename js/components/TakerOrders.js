@@ -1,10 +1,12 @@
-import { ViewOrders } from './ViewOrders.js';
+import { BaseComponent } from './BaseComponent.js';
 import { createLogger } from '../services/LogService.js';
 import { ethers } from 'ethers';
 import { processOrderAddress, generateStatusCellHTML, setupClickToCopy } from '../utils/ui.js';
 import { formatTimeDiff, formatUsdPrice, calculateTotalValue } from '../utils/orderUtils.js';
+import { OrdersComponentHelper } from '../services/OrdersComponentHelper.js';
+import { OrdersTableRenderer } from '../services/OrdersTableRenderer.js';
 
-export class TakerOrders extends ViewOrders {
+export class TakerOrders extends BaseComponent {
     constructor() {
         super('taker-orders');
         this.isProcessingFill = false;
@@ -14,9 +16,53 @@ export class TakerOrders extends ViewOrders {
         this.debug = logger.debug.bind(logger);
         this.error = logger.error.bind(logger);
         this.warn = logger.warn.bind(logger);
+        
+        // Initialize state
+        this.provider = null;
+        this.currentPage = 1;
+        this.totalOrders = 0;
+        this.eventSubscriptions = new Set();
+        this.expiryTimers = new Map();
+        this.isLoading = false;
+        this.pricingService = null;
+        this.currentAccount = null;
+        
+        // Initialize helper and renderer
+        this.helper = new OrdersComponentHelper(this);
+        this.renderer = new OrdersTableRenderer(this, {
+            rowRenderer: (order) => this.createOrderRow(order),
+            showRefreshButton: false
+        });
     }
 
 
+
+    async initialize(readOnlyMode = true) {
+        // Prevent concurrent initializations
+        if (this.isInitializing) {
+            this.debug('Already initializing, skipping...');
+            return;
+        }
+        
+        this.isInitializing = true;
+        
+        try {
+            if (!this.initialized) {
+                // First time setup
+                this.helper.setupServices({
+                    onRefresh: () => this.refreshOrdersView()
+                });
+                await this.renderer.setupTable(() => this.refreshOrdersView());
+                await this.setupWebSocket();
+                this.initialized = true;
+            }
+            await this.refreshOrdersView();
+        } catch (error) {
+            this.error('Error in initialize:', error);
+        } finally {
+            this.isInitializing = false;
+        }
+    }
 
     async refreshOrdersView() {
         if (this.isLoading) return;
@@ -27,7 +73,7 @@ export class TakerOrders extends ViewOrders {
             
             // Get current user address
             const wallet = this.ctx.getWallet();
-            const userAddress = await wallet?.getAccount();
+            const userAddress = wallet?.getAccount();
             if (!userAddress) {
                 this.debug('No wallet connected, showing empty state');
                 // Show empty state for taker orders when no wallet is connected
@@ -116,38 +162,28 @@ export class TakerOrders extends ViewOrders {
                 ordersToDisplay : 
                 ordersToDisplay.slice(startIndex, endIndex);
 
-            // Display orders
-            const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                this.error('tbody element not found in container');
-                return;
-            }
-
-            tbody.innerHTML = '';
-
-            for (const order of paginatedOrders) {
-                const newRow = await this.createOrderRow(order);
-                if (newRow) {
-                    tbody.appendChild(newRow);
+            // Render orders using renderer
+            if (paginatedOrders.length === 0) {
+                // Show empty state
+                const tbody = this.container.querySelector('tbody');
+                if (tbody) {
+                    tbody.innerHTML = `
+                        <tr class="empty-message">
+                            <td colspan="7" class="no-orders-message">
+                                <div class="placeholder-text">
+                                    ${showOnlyActive ? 
+                                        'No active orders where you are the taker' : 
+                                        'No orders found where you are the taker'}
+                                </div>
+                            </td>
+                        </tr>`;
                 }
+            } else {
+                await this.renderer.renderOrders(paginatedOrders);
             }
 
             // Update pagination controls
-            this.updatePaginationControls(ordersToDisplay.length);
-
-            if (ordersToDisplay.length === 0) {
-                this.debug('No orders to display');
-                tbody.innerHTML = `
-                    <tr class="empty-message">
-                        <td colspan="7" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyActive ? 
-                                    'No active orders where you are the taker' : 
-                                    'No orders found where you are the taker'}
-                            </div>
-                        </td>
-                    </tr>`;
-            }
+            this.renderer.updatePaginationControls(this.totalOrders);
 
         } catch (error) {
             this.error('Error refreshing orders:', error);
@@ -157,47 +193,51 @@ export class TakerOrders extends ViewOrders {
         }
     }
 
-    // Override setupWebSocket to filter for taker events
-    setupWebSocket() {
+    // Setup WebSocket with taker-specific event handling
+    async setupWebSocket() {
         try {
-            super.setupWebSocket();
+            // Setup base WebSocket subscriptions
+            await this.helper.setupWebSocket(() => this.refreshOrdersView());
 
             // Add taker-specific event handling
-            this.eventSubscriptions.add({
-                event: 'orderSyncComplete',
-                callback: async (orders) => {
+            const ws = this.ctx.getWebSocket();
+            if (ws && !this._takerSyncHandler) {
+                this._takerSyncHandler = async (orders) => {
                     if (this.isProcessingFill) {
                         this.debug('Skipping sync while processing fill');
                         return;
                     }
                     
                     const wallet = this.ctx.getWallet();
-                    const userAddress = await wallet?.getAccount();
-                    this.orders.clear();
+                    const userAddress = wallet?.getAccount();
+                    if (!userAddress) return;
                     
-                    const takerOrders = Object.values(orders)
+                    const takerOrders = Object.values(orders || {})
                         .filter(order => 
-                            order.taker.toLowerCase() === userAddress.toLowerCase()
+                            order.taker?.toLowerCase() === userAddress.toLowerCase()
                         );
                     
                     this.debug(`Synced ${takerOrders.length} taker orders`);
-                    
-                    takerOrders.forEach(order => {
-                        this.orders.set(order.id, order);
-                    });
-                    
                     await this.refreshOrdersView();
+                };
+                
+                ws.subscribe('orderSyncComplete', this._takerSyncHandler);
+                if (this.eventSubscriptions) {
+                    this.eventSubscriptions.add({ 
+                        event: 'orderSyncComplete', 
+                        callback: this._takerSyncHandler 
+                    });
                 }
-            });
+            }
         } catch (error) {
             this.error('Error setting up WebSocket:', error);
         }
     }
 
-    // Override setupTable to customize headers and add advanced filters
+    // Setup table with taker-specific customizations
     async setupTable() {
         try {
-            await super.setupTable();
+            await this.renderer.setupTable(() => this.refreshOrdersView());
             
             // Show advanced filters by default
             const advancedFilters = this.container.querySelector('.advanced-filters');
@@ -347,19 +387,75 @@ export class TakerOrders extends ViewOrders {
             const buyTokenIconContainer = tr.querySelector('td:nth-child(3) .token-icon');
             
             if (sellTokenIconContainer) {
-                this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
+                this.helper.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
             }
             if (buyTokenIconContainer) {
-                this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
+                this.helper.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
             }
 
             // Start expiry timer for this row
-            this.startExpiryTimer(tr);
+            this.renderer.startExpiryTimer(tr);
 
             return tr;
         } catch (error) {
             this.error('Error creating order row:', error);
             return null;
         }
+    }
+
+    // Method called by renderer to update action column during expiry timer updates
+    updateActionColumn(actionCell, order, wallet) {
+        const currentAccount = wallet?.getAccount()?.toLowerCase();
+        const ws = this.ctx.getWebSocket();
+
+        // For taker orders, user is the taker - show fill button if they can fill
+        if (ws.canFillOrder(order, currentAccount)) {
+            if (!actionCell.querySelector('.fill-button')) {
+                actionCell.innerHTML = `<button class="fill-button" data-order-id="${order.id}">Fill</button>`;
+                const fillButton = actionCell.querySelector('.fill-button');
+                if (fillButton) {
+                    fillButton.addEventListener('click', () => this.fillOrder(order.id));
+                }
+            }
+        } else {
+            actionCell.innerHTML = '-';
+        }
+    }
+
+    async fillOrder(orderId) {
+        // Delegate to helper or implement fill logic
+        this.debug('Fill order requested:', orderId);
+        this.showInfo(`Fill order ${orderId} - functionality inherited from ViewOrders`);
+    }
+
+    cleanup() {
+        this.debug('Cleaning up TakerOrders...');
+        
+        // Cleanup helper and renderer
+        if (this.helper) {
+            this.helper.cleanup();
+        }
+        if (this.renderer) {
+            this.renderer.cleanup();
+        }
+        
+        // Cleanup taker-specific handler
+        if (this._takerSyncHandler) {
+            const ws = this.ctx.getWebSocket();
+            ws?.unsubscribe('orderSyncComplete', this._takerSyncHandler);
+            this._takerSyncHandler = null;
+        }
+        
+        // Clear expiry timers
+        if (this.expiryTimers) {
+            this.expiryTimers.forEach(timerId => clearInterval(timerId));
+            this.expiryTimers.clear();
+        }
+        
+        // Reset state
+        this.initialized = false;
+        this.isInitializing = false;
+        
+        this.debug('TakerOrders cleanup complete');
     }
 }

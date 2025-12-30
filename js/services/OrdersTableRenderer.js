@@ -53,6 +53,12 @@ export class OrdersTableRenderer {
         }
         this.component._tableSetup = true;
         
+        // Ensure container exists
+        if (!this.component.container) {
+            this.error('Component container not available for setupTable');
+            throw new Error('Component container not initialized');
+        }
+        
         // Clear existing content
         this.component.container.innerHTML = '';
         
@@ -70,10 +76,11 @@ export class OrdersTableRenderer {
         const bottomControls = this._createBottomControls(onRefresh);
         tableContainer.appendChild(bottomControls);
         
-        // Setup event listeners
-        this._setupTableEventListeners(onRefresh);
-        
+        // Append table container to component container first
         this.component.container.appendChild(tableContainer);
+        
+        // Setup event listeners AFTER appending (so elements exist in DOM)
+        this._setupTableEventListeners(onRefresh);
     }
 
     /**
@@ -274,7 +281,16 @@ export class OrdersTableRenderer {
      * Setup table event listeners
      */
     _setupTableEventListeners(onRefresh) {
+        if (!this.component.container) {
+            this.error('Component container not available');
+            return;
+        }
+        
         const filterControls = this.component.container.querySelector('.filter-controls');
+        if (!filterControls) {
+            this.warn('Filter controls not found, skipping event listener setup');
+            return;
+        }
         
         // Filter change listeners
         const sellTokenFilter = filterControls.querySelector('#sell-token-filter');

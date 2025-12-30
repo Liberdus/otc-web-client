@@ -66,9 +66,6 @@ export class ViewOrders extends BaseComponent {
         });
     }
 
-    async init() {
-        await this.helper.initWebSocket(() => this.refreshOrdersView());
-    }
 
     showLoadingState() {
         this.container.innerHTML = `

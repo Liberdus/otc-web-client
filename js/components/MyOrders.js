@@ -81,7 +81,8 @@ export class MyOrders extends BaseComponent {
                 this.helper.setupServices({
                     onRefresh: () => this.refreshOrdersView()
                 });
-                await this.renderer.setupTable(() => this.refreshOrdersView());
+                // Use MyOrders custom table setup (not renderer's generic one)
+                await this.setupTable();
                 await this.helper.setupWebSocket(() => this.refreshOrdersView());
             } else {
                 this.debug('Table already exists, skipping setup');
@@ -179,38 +180,28 @@ export class MyOrders extends BaseComponent {
                 ordersToDisplay = ordersToDisplay.slice(startIndex, endIndex);
             }
 
-            // Update the table
-            const tbody = this.container.querySelector('tbody');
-            if (!tbody) {
-                this.warn('No tbody found in table');
-                return;
-            }
-
-            tbody.innerHTML = '';
-            
-            for (const order of ordersToDisplay) {
-                const newRow = await this.createOrderRow(order);
-                if (newRow) {
-                    tbody.appendChild(newRow);
+            // Render orders using renderer
+            if (ordersToDisplay.length === 0) {
+                // Show empty state
+                const tbody = this.container.querySelector('tbody');
+                if (tbody) {
+                    tbody.innerHTML = `
+                        <tr class="empty-message">
+                            <td colspan="7" class="no-orders-message">
+                                <div class="placeholder-text">
+                                    ${showOnlyCancellable ? 
+                                        'No cancellable orders found' : 
+                                        'No orders found'}
+                                </div>
+                            </td>
+                        </tr>`;
                 }
+            } else {
+                await this.renderer.renderOrders(ordersToDisplay);
             }
 
             // Update pagination controls
             this.renderer.updatePaginationControls(this.totalOrders);
-
-            // Show empty state if no orders
-            if (ordersToDisplay.length === 0) {
-                tbody.innerHTML = `
-                    <tr class="empty-message">
-                        <td colspan="7" class="no-orders-message">
-                            <div class="placeholder-text">
-                                ${showOnlyCancellable ? 
-                                    'No cancellable orders found' : 
-                                    'No orders found'}
-                            </div>
-                        </td>
-                    </tr>`;
-            }
 
             // Checkbox state is now preserved in setupTable(), no need to restore here
 
@@ -447,7 +438,7 @@ export class MyOrders extends BaseComponent {
         const lastUpdatedElement = this.container.querySelector('#last-updated-timestamp');
         
         // Initialize last updated timestamp
-        this.updateLastUpdatedTimestamp(lastUpdatedElement);
+        this.helper.updateLastUpdatedTimestamp(lastUpdatedElement);
         
         let refreshTimeout;
         if (refreshButton) {
@@ -729,10 +720,10 @@ export class MyOrders extends BaseComponent {
             const sellTokenIconContainer = tr.querySelector('td:nth-child(2) .token-icon');
             const buyTokenIconContainer = tr.querySelector('td:nth-child(3) .token-icon');
             if (sellTokenIconContainer) {
-                this.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
+                this.helper.renderTokenIcon(sellTokenInfo, sellTokenIconContainer);
             }
             if (buyTokenIconContainer) {
-                this.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
+                this.helper.renderTokenIcon(buyTokenInfo, buyTokenIconContainer);
             }
 
             // Start the expiry timer
@@ -745,141 +736,97 @@ export class MyOrders extends BaseComponent {
         }
     }
 
+    // updatePaginationControls and startExpiryTimer now handled by renderer
     updatePaginationControls(totalOrders) {
-        const pageSize = parseInt(this.container.querySelector('#page-size-select')?.value || '25');
-        
-        const updateControls = (container) => {
-            const prevButton = container.querySelector('.prev-page');
-            const nextButton = container.querySelector('.next-page');
-            const pageInfo = container.querySelector('.page-info');
-            
-            if (!prevButton || !nextButton || !pageInfo) {
-                this.warn('Pagination controls not found');
-                return;
-            }
-            
-            if (pageSize === -1) {
-                // Show all orders
-                prevButton.disabled = true;
-                nextButton.disabled = true;
-                pageInfo.textContent = `Showing all ${totalOrders} orders`;
-                return;
-            }
-            
-            const totalPages = Math.max(1, Math.ceil(totalOrders / pageSize));
-            
-            // Ensure current page is within bounds
-            this.currentPage = Math.min(Math.max(1, this.currentPage), totalPages);
-            
-            prevButton.disabled = this.currentPage <= 1;
-            nextButton.disabled = this.currentPage >= totalPages;
-            
-            const startItem = ((this.currentPage - 1) * pageSize) + 1;
-            const endItem = Math.min(this.currentPage * pageSize, totalOrders);
-            
-            pageInfo.textContent = `${startItem}-${endItem} of ${totalOrders} orders (Page ${this.currentPage} of ${totalPages})`;
-        };
-        
-        // Update both top and bottom controls
-        const controls = this.container.querySelectorAll('.filter-controls');
-        controls.forEach(updateControls);
+        return this.renderer.updatePaginationControls(totalOrders);
     }
 
-    startExpiryTimer(row) {
-        // Clear any existing timer
-        const existingTimer = this.expiryTimers?.get(row.dataset.orderId);
-        if (existingTimer) {
-            clearInterval(existingTimer);
-        }
+    // Method called by renderer to update action column during expiry timer updates
+    updateActionColumn(actionCell, order, wallet) {
+        const currentAccount = wallet?.getAccount()?.toLowerCase();
+        const ws = this.ctx.getWebSocket();
 
-        // Initialize timers Map if not exists
-        if (!this.expiryTimers) {
-            this.expiryTimers = new Map();
-        }
-
-        const updateExpiryAndButton = async () => {
-            const expiresCell = row.querySelector('td:nth-child(5)');
-            const actionCell = row.querySelector('.action-column');
-            if (!expiresCell || !actionCell) return;
-
-            const orderId = row.dataset.orderId;
-            const ws = this.ctx.getWebSocket();
-            const wallet = this.ctx.getWallet();
-            const order = ws.orderCache.get(Number(orderId));
-            if (!order) return;
-
-            const currentTime = Math.floor(Date.now() / 1000);
-                            const timeDiff = order.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
-            const currentAccount = wallet?.getAccount()?.toLowerCase();
-
-            // Update expiry text - only calculate for active orders
-            const orderStatusForExpiry = ws.getOrderStatus(order);
-            const newExpiryText = orderStatusForExpiry === 'Active' ? formatTimeDiff(timeDiff) : '';
-            if (expiresCell.textContent !== newExpiryText) {
-                expiresCell.textContent = newExpiryText;
-            }
-
-            // Update action column content for MyOrders view
-            if (ws.canCancelOrder(order, currentAccount)) {
-                // Only update if there isn't already a cancel button
-                if (!actionCell.querySelector('.cancel-order-btn')) {
-                    const cancelButton = document.createElement('button');
-                    cancelButton.className = 'cancel-order-btn';
-                    cancelButton.textContent = 'Cancel';
-                    
-                    cancelButton.addEventListener('click', async () => {
-                        try {
-                            if (!this.provider) {
-                                throw new Error('MetaMask is not installed. Please install MetaMask to cancel orders.');
-                            }
-
-                            cancelButton.disabled = true;
-                            cancelButton.textContent = 'Cancelling...';
-                            
-                            // Get contract from WebSocket and connect to signer
-                            const contract = ws.contract;
-                            if (!contract) {
-                                throw new Error('Contract not available');
-                            }
-
-                            const signer = this.provider.getSigner();
-                            const contractWithSigner = contract.connect(signer);
-                            
-                            const gasEstimate = await contractWithSigner.estimateGas.cancelOrder(order.id);
-                            const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
-                            
-                            const tx = await contractWithSigner.cancelOrder(order.id, { gasLimit });
-                            this.showError(`Cancelling order ${order.id}... Transaction sent`);
-                            
-                            const receipt = await tx.wait();
-                            if (receipt.status === 0) {
-                                throw new Error('Transaction reverted by contract');
-                            }
-
-                            this.showSuccess(`Order ${order.id} cancelled successfully!`);
-                            actionCell.textContent = '-';
-                            this.debouncedRefresh();
-                        } catch (error) {
-                            this.debug('Error cancelling order:', error);
-                            handleTransactionError(error, this, 'order cancellation');
-                            cancelButton.disabled = false;
-                            cancelButton.textContent = 'Cancel';
+        if (ws.canCancelOrder(order, currentAccount)) {
+            // Only update if there isn't already a cancel button
+            if (!actionCell.querySelector('.cancel-order-btn')) {
+                const cancelButton = document.createElement('button');
+                cancelButton.className = 'cancel-order-btn';
+                cancelButton.textContent = 'Cancel';
+                
+                cancelButton.addEventListener('click', async () => {
+                    try {
+                        if (!this.provider) {
+                            throw new Error('MetaMask is not installed. Please install MetaMask to cancel orders.');
                         }
-                    });
-                    
-                    actionCell.innerHTML = '';
-                    actionCell.appendChild(cancelButton);
-                }
-            } else if (order.maker?.toLowerCase() === currentAccount) {
-                actionCell.innerHTML = '<span class="your-order">Mine</span>';
-            } else {
-                actionCell.textContent = '-';
-            }
-        };
 
-        // Update immediately and then every minute
-        updateExpiryAndButton();
-        const timerId = setInterval(updateExpiryAndButton, 60000);
-        this.expiryTimers.set(row.dataset.orderId, timerId);
+                        cancelButton.disabled = true;
+                        cancelButton.textContent = 'Cancelling...';
+                        
+                        // Get contract from WebSocket and connect to signer
+                        const contract = ws.contract;
+                        if (!contract) {
+                            throw new Error('Contract not available');
+                        }
+
+                        const signer = this.provider.getSigner();
+                        const contractWithSigner = contract.connect(signer);
+                        
+                        const gasEstimate = await contractWithSigner.estimateGas.cancelOrder(order.id);
+                        const gasLimit = gasEstimate.mul(120).div(100); // Add 20% buffer
+                        
+                        const tx = await contractWithSigner.cancelOrder(order.id, { gasLimit });
+                        this.showError(`Cancelling order ${order.id}... Transaction sent`);
+                        
+                        const receipt = await tx.wait();
+                        if (receipt.status === 0) {
+                            throw new Error('Transaction reverted by contract');
+                        }
+
+                        this.showSuccess(`Order ${order.id} cancelled successfully!`);
+                        actionCell.textContent = '-';
+                        if (this.debouncedRefresh) {
+                            this.debouncedRefresh();
+                        } else {
+                            await this.refreshOrdersView();
+                        }
+                    } catch (error) {
+                        this.debug('Error cancelling order:', error);
+                        handleTransactionError(error, this, 'order cancellation');
+                        cancelButton.disabled = false;
+                        cancelButton.textContent = 'Cancel';
+                    }
+                });
+                
+                actionCell.innerHTML = '';
+                actionCell.appendChild(cancelButton);
+            }
+        } else if (order.maker?.toLowerCase() === currentAccount) {
+            actionCell.innerHTML = '<span class="your-order">Mine</span>';
+        } else {
+            actionCell.textContent = '-';
+        }
+    }
+
+    cleanup() {
+        this.debug('Cleaning up MyOrders...');
+        
+        // Cleanup helper and renderer
+        if (this.helper) {
+            this.helper.cleanup();
+        }
+        if (this.renderer) {
+            this.renderer.cleanup();
+        }
+        
+        // Clear expiry timers
+        if (this.expiryTimers) {
+            this.expiryTimers.forEach(timerId => clearInterval(timerId));
+            this.expiryTimers.clear();
+        }
+        
+        // Reset state
+        this.isInitializing = false;
+        
+        this.debug('MyOrders cleanup complete');
     }
 }
