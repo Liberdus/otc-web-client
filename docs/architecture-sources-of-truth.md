@@ -71,7 +71,7 @@ This allows gradual migration without breaking existing code.
 
 ---
 
-## Current State (Post Phase 2)
+## Current State (Post Phase 3)
 
 ### Wallet / Signer / Account
 
@@ -127,12 +127,11 @@ This allows gradual migration without breaking existing code.
 
 | Concern | Current Location(s) | Notes |
 |---------|---------------------|-------|
-| Token cache (symbol, decimals, icon) | `WebSocketService.tokenCache` | **Recommended canonical** |
+| Token cache (symbol, decimals, icon) | `WebSocketService.tokenCache` | **Canonical** ✅ |
 | Get token info | `window.webSocket.getTokenInfo(address)` | Uses cache, fetches if missing |
-| Duplicate cache | `BaseComponent.tokenCache` | Unused by most components |
-| Duplicate cache | `CreateOrder.tokenCache` | Used for decimals lookup |
+| Via context | `this.ctx.getWebSocket().getTokenInfo(address)` | **Preferred access pattern** |
 
-**Issue:** Three separate token caches exist. Should consolidate to `WebSocketService.tokenCache`.
+**Resolved in Phase 3:** Duplicate caches removed from `BaseComponent` and `CreateOrder`. All token lookups now use `WebSocketService.getTokenInfo()` via context.
 
 ---
 

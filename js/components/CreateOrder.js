@@ -22,7 +22,7 @@ export class CreateOrder extends BaseComponent {
         this.initialized = false;
         this.isRendered = false;
         this.hasLoadedData = false;
-        this.tokenCache = new Map();
+        // Token cache removed - use WebSocket's centralized token cache via ctx.getWebSocket()
         this.boundCreateOrderHandler = this.handleCreateOrder.bind(this);
         this.isSubmitting = false;
         this.tokens = [];
@@ -62,7 +62,7 @@ export class CreateOrder extends BaseComponent {
         // this.sellToken = null;  // Commented out - not resetting form
         // this.buyToken = null;   // Commented out - not resetting form
         this.feeToken = null;
-        this.tokenCache.clear();
+        // Token cache is centralized in WebSocket - no local cache to clear
         this.resetBalanceDisplays();
     }
 
@@ -1653,18 +1653,28 @@ export class CreateOrder extends BaseComponent {
         }
     }
 
+    /**
+     * Get token decimals using WebSocket's centralized token cache
+     * Falls back to direct contract call if WebSocket not available
+     * @param {string} tokenAddress - Token contract address
+     * @returns {Promise<number>} Token decimals
+     */
     async getTokenDecimals(tokenAddress) {
         try {
-            // Check if token is in cache
             const normalizedAddress = tokenAddress.toLowerCase();
-            const cachedToken = this.tokenCache.get(normalizedAddress);
             
-            if (cachedToken?.decimals) {
-                this.debug(`Cache hit for decimals: ${tokenAddress}`);
-                return cachedToken.decimals;
+            // Use WebSocket's centralized token cache
+            const ws = this.ctx.getWebSocket();
+            if (ws && typeof ws.getTokenInfo === 'function') {
+                const tokenInfo = await ws.getTokenInfo(normalizedAddress);
+                if (tokenInfo?.decimals !== undefined) {
+                    this.debug(`Cache hit for decimals: ${tokenAddress} = ${tokenInfo.decimals}`);
+                    return tokenInfo.decimals;
+                }
             }
 
-            // If not in cache, fetch from contract
+            // Fallback: fetch directly from contract
+            this.debug(`Fetching decimals directly for: ${tokenAddress}`);
             const tokenContract = new ethers.Contract(
                 tokenAddress,
                 ['function decimals() view returns (uint8)'],
@@ -1673,14 +1683,6 @@ export class CreateOrder extends BaseComponent {
             
             const decimals = await tokenContract.decimals();
             this.debug(`Fetched decimals for token ${tokenAddress}: ${decimals}`);
-            
-            // Update cache
-            if (cachedToken) {
-                cachedToken.decimals = decimals;
-                this.tokenCache.set(normalizedAddress, cachedToken);
-            } else {
-                this.tokenCache.set(normalizedAddress, { decimals });
-            }
             
             return decimals;
         } catch (error) {

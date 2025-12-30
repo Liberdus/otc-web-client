@@ -57,8 +57,10 @@ export class BaseComponent {
         // App context (injected via setContext, falls back to global)
         this._ctx = null;
         
-        // Initialize the token cache
-        this.tokenCache = new Map();
+        // Token cache removed - use WebSocketService.getTokenInfo() via ctx.getWebSocket()
+        // Balance cache for user-specific balance lookups
+        this.balanceCache = new Map();
+        
         // Initialize provider from window.walletManager if available
         this.provider = window.walletManager?.provider || null;
     }
@@ -207,7 +209,14 @@ export class BaseComponent {
         }
     }
 
-    // Add this method to BaseComponent.js
+    /**
+     * Get token details for one or more addresses
+     * Uses WebSocket's centralized token cache for symbol/decimals/name,
+     * and fetches balance on-demand for the connected user.
+     * 
+     * @param {string|string[]} tokenAddresses - Token address(es) to look up
+     * @returns {Promise<Object[]>} Array of token details with balance info
+     */
     async getTokenDetails(tokenAddresses) {
         try {
             this.debug('Getting token details for:', tokenAddresses);
@@ -233,58 +242,57 @@ export class BaseComponent {
                 return addressArray.map(() => null);
             }
 
+            // Get WebSocket service for centralized token cache
+            const ws = this.ctx.getWebSocket();
+
             const results = await Promise.all(validAddresses.map(async (tokenAddress) => {
-                // Check cache first with lowercase address
-                if (this.tokenCache.has(tokenAddress)) {
-                    this.debug('Cache hit for token:', tokenAddress);
-                    // If we have a user address, update balance even for cached tokens
+                try {
+                    // Use WebSocket's centralized token cache for symbol/decimals/name
+                    let tokenInfo = null;
+                    if (ws && typeof ws.getTokenInfo === 'function') {
+                        tokenInfo = await ws.getTokenInfo(tokenAddress);
+                    }
+                    
+                    // Fallback if WebSocket not available
+                    if (!tokenInfo) {
+                        const tokenContract = new ethers.Contract(
+                            tokenAddress,
+                            erc20Abi,
+                            this.provider
+                        );
+                        const [name, symbol, decimals] = await Promise.all([
+                            tokenContract.name().catch(() => null),
+                            tokenContract.symbol().catch(() => null),
+                            tokenContract.decimals().catch(() => 18)
+                        ]);
+                        const shortAddr = `${tokenAddress.slice(0, 6)}...${tokenAddress.slice(-4)}`;
+                        tokenInfo = {
+                            address: tokenAddress,
+                            name: name || shortAddr,
+                            symbol: symbol || 'UNK',
+                            decimals
+                        };
+                    }
+                    
+                    // Fetch balance if user is connected
+                    let balance = '0';
+                    let formattedBalance = '0';
                     if (userAddress) {
                         const tokenContract = new ethers.Contract(
                             tokenAddress,
                             erc20Abi,
                             this.provider
                         );
-                        const balance = await tokenContract.balanceOf(userAddress);
-                        const cachedDetails = this.tokenCache.get(tokenAddress);
-                        return {
-                            ...cachedDetails,
-                            balance,
-                            formattedBalance: ethers.utils.formatUnits(balance, cachedDetails.decimals)
-                        };
+                        balance = await tokenContract.balanceOf(userAddress).catch(() => '0');
+                        formattedBalance = ethers.utils.formatUnits(balance, tokenInfo.decimals);
                     }
-                    return this.tokenCache.get(tokenAddress);
-                }
-
-                try {
-                    const tokenContract = new ethers.Contract(
-                        tokenAddress,
-                        erc20Abi,
-                        this.provider
-                    );
-
-                    // Use Promise.all for parallel requests
-                    const [name, symbol, decimals, balance] = await Promise.all([
-                        tokenContract.name().catch(() => null),
-                        tokenContract.symbol().catch(() => null),
-                        tokenContract.decimals().catch(() => 18),
-                        userAddress ? tokenContract.balanceOf(userAddress).catch(() => '0') : '0'
-                    ]);
-
-                    // If both name and symbol failed, use formatted address
-                    const shortAddr = `${tokenAddress.slice(0, 6)}...${tokenAddress.slice(-4)}`;
-                    const details = {
-                        name: name || shortAddr,
-                        symbol: symbol || 'UNK',
-                        decimals,
+                    
+                    return {
+                        ...tokenInfo,
                         address: tokenAddress,
                         balance,
-                        formattedBalance: ethers.utils.formatUnits(balance, decimals)
+                        formattedBalance
                     };
-
-                    // Cache the result with lowercase address
-                    this.tokenCache.set(tokenAddress, details);
-                    this.debug('Added token to cache:', { address: tokenAddress, details });
-                    return details;
                 } catch (error) {
                     this.debug('Error fetching token details:', {
                         address: tokenAddress,
@@ -294,7 +302,6 @@ export class BaseComponent {
                 }
             }));
 
-            this.debug('Token cache after update:', Array.from(this.tokenCache.entries()));
             return results;
         } catch (error) {
             this.error('Error in getTokenDetails:', error);
