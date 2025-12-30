@@ -2,6 +2,7 @@ import { ViewOrders } from './ViewOrders.js';
 import { createLogger } from '../services/LogService.js';
 import { ethers } from 'ethers';
 import { processOrderAddress, generateStatusCellHTML, setupClickToCopy } from '../utils/ui.js';
+import { formatTimeDiff, formatUsdPrice, calculateTotalValue } from '../utils/orderUtils.js';
 
 export class TakerOrders extends ViewOrders {
     constructor() {
@@ -276,23 +277,6 @@ export class TakerOrders extends ViewOrders {
                     ? ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals)
                     : '0');
 
-            // Format USD prices
-            const formatUsdPrice = (price) => {
-                if (!price) return '';
-                if (price >= 100) return `$${price.toFixed(0)}`;
-                if (price >= 1) return `$${price.toFixed(2)}`;
-                return `$${price.toFixed(4)}`;
-            };
-
-            // Calculate total values (price × amount)
-            const calculateTotalValue = (price, amount) => {
-                if (!price || !amount) return 'N/A';
-                const total = price * parseFloat(amount);
-                if (total >= 100) return `$${total.toFixed(0)}`;
-                if (total >= 1) return `$${total.toFixed(2)}`;
-                return `$${total.toFixed(4)}`;
-            };
-
             // Determine prices with fallback to current pricing service map
             const pricing = this.ctx.getPricing();
             const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
@@ -309,7 +293,7 @@ export class TakerOrders extends ViewOrders {
             const orderStatus = ws.getOrderStatus(order);
             const expiryEpoch = order?.timings?.expiresAt;
             const expiryText = orderStatus === 'Active' && typeof expiryEpoch === 'number' 
-                ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
+                ? formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
                 : '';
 
             // Get counterparty address for display

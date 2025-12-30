@@ -8,6 +8,7 @@ import { createLogger } from '../services/LogService.js';
 import { tokenIconService } from '../services/TokenIconService.js';
 import { generateTokenIconHTML } from '../utils/tokenIcons.js';
 import { handleTransactionError } from '../utils/ui.js';
+import { formatAddress, formatTimestamp, formatTimeDiff, getExplorerUrl, getOrderStatusText, formatUsdPrice, calculateTotalValue } from '../utils/orderUtils.js';
 
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
@@ -693,20 +694,6 @@ export class ViewOrders extends BaseComponent {
         this.container.appendChild(tableContainer);
     }
 
-    formatAddress(address) {
-        return `${address.slice(0, 6)}...${address.slice(-4)}`;
-    }
-
-    formatTimestamp(timestamp) {
-        const date = new Date(Number(timestamp) * 1000);
-        return date.toLocaleDateString('en-US', {
-            month: 'numeric',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit'
-        });
-    }
-
     setupEventListeners() {
         this.tbody.addEventListener('click', async (e) => {
             if (e.target.classList.contains('fill-button')) {
@@ -786,7 +773,7 @@ export class ViewOrders extends BaseComponent {
             this.debug('Current order state:', currentOrder);
             
             if (currentOrder.status !== 0) {
-                throw new Error(`Order is not active (status: ${this.getOrderStatusText(currentOrder.status)})`);
+                throw new Error(`Order is not active (status: ${getOrderStatusText(currentOrder.status)})`);
             }
 
             // Check expiry
@@ -1016,23 +1003,6 @@ export class ViewOrders extends BaseComponent {
                     ? ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals)
                     : '0');
 
-            // Format USD prices
-            const formatUsdPrice = (price) => {
-                if (!price) return '';
-                if (price >= 100) return `$${price.toFixed(0)}`;
-                if (price >= 1) return `$${price.toFixed(2)}`;
-                return `$${price.toFixed(4)}`;
-            };
-
-            // Calculate total values (price × amount)
-            const calculateTotalValue = (price, amount) => {
-                if (!price || !amount) return 'N/A';
-                const total = price * parseFloat(amount);
-                if (total >= 100) return `$${total.toFixed(0)}`;
-                if (total >= 1) return `$${total.toFixed(2)}`;
-                return `$${total.toFixed(4)}`;
-            };
-
             // Determine prices with fallback to current pricing service map
             const pricing = this.ctx.getPricing();
             const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
@@ -1049,7 +1019,7 @@ export class ViewOrders extends BaseComponent {
             const orderStatus = ws.getOrderStatus(order);
             const expiryEpoch = order?.timings?.expiresAt;
             const expiryText = orderStatus === 'Active' && typeof expiryEpoch === 'number' 
-                ? this.formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
+                ? formatTimeDiff(expiryEpoch - Math.floor(Date.now() / 1000)) 
                 : '';
 
             tr.innerHTML = `
@@ -1176,7 +1146,7 @@ export class ViewOrders extends BaseComponent {
 
             // Update expiry text - only calculate for active orders
             const orderStatusForExpiry = ws.getOrderStatus(order);
-            const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
+            const newExpiryText = orderStatusForExpiry === 'Active' ? formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
@@ -1213,44 +1183,11 @@ export class ViewOrders extends BaseComponent {
         this.expiryTimers.set(row.dataset.orderId, timerId);
     }
 
-    getExplorerUrl(address) {
-        const networkConfig = getNetworkConfig();
-        if (!networkConfig?.explorer) {
-            this.warn('Explorer URL not configured');
-            return '#';
-        }
-        return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
-    }
-
-    getOrderStatusText(status) {
-        const statusMap = {
-            0: 'Active',
-            1: 'Filled',
-            2: 'Cancelled'
-            // Removed status 3 (Expired) as we want to keep showing 'Active'
-        };
-        return statusMap[status] || `Unknown (${status})`;
-    }
-
     async getContract() {
         const ws = this.ctx.getWebSocket();
         if (!ws?.contract) {
             throw new Error('WebSocket contract not initialized');
         }
         return ws.contract;
-    }
-
-    formatTimeDiff(seconds) {
-        const days = Math.floor(seconds / 86400);
-        const hours = Math.floor((seconds % 86400) / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        
-        if (days > 0) {
-            return `${days}D ${hours}H ${minutes}M`;
-        } else if (hours > 0) {
-            return `${hours}H ${minutes}M`;
-        } else {
-            return `${minutes}M`;
-        }
     }
 }

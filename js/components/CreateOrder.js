@@ -10,6 +10,7 @@ import { validateSellBalance } from '../utils/balanceValidation.js';
 import { tokenIconService } from '../services/TokenIconService.js';
 import { generateTokenIconHTML, getFallbackIconData } from '../utils/tokenIcons.js';
 import { handleTransactionError } from '../utils/ui.js';
+import { getExplorerUrl } from '../utils/orderUtils.js';
 
 export class CreateOrder extends BaseComponent {
     // Liberdus token addresses by network chainId (decimal, not hex)
@@ -1131,7 +1132,7 @@ export class CreateOrder extends BaseComponent {
                                                 </div>
                                                 <div class="token-item-name">
                                                     ${token.name}
-                                                    <a href="${this.getExplorerUrl(token.address)}" 
+                                                    <a href="${getExplorerUrl(token.address)}" 
                                                        target="_blank"
                                                        class="token-explorer-link"
                                                        onclick="event.stopPropagation();">
@@ -1222,7 +1223,7 @@ export class CreateOrder extends BaseComponent {
                                                     </div>
                                                     <div class="token-item-name">
                                                         ${token.name}
-                                                        <a href="${this.getExplorerUrl(token.address)}" 
+                                                        <a href="${getExplorerUrl(token.address)}" 
                                                            target="_blank"
                                                            class="token-explorer-link"
                                                            onclick="event.stopPropagation();">
@@ -1382,7 +1383,7 @@ export class CreateOrder extends BaseComponent {
                             <div class="token-balance-usd">${formattedUsdValue}</div>
                         </div>
                         <div class="token-item-actions">
-                            <a href="${this.getExplorerUrl(token.address)}" 
+                            <a href="${getExplorerUrl(token.address)}" 
                                target="_blank"
                                class="token-explorer-link"
                                onclick="event.stopPropagation();"
@@ -1508,7 +1509,7 @@ export class CreateOrder extends BaseComponent {
                             <div class="token-balance-usd">${formattedUsdValue}</div>
                         </div>
                         <div class="token-item-actions">
-                            <a href="${this.getExplorerUrl(token.address)}" 
+                            <a href="${getExplorerUrl(token.address)}" 
                                target="_blank"
                                class="token-explorer-link"
                                onclick="event.stopPropagation();"
@@ -1528,15 +1529,6 @@ export class CreateOrder extends BaseComponent {
             // Add to container
             container.appendChild(tokenElement);
         });
-    }
-
-    getExplorerUrl(address) {
-        const networkConfig = getNetworkConfig();
-        if (!networkConfig?.explorer) {
-            this.warn('Explorer URL not configured');
-            return '#';
-        }
-        return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
     }
 
     /**

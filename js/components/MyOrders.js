@@ -2,6 +2,7 @@ import { ViewOrders } from './ViewOrders.js';
 import { createLogger } from '../services/LogService.js';
 import { ethers } from 'ethers';
 import { handleTransactionError, processOrderAddress, generateStatusCellHTML, setupClickToCopy } from '../utils/ui.js';
+import { formatTimeDiff, formatUsdPrice, calculateTotalValue } from '../utils/orderUtils.js';
 
 export class MyOrders extends ViewOrders {
     constructor() {
@@ -566,23 +567,6 @@ export class MyOrders extends ViewOrders {
                     ? ethers.utils.formatUnits(order.buyAmount, buyTokenInfo.decimals)
                     : '0');
 
-            // Format USD prices with appropriate precision
-            const formatUsdPrice = (price) => {
-                if (!price) return '';
-                if (price >= 100) return `$${price.toFixed(0)}`;
-                if (price >= 1) return `$${price.toFixed(2)}`;
-                return `$${price.toFixed(4)}`;
-            };
-
-            // Calculate total values (price × amount)
-            const calculateTotalValue = (price, amount) => {
-                if (!price || !amount) return 'N/A';
-                const total = price * parseFloat(amount);
-                if (total >= 100) return `$${total.toFixed(0)}`;
-                if (total >= 1) return `$${total.toFixed(2)}`;
-                return `$${total.toFixed(4)}`;
-            };
-
             // Determine prices with fallback to current pricing service map
             const pricing = this.ctx.getPricing();
             const resolvedSellPrice = typeof sellTokenUsdPrice !== 'undefined' 
@@ -599,7 +583,7 @@ export class MyOrders extends ViewOrders {
             const currentTime = Math.floor(Date.now() / 1000);
             const timeUntilExpiry = order?.timings?.expiresAt ? order.timings.expiresAt - currentTime : 0;
             const orderStatusForExpiry = ws.getOrderStatus(order);
-            const expiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeUntilExpiry) : '';
+            const expiryText = orderStatusForExpiry === 'Active' ? formatTimeDiff(timeUntilExpiry) : '';
 
             // Get order status from WebSocket cache
             const orderStatus = ws.getOrderStatus(order);
@@ -806,7 +790,7 @@ export class MyOrders extends ViewOrders {
 
             // Update expiry text - only calculate for active orders
             const orderStatusForExpiry = ws.getOrderStatus(order);
-            const newExpiryText = orderStatusForExpiry === 'Active' ? this.formatTimeDiff(timeDiff) : '';
+            const newExpiryText = orderStatusForExpiry === 'Active' ? formatTimeDiff(timeDiff) : '';
             if (expiresCell.textContent !== newExpiryText) {
                 expiresCell.textContent = newExpiryText;
             }
