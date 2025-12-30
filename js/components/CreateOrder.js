@@ -12,8 +12,11 @@ import { generateTokenIconHTML, getFallbackIconData } from '../utils/tokenIcons.
 import { handleTransactionError } from '../utils/ui.js';
 
 export class CreateOrder extends BaseComponent {
-    // Liberdus token address constant
-    static LIBERDUS_ADDRESS = '0x693ed886545970f0a3adf8c59af5ccdb6ddf0a76';
+    // Liberdus token addresses by network chainId (decimal, not hex)
+    static LIBERDUS_ADDRESSES = {
+        '137': '0x693ed886545970f0a3adf8c59af5ccdb6ddf0a76', // Polygon Mainnet
+        '80002': '0xb96AC22BaC90Cd59A30376309e54385413517119' // Amoy Testnet
+    };
     
     constructor() {
         super('create-order');
@@ -1533,9 +1536,44 @@ export class CreateOrder extends BaseComponent {
         return `${networkConfig.explorer}/address/${ethers.utils.getAddress(address)}`;
     }
 
-    // Helper method to check if a token is Liberdus
+    /**
+     * Helper method to check if a token is Liberdus
+     * Uses network-aware address lookup based on current chainId
+     * @param {string} tokenAddress - Token address to check
+     * @returns {boolean} True if the token is Liberdus on the current network
+     */
     isLiberdusToken(tokenAddress) {
-        return tokenAddress.toLowerCase() === CreateOrder.LIBERDUS_ADDRESS.toLowerCase();
+        try {
+            // Get current chainId from walletManager
+            const chainId = walletManager?.chainId;
+            if (!chainId) {
+                this.debug('No chainId available, cannot verify Liberdus token');
+                return false;
+            }
+            
+            // Convert hex chainId to decimal string for lookup
+            const chainIdDecimal = typeof chainId === 'string' && chainId.startsWith('0x')
+                ? parseInt(chainId, 16).toString()
+                : chainId.toString();
+            
+            // Look up Liberdus address for current network
+            const liberdusAddress = CreateOrder.LIBERDUS_ADDRESSES[chainIdDecimal];
+            
+            if (!liberdusAddress) {
+                this.debug(`No Liberdus address configured for chainId: ${chainIdDecimal}`);
+                return false;
+            }
+            
+            const isLiberdus = tokenAddress.toLowerCase() === liberdusAddress.toLowerCase();
+            if (isLiberdus) {
+                this.debug(`Token ${tokenAddress} is Liberdus on chain ${chainIdDecimal}`);
+            }
+            
+            return isLiberdus;
+        } catch (error) {
+            this.debug('Error checking if token is Liberdus:', error);
+            return false;
+        }
     }
 
     // Add helper method for token icons
