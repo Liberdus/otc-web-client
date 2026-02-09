@@ -941,6 +941,12 @@ function syncNetworkBadgeFromState() {
 	const selectedNetwork = getNetworkBySlug(selectedSlug) || getDefaultNetwork();
 	networkBadge.textContent = selectedNetwork.displayName || selectedNetwork.name;
 	networkBadge.classList.remove('connected', 'wrong-network');
+	if (networkButton) {
+		networkButton.dataset.networkStatus = 'default';
+	}
+	if (networkDropdown) {
+		networkDropdown.dataset.networkStatus = 'default';
+	}
 
 	const walletChainId = window.app?.ctx?.getWalletChainId?.();
 	if (!walletChainId) return;
@@ -948,8 +954,20 @@ function syncNetworkBadgeFromState() {
 	const walletNetwork = getNetworkById(walletChainId);
 	if (walletNetwork && walletNetwork.slug === selectedNetwork.slug) {
 		networkBadge.classList.add('connected');
+		if (networkButton) {
+			networkButton.dataset.networkStatus = 'connected';
+		}
+		if (networkDropdown) {
+			networkDropdown.dataset.networkStatus = 'connected';
+		}
 	} else {
 		networkBadge.classList.add('wrong-network');
+		if (networkButton) {
+			networkButton.dataset.networkStatus = 'wrong-network';
+		}
+		if (networkDropdown) {
+			networkDropdown.dataset.networkStatus = 'wrong-network';
+		}
 	}
 }
 
