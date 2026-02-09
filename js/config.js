@@ -6,32 +6,33 @@ export const APP_BRAND = 'LiberdusOTC';
 export const APP_LOGO = 'assets/1.png';
 
 const networkConfig = {
-    // "80002": {
-    // name: "Amoy",
-    // displayName: "Polygon Amoy Testnet",
-    // isDefault: false,
-    // contractAddress: "0x7A64764074971839bd5A3022beA2450CBc51dEC8",
-    // contractABI: CONTRACT_ABI,
-    // explorer: "https://www.oklink.com/amoy",
-    // rpcUrl: "https://rpc-amoy.polygon.technology",
-    // fallbackRpcUrls: [
-    //     "https://rpc.ankr.com/polygon_amoy",
-    //     "https://polygon-amoy.blockpi.network/v1/rpc/public",
-    //     "https://polygon-amoy.public.blastapi.io"
-    // ],
-    // chainId: "0x13882",
-    // nativeCurrency: {
-    //     name: "POL",
-    //     symbol: "POL",
-    //     decimals: 18
-    // },
-    // // multicall address amoy testnet
-    // multicallAddress: "0xca11bde05977b3631167028862be2a173976ca11",
-    // wsUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
-    // fallbackWsUrls: [
-    //     "wss://polygon-amoy.public.blastapi.io"
-    // ]
-    // },
+    "80002": {
+        slug: "amoy",
+        name: "Amoy",
+        displayName: "Polygon Amoy Testnet",
+        isDefault: false,
+        contractAddress: "0x7A64764074971839bd5A3022beA2450CBc51dEC8",
+        contractABI: CONTRACT_ABI,
+        explorer: "https://www.oklink.com/amoy",
+        rpcUrl: "https://rpc-amoy.polygon.technology",
+        fallbackRpcUrls: [
+            "https://rpc.ankr.com/polygon_amoy",
+            "https://polygon-amoy.blockpi.network/v1/rpc/public",
+            "https://polygon-amoy.public.blastapi.io"
+        ],
+        chainId: "0x13882",
+        nativeCurrency: {
+            name: "POL",
+            symbol: "POL",
+            decimals: 18
+        },
+        // multicall address amoy testnet
+        multicallAddress: "0xca11bde05977b3631167028862be2a173976ca11",
+        wsUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
+        fallbackWsUrls: [
+            "wss://polygon-amoy.public.blastapi.io"
+        ]
+    },
     "137": {
         slug: "polygon",
         name: "Polygon",
@@ -65,33 +66,23 @@ const networkConfig = {
     },
 };
 
-// replace above with this when testing amoy
-/* "80002": {
-    name: "Amoy",
-    displayName: "Polygon Amoy Testnet",
-    isDefault: true,
-    contractAddress: "0x0BE723F88aDb867022fA0a71EB82365556cb3c8C",
-    contractABI: CONTRACT_ABI,
-    explorer: "https://www.oklink.com/amoy",
-    rpcUrl: "https://rpc-amoy.polygon.technology",
-    fallbackRpcUrls: [
-        "https://rpc.ankr.com/polygon_amoy",
-        "https://polygon-amoy.blockpi.network/v1/rpc/public",
-        "https://polygon-amoy.public.blastapi.io"
-    ],
-    chainId: "0x13882",
-    nativeCurrency: {
-        name: "POL",
-        symbol: "POL",
-        decimals: 18
-    },
-    // multicall address amoy testnet
-    multicallAddress: "0xca11bde05977b3631167028862be2a173976ca11",
-    wsUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
-    fallbackWsUrls: [
-        "wss://polygon-amoy.public.blastapi.io"
-    ]
-}, */
+const normalizeChainId = (chainId) => {
+    if (chainId === null || chainId === undefined) {
+        return null;
+    }
+
+    const chainIdStr = String(chainId).toLowerCase();
+    if (/^0x[0-9a-f]+$/.test(chainIdStr)) {
+        const decimalValue = parseInt(chainIdStr, 16);
+        return Number.isNaN(decimalValue) ? null : String(decimalValue);
+    }
+
+    if (/^\d+$/.test(chainIdStr)) {
+        return chainIdStr;
+    }
+
+    return null;
+};
 
 
 export const DEBUG_CONFIG = {
@@ -192,6 +183,8 @@ export const getDefaultNetwork = () => {
     return defaultNetwork;
 };
 
+let activeNetworkSlug = getDefaultNetwork().slug;
+
 export const getNetworkBySlug = (slug) => {
     if (!slug) return null;
     const normalizedSlug = String(slug).toLowerCase();
@@ -199,28 +192,41 @@ export const getNetworkBySlug = (slug) => {
 };
 
 export const getNetworkById = (chainId) => {
-    if (chainId === null || chainId === undefined) {
-        return null;
-    }
-
-    // Convert hex chainId to decimal if needed
-    const chainIdStr = String(chainId);
-    const decimalChainId = chainIdStr.startsWith('0x')
-        ? parseInt(chainIdStr, 16).toString()
-        : chainIdStr;
-    
+    const decimalChainId = normalizeChainId(chainId);
+    if (!decimalChainId) return null;
     return networkConfig[decimalChainId];
 };
 
+export const getActiveNetwork = () => {
+    return getNetworkBySlug(activeNetworkSlug) || getDefaultNetwork();
+};
+
+export const setActiveNetwork = (networkRef) => {
+    let network = null;
+
+    if (networkRef && typeof networkRef === 'object' && networkRef.slug) {
+        network = getNetworkBySlug(networkRef.slug);
+    } else {
+        network = getNetworkBySlug(networkRef) || getNetworkById(networkRef);
+    }
+
+    if (!network) {
+        throw new Error(`Cannot set active network. Unsupported value: ${networkRef}`);
+    }
+
+    activeNetworkSlug = network.slug;
+    return network;
+};
+
 export const getNetworkConfig = (chainId = null) => {
-    if (chainId) {
+    if (chainId !== null && chainId !== undefined) {
         const network = getNetworkById(chainId);
         if (!network) {
             throw new Error(`Network configuration not found for chain ID: ${chainId}`);
         }
         return network;
     }
-    return getDefaultNetwork();
+    return getActiveNetwork();
 };
 
 export class WalletManager {
@@ -243,8 +249,8 @@ export class WalletManager {
         this.provider = null;
         this.signer = null;
         this.contract = null;
-        this.contractAddress = getDefaultNetwork().contractAddress;
-        this.contractABI = getDefaultNetwork().contractABI;
+        this.contractAddress = getActiveNetwork().contractAddress;
+        this.contractABI = getActiveNetwork().contractABI;
         this.isInitialized = false;
         this.contractInitialized = false;
         
@@ -352,9 +358,12 @@ export class WalletManager {
         }
 
         try {
-            const networkConfig = getNetworkConfig();
+            const currentNetwork = getNetworkById(this.chainId) || getNetworkConfig();
+            this.contractAddress = currentNetwork.contractAddress;
+            this.contractABI = currentNetwork.contractABI;
+
             this.contract = new ethers.Contract(
-                networkConfig.contractAddress,
+                currentNetwork.contractAddress,
                 CONTRACT_ABI,
                 this.signer
             );
@@ -422,6 +431,65 @@ export class WalletManager {
         } finally {
             this.isConnecting = false;
         }
+    }
+
+    async switchToNetwork(targetNetworkRef) {
+        if (typeof window.ethereum === 'undefined') {
+            throw new Error('MetaMask is not installed');
+        }
+
+        const targetNetwork =
+            (targetNetworkRef && typeof targetNetworkRef === 'object' && targetNetworkRef.chainId
+                ? targetNetworkRef
+                : (getNetworkBySlug(targetNetworkRef) || getNetworkById(targetNetworkRef)));
+
+        if (!targetNetwork) {
+            throw new Error(`Unsupported target network: ${targetNetworkRef}`);
+        }
+
+        const currentChainId = this.chainId || await window.ethereum.request({ method: 'eth_chainId' });
+        if (normalizeChainId(currentChainId) === normalizeChainId(targetNetwork.chainId)) {
+            setActiveNetwork(targetNetwork);
+            return targetNetwork;
+        }
+
+        try {
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: targetNetwork.chainId }]
+            });
+        } catch (error) {
+            if (error?.code !== 4902) {
+                throw error;
+            }
+
+            await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [{
+                    chainId: targetNetwork.chainId,
+                    chainName: targetNetwork.displayName || targetNetwork.name,
+                    nativeCurrency: targetNetwork.nativeCurrency,
+                    rpcUrls: [targetNetwork.rpcUrl, ...(targetNetwork.fallbackRpcUrls || [])],
+                    blockExplorerUrls: [targetNetwork.explorer]
+                }]
+            });
+
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: targetNetwork.chainId }]
+            });
+        }
+
+        const switchedChainId = await window.ethereum.request({ method: 'eth_chainId' });
+        this.chainId = switchedChainId;
+        setActiveNetwork(targetNetwork);
+
+        if (this.signer) {
+            this.contractInitialized = false;
+            await this.initializeContract();
+        }
+
+        return targetNetwork;
     }
 
     async handleAccountsChanged(accounts) {

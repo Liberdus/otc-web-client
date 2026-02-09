@@ -1,6 +1,6 @@
 import { BaseComponent } from './components/BaseComponent.js';
 import { CreateOrder } from './components/CreateOrder.js';
-import { walletManager, getNetworkConfig, getAllNetworks, getNetworkById, getNetworkBySlug, getDefaultNetwork, APP_BRAND, APP_LOGO, DEBUG_CONFIG } from './config.js';
+import { walletManager, getNetworkConfig, getAllNetworks, getNetworkById, getNetworkBySlug, getDefaultNetwork, setActiveNetwork, APP_BRAND, APP_LOGO, DEBUG_CONFIG } from './config.js';
 import { WalletUI } from './components/WalletUI.js';
 import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
@@ -31,13 +31,59 @@ class App {
 		this.debug('App constructor called');
 	}
 
+	getSelectedNetwork() {
+		const selectedSlug = this.ctx?.getSelectedChainSlug?.();
+		return getNetworkBySlug(selectedSlug) || getDefaultNetwork();
+	}
+
+	isWalletOnSelectedNetwork(chainId = null) {
+		const walletChainId = chainId ?? this.ctx?.getWalletChainId?.() ?? walletManager.chainId ?? null;
+		const walletNetwork = getNetworkById(walletChainId);
+		const selectedNetwork = this.getSelectedNetwork();
+		return !!(walletNetwork && selectedNetwork && walletNetwork.slug === selectedNetwork.slug);
+	}
+
+	async handleNetworkSelectionCommit(network) {
+		if (!network) return;
+
+		try {
+			setActiveNetwork(network);
+		} catch (error) {
+			this.error('Failed to set active network from selection:', error);
+			return;
+		}
+
+		const wallet = this.ctx?.getWallet?.();
+		const isConnected = !!wallet?.isWalletConnected?.() && !!wallet?.getSigner?.();
+		if (!isConnected) {
+			window.location.reload();
+			return;
+		}
+
+		const walletNetwork = getNetworkById(this.ctx.getWalletChainId() || walletManager.chainId || null);
+		if (walletNetwork?.slug === network.slug) {
+			window.location.reload();
+			return;
+		}
+
+		try {
+			await walletManager.switchToNetwork(network);
+			window.location.reload();
+		} catch (error) {
+			this.warn('Wallet network switch rejected/failed:', error);
+			this.showWarning(`Could not switch wallet to ${network.displayName || network.name}.`);
+		}
+	}
+
 	async load () {
 		this.debug('Loading app components...');
 
 		// Create application context for dependency injection
 		this.ctx = createAppContext();
 		setGlobalContext(this.ctx);
-		this.ctx.setSelectedChainSlug(getInitialSelectedNetwork().slug);
+		const initialSelectedNetwork = getInitialSelectedNetwork();
+		this.ctx.setSelectedChainSlug(initialSelectedNetwork.slug);
+		setActiveNetwork(initialSelectedNetwork);
 		this.debug('AppContext created');
 
 		// Initialize toast component
@@ -155,10 +201,15 @@ class App {
 			}
 		});
 
-        // Treat presence of signer as connected for initial render to avoid flicker
-        const wallet = this.ctx.getWallet();
-        const isInitiallyConnected = !!wallet?.getSigner?.();
-        this.currentTab = isInitiallyConnected ? 'create-order' : 'view-orders';
+		// Treat presence of signer as connected for initial render to avoid flicker,
+		// but only enable connected UX when wallet chain matches selected chain.
+		const wallet = this.ctx.getWallet();
+		const isInitiallyConnected = !!wallet?.getSigner?.();
+		const isInitialNetworkMatch = this.isWalletOnSelectedNetwork(
+			this.ctx.getWalletChainId() || walletManager.chainId || null
+		);
+		const hasInitialConnectedContext = isInitiallyConnected && isInitialNetworkMatch;
+		this.currentTab = hasInitialConnectedContext ? 'create-order' : 'view-orders';
 
 		// Add wallet connect button handler
 		const walletConnectBtn = document.getElementById('walletConnect');
@@ -170,9 +221,26 @@ class App {
 		walletManager.addListener(async (event, data) => {
 			switch (event) {
 				case 'connect': {
-					this.ctx.setWalletChainId(data?.chainId || walletManager.chainId || null);
+					const walletChainId = data?.chainId || walletManager.chainId || null;
+					this.ctx.setWalletChainId(walletChainId);
 					syncNetworkBadgeFromState();
-					this.debug('Wallet connected, reinitializing components (preserving current tab)...');
+
+					const selectedNetwork = this.getSelectedNetwork();
+					const walletNetwork = getNetworkById(walletChainId);
+					if (!walletNetwork || walletNetwork.slug !== selectedNetwork.slug) {
+						this.updateTabVisibility(false);
+						try {
+							await walletManager.switchToNetwork(selectedNetwork);
+							window.location.reload();
+						} catch (error) {
+							this.warn('Wallet connect on mismatched network and switch failed:', error);
+							const walletName = walletNetwork?.displayName || walletNetwork?.name || 'unsupported network';
+							this.showWarning(`Wallet is on ${walletName}. Please switch to ${selectedNetwork.displayName || selectedNetwork.name}.`);
+						}
+						break;
+					}
+
+					this.debug('Wallet connected on selected chain, reinitializing components...');
 					this.updateTabVisibility(true);
 					// Preserve WebSocket order cache to avoid clearing orders on connect
 					await this.reinitializeComponents(true);
@@ -198,7 +266,18 @@ class App {
 					try {
 						this.ctx.setWalletChainId(walletManager.chainId || null);
 						syncNetworkBadgeFromState();
+
+						if (!this.isWalletOnSelectedNetwork()) {
+							const selectedNetwork = this.getSelectedNetwork();
+							const walletNetwork = getNetworkById(this.ctx.getWalletChainId());
+							this.updateTabVisibility(false);
+							const walletName = walletNetwork?.displayName || walletNetwork?.name || 'unsupported network';
+							this.showWarning(`Wallet is on ${walletName}. Please switch to ${selectedNetwork.displayName || selectedNetwork.name}.`);
+							break;
+						}
+
 						this.debug('Account changed, reinitializing components...');
+						this.updateTabVisibility(true);
 						await this.reinitializeComponents(true);
 						if (data?.account) {
 							const short = `${data.account.slice(0,6)}...${data.account.slice(-4)}`;
@@ -214,15 +293,19 @@ class App {
 				case 'chainChanged': {
 					try {
 						this.debug('Chain changed event received:', data?.chainId);
-						this.ctx.setWalletChainId(data?.chainId || null);
+						const walletChainId = data?.chainId || null;
+						this.ctx.setWalletChainId(walletChainId);
 						syncNetworkBadgeFromState();
-						const network = data?.chainId ? getNetworkById(data.chainId) : null;
-						if (network?.isDefault) {
-							await this.reinitializeComponents(true);
-							this.showInfo(`Switched to ${network.displayName || network.name}`);
+
+						const selectedNetwork = this.getSelectedNetwork();
+						const walletNetwork = getNetworkById(walletChainId);
+						if (walletNetwork && walletNetwork.slug === selectedNetwork.slug) {
+							setActiveNetwork(walletNetwork);
+							window.location.reload();
 						} else {
-							const requiredNetwork = getDefaultNetwork();
-							this.showWarning(`Wrong Network. Please switch to ${requiredNetwork.displayName || requiredNetwork.name}.`);
+							this.updateTabVisibility(false);
+							const walletName = walletNetwork?.displayName || walletNetwork?.name || 'unsupported network';
+							this.showWarning(`Wallet is on ${walletName}. Please switch to ${selectedNetwork.displayName || selectedNetwork.name}.`);
 						}
 					} catch (error) {
 						console.error('[App] Error handling chainChanged:', error);
@@ -283,8 +366,8 @@ class App {
 			}
 		};
 
-		// Update initial tab visibility based on initial connection state
-		this.updateTabVisibility(!!isInitiallyConnected);
+		// Update initial tab visibility based on connection + selected-chain match
+		this.updateTabVisibility(hasInitialConnectedContext);
 
 		// Add new property to track WebSocket readiness
 		this.wsInitialized = false;
@@ -312,10 +395,8 @@ class App {
 			await ws.syncAllOrders();
 		}
 
-		// Initialize components based on connection (read-only if not connected)
-		const readOnlyMode = !wallet?.isWalletConnected();
-		// Prefer signer presence for initial render
-		const initialReadOnlyMode = !isInitiallyConnected;
+		// Prefer signer presence + selected-chain match for initial render
+		const initialReadOnlyMode = !hasInitialConnectedContext;
 		await this.initializeComponents(initialReadOnlyMode);
 		
 		// Show the initial tab based on connection state (force read-only if needed for first paint)
@@ -875,16 +956,19 @@ function syncNetworkBadgeFromState() {
 function applySelectedNetwork(network, { updateUrl = true } = {}) {
 	if (!network) return;
 
+	const hasChanged = selectedNetworkSlug !== network.slug;
 	selectedNetworkSlug = network.slug;
 	if (window.app?.ctx?.setSelectedChainSlug) {
 		window.app.ctx.setSelectedChainSlug(network.slug);
 	}
+	setActiveNetwork(network);
 
 	markSelectedNetworkOption(network.slug);
 	if (updateUrl) {
 		updateChainInUrl(network.slug);
 	}
 	syncNetworkBadgeFromState();
+	return hasChanged;
 }
 
 function toggleNetworkDropdown(forceOpen = null) {
@@ -925,18 +1009,21 @@ const populateNetworkOptions = () => {
 	
 	// Re-attach click handlers only if multiple networks.
 	document.querySelectorAll('.network-option').forEach(option => {
-		const commitSelection = () => {
+		const commitSelection = async () => {
 			const network = getNetworkBySlug(option.dataset.slug);
 			if (!network) return;
-			applySelectedNetwork(network, { updateUrl: true });
+			const hasChanged = applySelectedNetwork(network, { updateUrl: true });
 			toggleNetworkDropdown(false);
+			if (hasChanged && typeof window.app?.handleNetworkSelectionCommit === 'function') {
+				await window.app.handleNetworkSelectionCommit(network);
+			}
 		};
 
 		option.addEventListener('click', commitSelection);
-		option.addEventListener('keydown', (event) => {
+		option.addEventListener('keydown', async (event) => {
 			if (event.key === 'Enter' || event.key === ' ') {
 				event.preventDefault();
-				commitSelection();
+				await commitSelection();
 			}
 		});
 	});

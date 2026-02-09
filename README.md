@@ -5,7 +5,7 @@ A decentralized application for over-the-counter token swaps on Polygon networks
 ## Networks Supported
 - Polygon Mainnet
 - Polygon Amoy Testnet
-- additional can be added depending on where smart contract is deployed and added to configs
+- Only these deployed chains are selectable in the app right now.
 
 ## Prerequisites
 - Node.js
@@ -25,19 +25,22 @@ YOUR_ALCHEMY_KEY=your_alchemy_key
 ```
 
 ## Network Configuration
-The application currently runs on Polygon Amoy Testnet. Network configuration is managed in `config.js`:
+Chain support is defined in `js/config.js`. The selector only exposes chains that have deployed contract config:
 
 ```javascript
 {
+    "137": {
+        slug: "polygon",
+        displayName: "Polygon Mainnet",
+        chainId: "0x89",
+        contractAddress: "0x2F786290BAe87D1e8c01A97e6529030bbCF9f147"
+    },
     "80002": {
+        slug: "amoy",
         name: "Amoy",
-        contractAddress: "0xF9D874860d5801233dd84569fad8513e0037A5d9",
-        explorer: "https://www.oklink.com/amoy",
-        rpcUrl: "https://rpc.ankr.com/polygon_amoy",
-        fallbackRpcUrls: [
-            "https://polygon-amoy.blockpi.network/v1/rpc/public",
-            "https://polygon-amoy.public.blastapi.io"
-        ]
+        displayName: "Polygon Amoy Testnet",
+        chainId: "0x13882",
+        contractAddress: "0x7A64764074971839bd5A3022beA2450CBc51dEC8"
     }
 }
 ```
@@ -56,10 +59,7 @@ npm install
 http-server
 ```
 
-4. Connect your wallet - the application will automatically:
-   - Request connection to MetaMask
-   - Switch to Amoy testnet if needed
-   - Initialize the contract interface
+4. Connect your wallet. On mismatch, the chain selector can request wallet switch between Polygon Mainnet and Amoy.
 
 ## Features
 - Create OTC swap orders
@@ -70,9 +70,9 @@ http-server
 - Real-time order updates
 
 ## Testing
-1. Test on Amoy testnet first
-2. Get test tokens from the Polygon faucet
-3. Ensure your wallet has sufficient native tokens for gas
+1. Validate both supported chains (`polygon`, `amoy`) via selector and `?chain=` URL.
+2. Get test tokens from the Polygon faucet for Amoy testing.
+3. Ensure your wallet has sufficient native token for gas on selected chain.
 
 ## Security Notes
 - Always verify token addresses
@@ -82,10 +82,17 @@ http-server
 
 ## Network Details
 
-### Amoy Testnet (Current Network)
+### Polygon Mainnet
+- Chain ID: 137 (0x89)
+- Primary RPC URL: https://polygon-rpc.com
+- Explorer: https://polygonscan.com
+- Native Currency: MATIC (18 decimals)
+
+### Polygon Amoy Testnet
 - Chain ID: 80002 (0x13882)
-- Primary RPC URL: https://rpc.ankr.com/polygon_amoy
+- Primary RPC URL: https://rpc-amoy.polygon.technology
 - Fallback RPC URLs:
+  - https://rpc.ankr.com/polygon_amoy
   - https://polygon-amoy.blockpi.network/v1/rpc/public
   - https://polygon-amoy.public.blastapi.io
 - Explorer: https://www.oklink.com/amoy
