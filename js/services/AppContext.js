@@ -40,6 +40,8 @@ export function createAppContext() {
         ws: null,
         pricing: null,
         contractService: null,
+        selectedChainSlug: null,
+        walletChainId: null,
         
         // Toast functions
         toast: {
@@ -79,6 +81,38 @@ export function createAppContext() {
          */
         getPricing() {
             return this.pricing;
+        },
+
+        /**
+         * Set currently selected chain slug (URL/UI intent)
+         * @param {string|null} slug
+         */
+        setSelectedChainSlug(slug) {
+            this.selectedChainSlug = slug ? String(slug).toLowerCase() : null;
+        },
+
+        /**
+         * Get currently selected chain slug (URL/UI intent)
+         * @returns {string|null}
+         */
+        getSelectedChainSlug() {
+            return this.selectedChainSlug;
+        },
+
+        /**
+         * Set wallet runtime chain ID (provider-reported)
+         * @param {string|number|null} chainId
+         */
+        setWalletChainId(chainId) {
+            this.walletChainId = chainId ?? null;
+        },
+
+        /**
+         * Get wallet runtime chain ID
+         * @returns {string|number|null}
+         */
+        getWalletChainId() {
+            return this.walletChainId;
         },
         
         /**

@@ -1,6 +1,6 @@
 import { BaseComponent } from './components/BaseComponent.js';
 import { CreateOrder } from './components/CreateOrder.js';
-import { walletManager, WalletManager, getNetworkConfig, getAllNetworks, isDebugEnabled, getNetworkById, APP_BRAND, APP_LOGO, DEBUG_CONFIG } from './config.js';
+import { walletManager, getNetworkConfig, getAllNetworks, getNetworkById, getNetworkBySlug, getDefaultNetwork, APP_BRAND, APP_LOGO, DEBUG_CONFIG } from './config.js';
 import { WalletUI } from './components/WalletUI.js';
 import { WebSocketService } from './services/WebSocket.js';
 import { ViewOrders } from './components/ViewOrders.js';
@@ -37,6 +37,7 @@ class App {
 		// Create application context for dependency injection
 		this.ctx = createAppContext();
 		setGlobalContext(this.ctx);
+		this.ctx.setSelectedChainSlug(getInitialSelectedNetwork().slug);
 		this.debug('AppContext created');
 
 		// Initialize toast component
@@ -169,6 +170,8 @@ class App {
 		walletManager.addListener(async (event, data) => {
 			switch (event) {
 				case 'connect': {
+					this.ctx.setWalletChainId(data?.chainId || walletManager.chainId || null);
+					syncNetworkBadgeFromState();
 					this.debug('Wallet connected, reinitializing components (preserving current tab)...');
 					this.updateTabVisibility(true);
 					// Preserve WebSocket order cache to avoid clearing orders on connect
@@ -176,6 +179,8 @@ class App {
 					break;
 				}
 				case 'disconnect': {
+					this.ctx.setWalletChainId(null);
+					syncNetworkBadgeFromState();
 					this.debug('Wallet disconnected, updating tab visibility...');
 					this.updateTabVisibility(false);
 					// Clear CreateOrder state only; no need to initialize since tab is hidden
@@ -191,6 +196,8 @@ class App {
 				}
 				case 'accountsChanged': {
 					try {
+						this.ctx.setWalletChainId(walletManager.chainId || null);
+						syncNetworkBadgeFromState();
 						this.debug('Account changed, reinitializing components...');
 						await this.reinitializeComponents(true);
 						if (data?.account) {
@@ -207,12 +214,15 @@ class App {
 				case 'chainChanged': {
 					try {
 						this.debug('Chain changed event received:', data?.chainId);
+						this.ctx.setWalletChainId(data?.chainId || null);
+						syncNetworkBadgeFromState();
 						const network = data?.chainId ? getNetworkById(data.chainId) : null;
 						if (network?.isDefault) {
 							await this.reinitializeComponents(true);
 							this.showInfo(`Switched to ${network.displayName || network.name}`);
 						} else {
-							this.showWarning('Wrong Network. Please switch to the default network.');
+							const requiredNetwork = getDefaultNetwork();
+							this.showWarning(`Wrong Network. Please switch to ${requiredNetwork.displayName || requiredNetwork.name}.`);
 						}
 					} catch (error) {
 						console.error('[App] Error handling chainChanged:', error);
@@ -369,6 +379,7 @@ class App {
 			
 			// Add to context
 			this.ctx.wallet = walletManager;
+			this.ctx.setWalletChainId(walletManager.chainId || null);
 			
 			this.debug('Wallet manager initialized');
 		} catch (error) {
@@ -813,6 +824,81 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // Network selector functionality
 let networkButton, networkDropdown, networkBadge;
+let networkSelectorElement;
+let selectedNetworkSlug = null;
+
+function getChainSlugFromUrl() {
+	const params = new URLSearchParams(window.location.search);
+	const slug = params.get('chain');
+	return slug ? slug.toLowerCase() : null;
+}
+
+function getInitialSelectedNetwork() {
+	const requestedSlug = getChainSlugFromUrl();
+	const fromUrl = requestedSlug ? getNetworkBySlug(requestedSlug) : null;
+	return fromUrl || getDefaultNetwork();
+}
+
+function updateChainInUrl(slug) {
+	const url = new URL(window.location.href);
+	url.searchParams.set('chain', slug);
+	window.history.replaceState({}, '', url);
+}
+
+function markSelectedNetworkOption(slug) {
+	document.querySelectorAll('.network-option').forEach(option => {
+		const isActive = option.dataset.slug === slug;
+		option.classList.toggle('active', isActive);
+		option.setAttribute('aria-selected', String(isActive));
+	});
+}
+
+function syncNetworkBadgeFromState() {
+	if (!networkBadge) return;
+
+	const selectedSlug = selectedNetworkSlug || window.app?.ctx?.getSelectedChainSlug?.() || getDefaultNetwork().slug;
+	const selectedNetwork = getNetworkBySlug(selectedSlug) || getDefaultNetwork();
+	networkBadge.textContent = selectedNetwork.displayName || selectedNetwork.name;
+	networkBadge.classList.remove('connected', 'wrong-network');
+
+	const walletChainId = window.app?.ctx?.getWalletChainId?.();
+	if (!walletChainId) return;
+
+	const walletNetwork = getNetworkById(walletChainId);
+	if (walletNetwork && walletNetwork.slug === selectedNetwork.slug) {
+		networkBadge.classList.add('connected');
+	} else {
+		networkBadge.classList.add('wrong-network');
+	}
+}
+
+function applySelectedNetwork(network, { updateUrl = true } = {}) {
+	if (!network) return;
+
+	selectedNetworkSlug = network.slug;
+	if (window.app?.ctx?.setSelectedChainSlug) {
+		window.app.ctx.setSelectedChainSlug(network.slug);
+	}
+
+	markSelectedNetworkOption(network.slug);
+	if (updateUrl) {
+		updateChainInUrl(network.slug);
+	}
+	syncNetworkBadgeFromState();
+}
+
+function toggleNetworkDropdown(forceOpen = null) {
+	if (!networkDropdown) return;
+
+	const shouldOpen = forceOpen === null
+		? networkDropdown.classList.contains('hidden')
+		: !!forceOpen;
+
+	networkDropdown.classList.toggle('hidden', !shouldOpen);
+	if (networkButton) {
+		networkButton.setAttribute('aria-expanded', String(shouldOpen));
+	}
+}
 
 // Dynamically populate network options
 const populateNetworkOptions = () => {
@@ -827,51 +913,35 @@ const populateNetworkOptions = () => {
 	// If only one network, hide dropdown functionality
 	if (networks.length <= 1) {
 		networkButton.classList.add('single-network');
+		applySelectedNetwork(networks[0], { updateUrl: true });
 		return;
 	}
 	
 	networkDropdown.innerHTML = networks.map(network => `
-		<div class="network-option" data-network="${network.name.toLowerCase()}" data-chain-id="${network.chainId}">
+		<div class="network-option" role="option" tabindex="0" data-network="${network.name.toLowerCase()}" data-chain-id="${network.chainId}" data-slug="${network.slug}">
 			${network.displayName}
 		</div>
 	`).join('');
 	
-	// Re-attach click handlers only if multiple networks
+	// Re-attach click handlers only if multiple networks.
 	document.querySelectorAll('.network-option').forEach(option => {
-		option.addEventListener('click', async () => {
-			try {
-				if (networkBadge) {
-					networkBadge.textContent = option.textContent;
-				}
-				if (networkDropdown) {
-					networkDropdown.classList.add('hidden');
-				}
-				
-				// Access wallet via app context
-				const wallet = window.app?.ctx?.getWallet();
-				if (wallet && wallet.isConnected()) {
-					const chainId = option.dataset.chainId;
-					await window.ethereum.request({
-						method: 'wallet_switchEthereumChain',
-						params: [{ chainId }],
-					});
-				}
-			} catch (error) {
-				console.error('Failed to switch network:', error);
-				if (networkBadge && networkButton) {
-					const buttonBadge = networkButton.querySelector('.network-badge');
-					if (buttonBadge) {
-						networkBadge.textContent = buttonBadge.textContent;
-					}
-				}
-				if (window.app) {
-					window.app.showError('Failed to switch network: ' + error.message);
-				} else {
-					showError('Failed to switch network: ' + error.message);
-				}
+		const commitSelection = () => {
+			const network = getNetworkBySlug(option.dataset.slug);
+			if (!network) return;
+			applySelectedNetwork(network, { updateUrl: true });
+			toggleNetworkDropdown(false);
+		};
+
+		option.addEventListener('click', commitSelection);
+		option.addEventListener('keydown', (event) => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				event.preventDefault();
+				commitSelection();
 			}
 		});
 	});
+
+	applySelectedNetwork(getInitialSelectedNetwork(), { updateUrl: true });
 };
 
 // Initialize network dropdown when DOM is ready
@@ -879,6 +949,40 @@ document.addEventListener('DOMContentLoaded', () => {
 	networkButton = document.querySelector('.network-button');
 	networkDropdown = document.querySelector('.network-dropdown');
 	networkBadge = document.querySelector('.network-badge');
+	networkSelectorElement = document.querySelector('.network-selector');
+
+	if (networkButton) {
+		networkButton.setAttribute('aria-haspopup', 'listbox');
+		networkButton.setAttribute('aria-expanded', 'false');
+		networkButton.addEventListener('click', (event) => {
+			event.preventDefault();
+			if (networkButton.classList.contains('single-network')) return;
+			toggleNetworkDropdown();
+		});
+	}
+
+	if (networkDropdown) {
+		networkDropdown.setAttribute('role', 'listbox');
+	}
+
+	document.addEventListener('click', (event) => {
+		if (!networkSelectorElement) return;
+		if (!networkSelectorElement.contains(event.target)) {
+			toggleNetworkDropdown(false);
+		}
+	});
+
+	document.addEventListener('keydown', (event) => {
+		if (event.key === 'Escape') {
+			toggleNetworkDropdown(false);
+		}
+	});
+
+	window.addEventListener('popstate', () => {
+		applySelectedNetwork(getInitialSelectedNetwork(), { updateUrl: false });
+	});
+
+	window.syncNetworkBadgeFromState = syncNetworkBadgeFromState;
 	populateNetworkOptions();
 });
 
@@ -911,4 +1015,3 @@ function showAppParametersPopup() {
 	
 	document.body.appendChild(popup);
 }
-

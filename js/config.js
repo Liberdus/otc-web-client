@@ -6,32 +6,63 @@ export const APP_BRAND = 'LiberdusOTC';
 export const APP_LOGO = 'assets/1.png';
 
 const networkConfig = {
-    "80002": {
-    name: "Amoy",
-    displayName: "Polygon Amoy Testnet",
-    isDefault: true,
-    contractAddress: "0x7A64764074971839bd5A3022beA2450CBc51dEC8",
-    contractABI: CONTRACT_ABI,
-    explorer: "https://www.oklink.com/amoy",
-    rpcUrl: "https://rpc-amoy.polygon.technology",
-    fallbackRpcUrls: [
-        "https://rpc.ankr.com/polygon_amoy",
-        "https://polygon-amoy.blockpi.network/v1/rpc/public",
-        "https://polygon-amoy.public.blastapi.io"
-    ],
-    chainId: "0x13882",
-    nativeCurrency: {
-        name: "POL",
-        symbol: "POL",
-        decimals: 18
+    // "80002": {
+    // name: "Amoy",
+    // displayName: "Polygon Amoy Testnet",
+    // isDefault: false,
+    // contractAddress: "0x7A64764074971839bd5A3022beA2450CBc51dEC8",
+    // contractABI: CONTRACT_ABI,
+    // explorer: "https://www.oklink.com/amoy",
+    // rpcUrl: "https://rpc-amoy.polygon.technology",
+    // fallbackRpcUrls: [
+    //     "https://rpc.ankr.com/polygon_amoy",
+    //     "https://polygon-amoy.blockpi.network/v1/rpc/public",
+    //     "https://polygon-amoy.public.blastapi.io"
+    // ],
+    // chainId: "0x13882",
+    // nativeCurrency: {
+    //     name: "POL",
+    //     symbol: "POL",
+    //     decimals: 18
+    // },
+    // // multicall address amoy testnet
+    // multicallAddress: "0xca11bde05977b3631167028862be2a173976ca11",
+    // wsUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
+    // fallbackWsUrls: [
+    //     "wss://polygon-amoy.public.blastapi.io"
+    // ]
+    // },
+    "137": {
+        slug: "polygon",
+        name: "Polygon",
+        displayName: "Polygon Mainnet",
+        isDefault: true,
+        contractAddress: "0x2F786290BAe87D1e8c01A97e6529030bbCF9f147", // New contract with allowed tokens 08/15/25
+        /* "0x34396a792510d6fb8ec0f70b68b8739456af06c6",  */// old 08/14/25
+        /* "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837", */ // old 08/13/25
+        contractABI: CONTRACT_ABI,
+        explorer: "https://polygonscan.com",
+        rpcUrl: "https://polygon-rpc.com",
+        fallbackRpcUrls: [
+            "https://rpc-mainnet.matic.network",
+            "https://polygon-bor.publicnode.com",
+            "https://polygon.api.onfinality.io/public"
+        ],
+        chainId: "0x89",
+        nativeCurrency: {
+            name: "MATIC",
+            symbol: "MATIC",
+            decimals: 18
+        },
+        // Multicall2 contract (Uniswap) deployed on Polygon mainnet
+        multicallAddress: "0x275617327c958bD06b5D6b871E7f491D76113dd8",
+        wsUrl: "wss://polygon.gateway.tenderly.co",
+        fallbackWsUrls: [
+            "wss://polygon-bor.publicnode.com",
+            "wss://polygon-bor-rpc.publicnode.com",
+            "wss://polygon.api.onfinality.io/public-ws"
+        ]
     },
-    // multicall address amoy testnet
-    multicallAddress: "0xca11bde05977b3631167028862be2a173976ca11",
-    wsUrl: "wss://polygon-amoy-bor-rpc.publicnode.com",
-    fallbackWsUrls: [
-        "wss://polygon-amoy.public.blastapi.io"
-    ]
-},
 };
 
 // replace above with this when testing amoy
@@ -61,37 +92,6 @@ const networkConfig = {
         "wss://polygon-amoy.public.blastapi.io"
     ]
 }, */
-
-// "137": {
-//     name: "Polygon",
-//     displayName: "Polygon Mainnet",
-//     isDefault: false,
-//     contractAddress: "0x2F786290BAe87D1e8c01A97e6529030bbCF9f147", // New contract with allowed tokens 08/15/25
-//     /* "0x34396a792510d6fb8ec0f70b68b8739456af06c6",  */// old 08/14/25
-//     /* "0x8F37e9b4980340b9DE777Baa4B9c5B2fc1BDc837", */ // old 08/13/25
-//     contractABI: CONTRACT_ABI,
-//     explorer: "https://polygonscan.com",
-//     rpcUrl: "https://polygon-rpc.com",
-//     fallbackRpcUrls: [
-//         "https://rpc-mainnet.matic.network",
-//         "https://polygon-bor.publicnode.com",
-//         "https://polygon.api.onfinality.io/public"
-//     ],
-//     chainId: "0x89",
-//     nativeCurrency: {
-//         name: "MATIC",
-//         symbol: "MATIC",
-//         decimals: 18
-//     },
-//     // Multicall2 contract (Uniswap) deployed on Polygon mainnet
-//     multicallAddress: "0x275617327c958bD06b5D6b871E7f491D76113dd8",
-//     wsUrl: "wss://polygon.gateway.tenderly.co",
-//     fallbackWsUrls: [
-//         "wss://polygon-bor.publicnode.com",
-//         "wss://polygon-bor-rpc.publicnode.com",
-//         "wss://polygon.api.onfinality.io/public-ws"
-//     ]
-// },
 
 
 export const DEBUG_CONFIG = {
@@ -192,11 +192,22 @@ export const getDefaultNetwork = () => {
     return defaultNetwork;
 };
 
+export const getNetworkBySlug = (slug) => {
+    if (!slug) return null;
+    const normalizedSlug = String(slug).toLowerCase();
+    return Object.values(networkConfig).find(net => net.slug === normalizedSlug) || null;
+};
+
 export const getNetworkById = (chainId) => {
+    if (chainId === null || chainId === undefined) {
+        return null;
+    }
+
     // Convert hex chainId to decimal if needed
-    const decimalChainId = chainId.startsWith('0x') 
-        ? parseInt(chainId, 16).toString()
-        : chainId.toString();
+    const chainIdStr = String(chainId);
+    const decimalChainId = chainIdStr.startsWith('0x')
+        ? parseInt(chainIdStr, 16).toString()
+        : chainIdStr;
     
     return networkConfig[decimalChainId];
 };
@@ -284,8 +295,8 @@ export class WalletManager {
                     this.account = accounts[0];
                     const chainId = await window.ethereum.request({ method: 'eth_chainId' });
                     this.chainId = chainId;
-                    // Enforce default network behavior on reload (same as connect flow)
-                    this.handleChainChanged(chainId);
+                    // Keep wallet-reported chain state; app-level logic decides if network is acceptable.
+                    this.notifyListeners('chainChanged', { chainId });
                     this.isConnected = true;
                     // Initialize signer and contract for the session
                     await this.initializeSigner(this.account);
@@ -384,10 +395,6 @@ export class WalletManager {
 
             const decimalChainId = parseInt(chainId, 16).toString();
             this.debug('Decimal Chain ID:', decimalChainId);
-            
-            if (decimalChainId !== "80002") { //TODO: need to not hardcode this
-                await this.switchToDefaultNetwork();
-            }
 
             this.account = accounts[0];
             this.chainId = chainId;
@@ -414,31 +421,6 @@ export class WalletManager {
             throw error;
         } finally {
             this.isConnecting = false;
-        }
-    }
-
-    async switchToDefaultNetwork() {
-        const targetNetwork = getDefaultNetwork();
-        try {
-            await window.ethereum.request({
-                method: 'wallet_switchEthereumChain',
-                params: [{ chainId: targetNetwork.chainId }],
-            });
-        } catch (error) {
-            if (error.code === 4902) {
-                await window.ethereum.request({
-                    method: 'wallet_addEthereumChain',
-                    params: [{
-                        chainId: targetNetwork.chainId,
-                        chainName: targetNetwork.name,
-                        nativeCurrency: targetNetwork.nativeCurrency,
-                        rpcUrls: [targetNetwork.rpcUrl, ...targetNetwork.fallbackRpcUrls],
-                        blockExplorerUrls: [targetNetwork.explorer]
-                    }],
-                });
-            } else {
-                throw error;
-            }
         }
     }
 
@@ -470,11 +452,6 @@ export class WalletManager {
         this.notifyListeners('chainChanged', { chainId });
         if (this.onChainChange) {
             this.onChainChange(chainId);
-        }
-        
-        const network = getNetworkById(chainId);
-        if (!network?.isDefault) {
-            this.switchToDefaultNetwork();
         }
     }
 

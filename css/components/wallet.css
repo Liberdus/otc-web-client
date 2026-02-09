@@ -52,6 +52,11 @@
   transition: all 0.2s ease;
 }
 
+.network-option:hover,
+.network-option.active {
+  background: var(--background-hover);
+}
+
 .wallet-button {
   display: flex;
   align-items: center;

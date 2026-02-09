@@ -1,5 +1,5 @@
 import { BaseComponent } from './BaseComponent.js';
-import { walletManager, getNetworkConfig, getNetworkById } from '../config.js';
+import { walletManager, getDefaultNetwork, getNetworkById, getNetworkBySlug } from '../config.js';
 import { createLogger } from '../services/LogService.js';
 
 export class WalletUI extends BaseComponent {
@@ -300,22 +300,32 @@ export class WalletUI extends BaseComponent {
     updateNetworkBadge(chainId) {
         try {
             this.debug('Updating network badge for chain:', chainId);
+
+            if (window.app?.ctx?.setWalletChainId) {
+                window.app.ctx.setWalletChainId(chainId ?? null);
+            }
+
+            if (typeof window.syncNetworkBadgeFromState === 'function') {
+                window.syncNetworkBadgeFromState();
+                return;
+            }
+
             const networkBadge = document.querySelector('.network-badge');
             if (!networkBadge) {
                 this.error('[WalletUI] Network badge element not found');
                 return;
             }
 
-            const network = getNetworkById(chainId);
-            
-            if (network?.isDefault) {
-                networkBadge.textContent = network.name;
-                networkBadge.classList.remove('wrong-network');
+            const selectedSlug = window.app?.ctx?.getSelectedChainSlug?.() || getDefaultNetwork().slug;
+            const selectedNetwork = getNetworkBySlug(selectedSlug) || getDefaultNetwork();
+            const walletNetwork = getNetworkById(chainId);
+
+            networkBadge.textContent = selectedNetwork.displayName || selectedNetwork.name;
+            networkBadge.classList.remove('wrong-network', 'connected');
+            if (walletNetwork && walletNetwork.slug === selectedNetwork.slug) {
                 networkBadge.classList.add('connected');
             } else {
-                networkBadge.textContent = "Wrong Network";
                 networkBadge.classList.add('wrong-network');
-                networkBadge.classList.remove('connected');
             }
             this.debug('Network badge updated');
         } catch (error) {
