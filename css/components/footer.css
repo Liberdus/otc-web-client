@@ -51,40 +51,47 @@
   background: var(--bg-primary);
   border-radius: 12px;
   border: 1px solid var(--border-color, #e0e0e0);
-  height: 140px;
+  min-height: 140px;
+  height: auto;
   display: flex;
   flex-direction: column;
+  gap: 8px;
 }
 
 .intro-section h4 {
   color: var(--text-primary);
-  margin: 0 0 12px 0;
+  margin: 0;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.25;
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
 }
 
+.intro-section h4 .intro-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--accent-color, #4b6bfb);
+}
+
 .intro-section ul {
   margin: 0;
-  padding-left: 16px;
+  padding-left: 18px;
   color: var(--text-secondary);
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 6px;
 }
 
 .intro-section li {
-  margin-bottom: 6px;
+  margin: 0;
   line-height: 1.4;
   font-size: 13px;
-}
-
-.intro-section li:last-child {
-  margin-bottom: 0;
 }
 
 /* FAQ Section Styles */

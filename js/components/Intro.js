@@ -47,7 +47,14 @@ export class Intro extends BaseComponent {
 					
 					<div class="intro-sections-grid">
 						<div class="intro-section">
-							<h4>📱 1. Connect Wallet</h4>
+							<h4>
+								<svg class="intro-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v2"></path>
+									<path d="M3 9h17a1 1 0 0 1 1 1v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+									<path d="M16 13h5"></path>
+								</svg>
+								<span>1. Connect Wallet</span>
+							</h4>
 							<ul>
 								<li>Click "Connect Wallet" in top right</li>
 								<li>Pick allowed wallets</li>
@@ -57,7 +64,13 @@ export class Intro extends BaseComponent {
 						</div>
 
 						<div class="intro-section">
-							<h4>🔍 2. Find Orders</h4>
+							<h4>
+								<svg class="intro-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<circle cx="11" cy="11" r="7"></circle>
+									<path d="m21 21-4.35-4.35"></path>
+								</svg>
+								<span>2. Find Orders</span>
+							</h4>
 							<ul>
 								<li>Browse "View Orders", all orders </li>
 								<li>"My Orders", orders you created</li>
@@ -67,7 +80,12 @@ export class Intro extends BaseComponent {
 						</div>
 
 						<div class="intro-section">
-							<h4>⚡ 3. Fill Order</h4>
+							<h4>
+								<svg class="intro-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M13 2 4 14h7l-1 8 9-12h-7z"></path>
+								</svg>
+								<span>3. Fill Order</span>
+							</h4>
 							<ul>
 								<li>Click order to fill</li>
 								<li>Review details carefully</li>
@@ -77,7 +95,15 @@ export class Intro extends BaseComponent {
 						</div>
 
 						<div class="intro-section">
-							<h4>💱 4. Create Order</h4>
+							<h4>
+								<svg class="intro-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M17 3h4v4"></path>
+									<path d="m21 3-7 7"></path>
+									<path d="M7 21H3v-4"></path>
+									<path d="m3 21 7-7"></path>
+								</svg>
+								<span>4. Create Order</span>
+							</h4>
 							<ul>
 								<li>Go to "Create Order" tab</li>
 								<li>Select tokens to swap</li>
@@ -87,7 +113,13 @@ export class Intro extends BaseComponent {
 						</div>
 
 						<div class="intro-section">
-							<h4>🛡️ Security Tips</h4>
+							<h4>
+								<svg class="intro-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<path d="M12 3 4 7v6c0 5 3.5 7.8 8 9 4.5-1.2 8-4 8-9V7z"></path>
+									<path d="m9 12 2 2 4-4"></path>
+								</svg>
+								<span>Security Tips</span>
+							</h4>
 							<ul>
 								<li>Verify token addresses</li>
 								<li>Review order details</li>
@@ -97,7 +129,14 @@ export class Intro extends BaseComponent {
 						</div>
 
 						<div class="intro-section">
-							<h4>💰 Fees & Cancellation</h4>
+							<h4>
+								<svg class="intro-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+									<circle cx="12" cy="12" r="9"></circle>
+									<path d="M9 9h5a2 2 0 1 1 0 4H10a2 2 0 1 0 0 4h5"></path>
+									<path d="M12 7v10"></path>
+								</svg>
+								<span>Fees & Cancellation</span>
+							</h4>
 							<ul>
 								<li>$1 USDC non-refundable fee</li>
 								<li>Orders expire after 7 days</li>
