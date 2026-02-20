@@ -10,3 +10,5 @@ cache/
 
 delete_when_done/
 deprecated/
+# /home/bui/shared/liberdus/WhaleSwap-UI/.cursor/settings.json
+.cursor/settings.json
