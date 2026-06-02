@@ -12,8 +12,7 @@ import { handleTransactionError } from '../utils/ui.js';
 export class ViewOrders extends BaseComponent {
     constructor(containerId = 'view-orders') {
         super(containerId);
-        this.provider = typeof window.ethereum !== 'undefined' ? 
-            new ethers.providers.Web3Provider(window.ethereum) : null;
+        this.provider = walletManager.getProvider();
         this.currentPage = 1;
         this.totalOrders = 0;
         this.setupErrorHandling();
@@ -688,8 +687,10 @@ export class ViewOrders extends BaseComponent {
         const button = this.container.querySelector(`button[data-order-id="${orderId}"]`);
         
         try {
-            if (!this.provider) {
-                throw new Error('MetaMask is not installed. Please install MetaMask to take orders.');
+            this.provider = walletManager.getProvider();
+            const signer = walletManager.getSigner();
+            if (!this.provider || !signer) {
+                throw new Error('Connect a browser wallet to take orders.');
             }
 
             // Check if wallet is connected and has an account
@@ -700,7 +701,6 @@ export class ViewOrders extends BaseComponent {
 
             // Additional check to ensure signer is properly connected
             try {
-                const signer = this.provider.getSigner();
                 await signer.getAddress(); // This will throw if not properly connected
             } catch (error) {
                 throw new Error('Please sign in to fill order');
@@ -726,7 +726,6 @@ export class ViewOrders extends BaseComponent {
             if (!contract) {
                 throw new Error('Contract not available');
             }
-            const signer = this.provider.getSigner();
             const contractWithSigner = contract.connect(signer);
 
             // Check order status first
@@ -750,16 +749,16 @@ export class ViewOrders extends BaseComponent {
             const buyToken = new ethers.Contract(
                 order.buyToken,
                 erc20Abi,
-                this.provider.getSigner()
+                signer
             );
             
             const sellToken = new ethers.Contract(
                 order.sellToken,
                 erc20Abi,
-                this.provider.getSigner()
+                signer
             );
 
-            const currentAccount = await this.provider.getSigner().getAddress();
+            const currentAccount = await signer.getAddress();
 
             // Get token details for proper formatting
             const buyTokenDecimals = await buyToken.decimals();

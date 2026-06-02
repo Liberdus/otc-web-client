@@ -103,11 +103,12 @@ export class BaseComponent {
     // Add method to get signer (used by CreateOrder)
     async getSigner() {
         try {
-            if (!window.walletManager?.provider) {
+            const signer = window.walletManager?.getSigner?.();
+            if (!signer) {
                 this.error('No wallet provider available');
                 throw new Error('Please connect your wallet first');
             }
-            this.signer = await window.walletManager.provider.getSigner();
+            this.signer = signer;
             return this.signer;
         } catch (error) {
             this.error('Error getting signer:', error);

@@ -1,4 +1,16 @@
 .wallet-container {
+  --wallet-surface: #ffffff;
+  --wallet-surface-hover: #f1f3f5;
+  --wallet-border: #d7dce2;
+}
+
+[data-theme="dark"] .wallet-container {
+  --wallet-surface: #2d2d2d;
+  --wallet-surface-hover: #363636;
+  --wallet-border: #484d55;
+}
+
+.wallet-container {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -14,8 +26,8 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  background: var(--background-secondary);
-  border: 1px solid var(--border-color);
+  background: var(--wallet-surface);
+  border: 1px solid var(--wallet-border);
   border-radius: 12px;
   color: var(--text-primary);
   cursor: pointer;
@@ -23,15 +35,15 @@
 }
 
 .network-button:hover {
-  background: var(--background-hover);
+  background: var(--wallet-surface-hover);
 }
 
 .network-dropdown {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  background: var(--background-secondary);
-  border: 1px solid var(--border-color);
+  background: var(--wallet-surface);
+  border: 1px solid var(--wallet-border);
   border-radius: 12px;
   padding: 4px;
   min-width: 150px;
@@ -68,6 +80,62 @@
 
 .wallet-button:hover {
   background: #3a54d6;
+}
+
+.wallet-module-connect {
+  position: relative;
+}
+
+.wallet-module-connect .liberdus-wallet-connect {
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.wallet-module-connect .liberdus-wallet-connect__button {
+  min-height: auto;
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: #4b6bfb;
+  color: white;
+  box-shadow: none;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wallet-module-connect .liberdus-wallet-connect__button:hover {
+  background: #3a54d6;
+}
+
+.wallet-module-connect .liberdus-wallet-connect__menu {
+  left: auto;
+  right: 0;
+  background: var(--wallet-surface);
+  border-color: var(--wallet-border);
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+.wallet-module-connect .liberdus-wallet-connect__title,
+.wallet-module-connect .liberdus-wallet-connect__wallet-meta,
+.wallet-module-connect .liberdus-wallet-connect__message {
+  color: var(--text-secondary);
+}
+
+.wallet-module-connect .liberdus-wallet-connect__wallet,
+.wallet-module-connect .liberdus-wallet-connect__disconnect {
+  background: var(--wallet-surface);
+}
+
+.wallet-module-connect .liberdus-wallet-connect__wallet,
+.wallet-module-connect .liberdus-wallet-connect__disconnect,
+.wallet-module-connect .liberdus-wallet-connect__wallet-name {
+  color: var(--text-primary);
+}
+
+.wallet-module-connect .liberdus-wallet-connect__wallet:hover,
+.wallet-module-connect .liberdus-wallet-connect__disconnect:hover {
+  background: var(--wallet-surface-hover);
 }
 
 .wallet-info {
@@ -136,7 +204,7 @@
 }
 
 .network-button.single-network:hover {
-  background: var(--background-secondary);
+  background: var(--wallet-surface);
 }
 
 .network-button.single-network .chevron-down {

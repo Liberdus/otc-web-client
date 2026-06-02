@@ -1,9 +1,12 @@
 import { abi as CONTRACT_ABI } from './abi/OTCSwap.js';
 import { ethers } from 'ethers';
 import { createLogger } from './services/LogService.js';
+import { createWalletCore } from '../vendor/liberdus-wallet-module/index.js';
+import { switchOrAddEthereumChain } from '../vendor/liberdus-wallet-module/adapters/chain.js';
 
 export const APP_BRAND = 'LiberdusOTC';
 export const APP_LOGO = 'assets/1.png';
+const WALLET_SESSION_KEY = 'liberdus-otc-wallet-session';
 
 const networkConfig = {
     "80002": {
@@ -212,9 +215,44 @@ export const getNetworkConfig = (chainId = null) => {
     return getDefaultNetwork();
 };
 
+function getBrowserStorage() {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+    try {
+        return window.localStorage;
+    } catch {
+        return null;
+    }
+}
+
+function normalizeAccount(account) {
+    return typeof account === 'string' && ethers.utils.isAddress(account) ? account : null;
+}
+
+function toHexChainId(chainId) {
+    if (chainId === null || chainId === undefined || chainId === '') {
+        return null;
+    }
+    if (typeof chainId === 'string' && chainId.startsWith('0x')) {
+        return chainId;
+    }
+    const numericChainId = Number(chainId);
+    return Number.isFinite(numericChainId) ? ethers.utils.hexValue(numericChainId) : null;
+}
+
+function getWalletChainConfig(network) {
+    return {
+        chainId: parseInt(network.chainId, 16),
+        chainName: network.displayName || network.name,
+        nativeCurrency: network.nativeCurrency,
+        rpcUrls: [network.rpcUrl, ...(network.fallbackRpcUrls || [])].filter(Boolean),
+        blockExplorerUrls: [network.explorer].filter(Boolean)
+    };
+}
+
 export class WalletManager {
     constructor() {
-        // Initialize logger
         const logger = createLogger('WALLET');
         this.debug = logger.debug.bind(logger);
         this.error = logger.error.bind(logger);
@@ -224,11 +262,18 @@ export class WalletManager {
         this.isConnecting = false;
         this.account = null;
         this.chainId = null;
-        this.isConnected = false;
+        this._isConnected = false;
         this.onAccountChange = null;
         this.onChainChange = null;
         this.onConnect = null;
         this.onDisconnect = null;
+        this.walletCore = createWalletCore({
+            storage: getBrowserStorage(),
+            walletSessionKey: WALLET_SESSION_KEY
+        });
+        this.injectedProvider = null;
+        this.providerSource = null;
+        this.walletUnsubscribe = null;
         this.provider = null;
         this.signer = null;
         this.contract = null;
@@ -236,8 +281,6 @@ export class WalletManager {
         this.contractABI = getDefaultNetwork().contractABI;
         this.isInitialized = false;
         this.contractInitialized = false;
-        
-        // Add user preference tracking for disconnect state
         this.userDisconnected = false;
         this.STORAGE_KEY = 'wallet_user_disconnected';
     }
@@ -245,84 +288,153 @@ export class WalletManager {
     async init() {
         try {
             this.debug('Starting initialization...');
-            
-            if (typeof window.ethereum === 'undefined') {
-                this.debug('MetaMask is not installed, initializing in read-only mode');
+            const networkCfg = getNetworkConfig();
+            this.contractAddress = networkCfg.contractAddress;
+            this.contractABI = CONTRACT_ABI;
+
+            await this.walletCore.discoverWallets();
+            this.bindWalletCoreEvents();
+            this.loadUserDisconnectPreference();
+
+            const availableProvider = this.walletCore.getEip1193Provider?.();
+            if (!availableProvider) {
+                this.debug('No compatible wallet detected, initializing in read-only mode');
                 this.provider = null;
                 this.isInitialized = true;
                 return;
             }
 
-            this.provider = new ethers.providers.Web3Provider(window.ethereum);
-            
-            // Set contract configuration
-            const networkCfg = getNetworkConfig();
-            this.contractAddress = networkCfg.contractAddress;
-            this.contractABI = CONTRACT_ABI;
-            
-            this.debug('Provider initialized');
-            this.debug('Contract config:', {
-                address: this.contractAddress,
-                hasABI: !!this.contractABI
-            });
-
-            // Setup event listeners
-            window.ethereum.on('accountsChanged', this.handleAccountsChanged.bind(this));
-            window.ethereum.on('chainChanged', this.handleChainChanged.bind(this));
-            window.ethereum.on('connect', this.handleConnect.bind(this));
-            window.ethereum.on('disconnect', this.handleDisconnect.bind(this));
-
-            // Check user disconnect preference before auto-connecting
-            this.loadUserDisconnectPreference();
-            
-            // Only auto-connect if user hasn't manually disconnected
             if (!this.userDisconnected) {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                if (accounts.length > 0) {
-                    this.debug('Auto-connecting to existing MetaMask session');
-                    // Ensure internal state reflects connected session
-                    this.account = accounts[0];
-                    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-                    this.chainId = chainId;
-                    // Enforce default network behavior on reload (same as connect flow)
-                    this.handleChainChanged(chainId);
-                    this.isConnected = true;
-                    // Initialize signer and contract for the session
+                const state = await this.walletCore.sync();
+                this.applyWalletState(state);
+                if (this.account) {
+                    this.debug('Auto-connecting to existing wallet session');
+                    this.ensureProvider();
+                    await this.switchToDefaultNetwork();
+                    await this.refreshChainId();
                     await this.initializeSigner(this.account);
-                    // Notify listeners so UI can react as connected
                     this.notifyListeners('connect', {
                         account: this.account,
                         chainId: this.chainId
                     });
+                } else {
+                    this.ensureProvider();
+                    await this.refreshChainId().catch(() => null);
                 }
             } else {
                 this.debug('User has manually disconnected, skipping auto-connect');
+                await this.walletCore.sync();
+                this.ensureProvider();
+                await this.refreshChainId().catch(() => null);
             }
 
             this.isInitialized = true;
             this.debug('Initialization complete');
         } catch (error) {
-            console.error("[WalletManager] Error in init:", error);
+            console.error('[WalletManager] Error in init:', error);
             throw error;
         }
     }
 
+    bindWalletCoreEvents() {
+        if (this.walletUnsubscribe) {
+            return;
+        }
+
+        this.walletUnsubscribe = this.walletCore.subscribe(async (event, data) => {
+            if (event === 'connected') {
+                this.applyWalletState(this.walletCore.getState());
+                this.ensureProvider();
+                if (this.account) {
+                    await this.initializeSigner(this.account).catch(error => {
+                        this.error('Error initializing signer after wallet connect:', error);
+                    });
+                }
+                return;
+            }
+
+            if (event === 'disconnected') {
+                this.handleDisconnect();
+                return;
+            }
+
+            if (event === 'accountChanged') {
+                const nextAccount = normalizeAccount(data);
+                await this.handleAccountsChanged(nextAccount ? [nextAccount] : []);
+                return;
+            }
+
+            if (event === 'chainChanged') {
+                this.handleChainChanged(toHexChainId(data) || data);
+            }
+        });
+    }
+
+    applyWalletState(state = this.walletCore.getState()) {
+        const injectedProvider = this.walletCore.getEip1193Provider?.() || null;
+        this.injectedProvider = injectedProvider;
+        if (this.providerSource !== injectedProvider) {
+            this.provider = null;
+            this.providerSource = null;
+            this.signer = null;
+            this.contract = null;
+            this.contractInitialized = false;
+        }
+
+        this.account = normalizeAccount(state.account);
+        this.chainId = toHexChainId(state.chainId);
+        this._isConnected = Boolean(this.account);
+    }
+
+    ensureProvider() {
+        const injectedProvider = this.walletCore.getEip1193Provider?.() || this.injectedProvider;
+        if (!injectedProvider) {
+            this.provider = null;
+            this.providerSource = null;
+            return null;
+        }
+
+        if (!this.provider || this.providerSource !== injectedProvider) {
+            this.injectedProvider = injectedProvider;
+            this.provider = new ethers.providers.Web3Provider(injectedProvider, 'any');
+            this.providerSource = injectedProvider;
+            this.signer = null;
+            this.contract = null;
+            this.contractInitialized = false;
+        }
+
+        return this.provider;
+    }
+
+    async refreshChainId() {
+        const injectedProvider = this.walletCore.getEip1193Provider?.() || this.injectedProvider;
+        if (!injectedProvider) {
+            this.chainId = null;
+            return null;
+        }
+        const chainId = await injectedProvider.request({ method: 'eth_chainId' });
+        this.chainId = toHexChainId(chainId);
+        return this.chainId;
+    }
+
     async checkConnection() {
         try {
-            if (!this.provider) {
+            const state = await this.walletCore.sync();
+            this.applyWalletState(state);
+            if (!this.account) {
                 return false;
             }
-            const accounts = await this.provider.listAccounts();
-            return accounts.length > 0;
+            this.ensureProvider();
+            return true;
         } catch (error) {
             console.error('[WalletManager] Connection check failed:', error);
             return false;
         }
     }
 
-    async initializeSigner(account) {
+    async initializeSigner() {
         try {
-            if (!this.provider) {
+            if (!this.ensureProvider()) {
                 throw new Error('No provider available');
             }
             this.signer = this.provider.getSigner();
@@ -347,9 +459,8 @@ export class WalletManager {
                 CONTRACT_ABI,
                 this.signer
             );
-            
-            this.debug('Contract initialized with ABI:', 
-                this.contract.interface.format());
+
+            this.debug('Contract initialized with ABI:', this.contract.interface.format());
             this.contractInitialized = true;
             return this.contract;
         } catch (error) {
@@ -358,45 +469,55 @@ export class WalletManager {
         }
     }
 
+    selectPrimaryWallet(wallets = []) {
+        const state = this.walletCore.getState?.() || {};
+        const sessionWalletId = state.sessionWalletId || state.selectedWalletId;
+        if (sessionWalletId) {
+            const persistedWallet = wallets.find(wallet => wallet.id === sessionWalletId);
+            if (persistedWallet) {
+                return persistedWallet;
+            }
+        }
+
+        return wallets.find(wallet => {
+            const name = String(wallet.info?.name || '').toLowerCase();
+            const rdns = String(wallet.info?.rdns || '').toLowerCase();
+            return name.includes('metamask') || rdns.includes('metamask');
+        }) || wallets.find(wallet => wallet.source === 'eip6963') || wallets[0] || null;
+    }
+
     async connect() {
         if (this.isConnecting) {
             console.log('[WalletManager] Connection already in progress');
             return null;
         }
 
-        if (!this.provider) {
-            throw new Error('MetaMask is not installed');
+        const wallets = await this.walletCore.discoverWallets();
+        const selectedWallet = this.selectPrimaryWallet(wallets);
+        if (!selectedWallet) {
+            throw new Error('No compatible browser wallet was detected.');
         }
 
         this.isConnecting = true;
         try {
             this.debug('Requesting accounts...');
-            const accounts = await window.ethereum.request({ 
-                method: 'eth_requestAccounts' 
-            });
-            
-            this.debug('Accounts received:', accounts);
-            
-            const chainId = await window.ethereum.request({ 
-                method: 'eth_chainId' 
-            });
+            const account = await this.walletCore.connect({ walletId: selectedWallet.id });
+            this.applyWalletState(this.walletCore.getState());
+            this.ensureProvider();
+
+            let chainId = await this.refreshChainId();
             this.debug('Chain ID:', chainId);
 
-            const decimalChainId = parseInt(chainId, 16).toString();
-            this.debug('Decimal Chain ID:', decimalChainId);
-            
-            if (decimalChainId !== "80002") { //TODO: need to not hardcode this
+            const defaultNetwork = getDefaultNetwork();
+            if (parseInt(chainId, 16).toString() !== parseInt(defaultNetwork.chainId, 16).toString()) {
                 await this.switchToDefaultNetwork();
+                chainId = await this.refreshChainId();
             }
 
-            this.account = accounts[0];
+            this.account = normalizeAccount(account) || this.account;
             this.chainId = chainId;
-            this.isConnected = true;
-
-            // Clear user disconnect preference when they manually connect
+            this._isConnected = Boolean(this.account);
             this.saveUserDisconnectPreference(false);
-
-            // Initialize signer before notifying listeners
             await this.initializeSigner(this.account);
 
             this.debug('Notifying listeners of connection');
@@ -417,44 +538,69 @@ export class WalletManager {
         }
     }
 
+    async completeWalletModuleConnection(account = null) {
+        this.applyWalletState(this.walletCore.getState());
+        this.ensureProvider();
+
+        let chainId = await this.refreshChainId();
+        const defaultNetwork = getDefaultNetwork();
+        if (chainId && parseInt(chainId, 16).toString() !== parseInt(defaultNetwork.chainId, 16).toString()) {
+            await this.switchToDefaultNetwork();
+            chainId = await this.refreshChainId();
+        }
+
+        this.account = normalizeAccount(account) || this.account;
+        this.chainId = chainId;
+        this._isConnected = Boolean(this.account);
+        this.saveUserDisconnectPreference(false);
+        await this.initializeSigner(this.account);
+
+        this.notifyListeners('connect', {
+            account: this.account,
+            chainId: this.chainId
+        });
+
+        return {
+            account: this.account,
+            chainId: this.chainId
+        };
+    }
+
+    getWalletCore() {
+        return this.walletCore;
+    }
+
     async switchToDefaultNetwork() {
         const targetNetwork = getDefaultNetwork();
-        try {
-            await window.ethereum.request({
-                method: 'wallet_switchEthereumChain',
-                params: [{ chainId: targetNetwork.chainId }],
-            });
-        } catch (error) {
-            if (error.code === 4902) {
-                await window.ethereum.request({
-                    method: 'wallet_addEthereumChain',
-                    params: [{
-                        chainId: targetNetwork.chainId,
-                        chainName: targetNetwork.name,
-                        nativeCurrency: targetNetwork.nativeCurrency,
-                        rpcUrls: [targetNetwork.rpcUrl, ...targetNetwork.fallbackRpcUrls],
-                        blockExplorerUrls: [targetNetwork.explorer]
-                    }],
-                });
-            } else {
-                throw error;
-            }
+        await this.switchToNetwork(targetNetwork.chainId);
+    }
+
+    async switchToNetwork(chainId) {
+        const network = getNetworkById(chainId);
+        if (!network) {
+            throw new Error(`Network configuration not found for chain ID: ${chainId}`);
         }
+        const injectedProvider = this.walletCore.getEip1193Provider?.() || this.injectedProvider;
+        if (!injectedProvider) {
+            throw new Error('No compatible browser wallet was detected.');
+        }
+        await switchOrAddEthereumChain(injectedProvider, getWalletChainConfig(network));
+        await this.refreshChainId();
     }
 
     async handleAccountsChanged(accounts) {
         this.debug('Accounts changed:', accounts);
         if (accounts.length === 0) {
             this.account = null;
-            this.isConnected = false;
+            this._isConnected = false;
             this.signer = null;
             this.contract = null;
             this.contractInitialized = false;
             this.debug('No accounts, triggering disconnect');
             this.notifyListeners('disconnect', {});
         } else if (accounts[0] !== this.account) {
-            this.account = accounts[0];
-            this.isConnected = true;
+            this.account = normalizeAccount(accounts[0]);
+            this._isConnected = Boolean(this.account);
             try {
                 await this.initializeSigner(this.account);
             } catch (e) {
@@ -466,15 +612,17 @@ export class WalletManager {
     }
 
     handleChainChanged(chainId) {
-        this.chainId = chainId;
-        this.notifyListeners('chainChanged', { chainId });
+        this.chainId = toHexChainId(chainId) || chainId;
+        this.notifyListeners('chainChanged', { chainId: this.chainId });
         if (this.onChainChange) {
-            this.onChainChange(chainId);
+            this.onChainChange(this.chainId);
         }
-        
-        const network = getNetworkById(chainId);
+
+        const network = getNetworkById(this.chainId);
         if (!network?.isDefault) {
-            this.switchToDefaultNetwork();
+            this.switchToDefaultNetwork().catch(error => {
+                this.warn('Failed to switch to default network:', error);
+            });
         }
     }
 
@@ -485,13 +633,16 @@ export class WalletManager {
     }
 
     handleDisconnect(error) {
-        this.isConnected = false;
+        this.account = null;
+        this._isConnected = false;
+        this.signer = null;
+        this.contract = null;
+        this.contractInitialized = false;
         if (this.onDisconnect) {
             this.onDisconnect(error);
         }
     }
 
-    // Utility methods
     getAccount() {
         return this.account;
     }
@@ -500,30 +651,27 @@ export class WalletManager {
         if (!this.provider) {
             return false;
         }
-        return this.isConnected;
+        return this._isConnected;
     }
 
     disconnect() {
         this.debug('User manually disconnecting wallet');
-        
-        // Save user's disconnect preference
         this.saveUserDisconnectPreference(true);
-        
-        // Clear connection state
         this.account = null;
         this.chainId = null;
-        this.isConnected = false;
+        this._isConnected = false;
         this.signer = null;
         this.contract = null;
         this.contractInitialized = false;
-        
-        // Notify listeners of disconnect
+        this.walletCore.disconnect().catch(error => {
+            this.warn('Wallet module disconnect failed:', error);
+        });
         this.notifyListeners('disconnect', {});
-        
+
         if (this.onDisconnect) {
             this.onDisconnect();
         }
-        
+
         this.debug('Wallet disconnected and preference saved');
     }
 
@@ -539,23 +687,22 @@ export class WalletManager {
         this.listeners.forEach(callback => callback(event, data));
     }
 
-    // Add getter methods
     getSigner() {
-        if (!this.provider) {
+        if (!this.ensureProvider()) {
             return null;
         }
         return this.signer;
     }
 
     getContract() {
-        if (!this.provider) {
+        if (!this.ensureProvider()) {
             return null;
         }
         return this.contract;
     }
 
     getProvider() {
-        return this.provider;
+        return this.ensureProvider();
     }
 
     async initializeProvider() {
@@ -564,7 +711,6 @@ export class WalletManager {
             let provider;
             let error;
 
-            // Try main RPC URL first
             try {
                 provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
                 await provider.getNetwork();
@@ -573,7 +719,6 @@ export class WalletManager {
                 error = e;
             }
 
-            // Try fallback URLs
             for (const rpcUrl of config.fallbackRpcUrls) {
                 try {
                     provider = new ethers.providers.JsonRpcProvider(rpcUrl);
@@ -591,12 +736,10 @@ export class WalletManager {
         }
     }
 
-    // Add method to check initialization status
     isWalletInitialized() {
         return this.isInitialized;
     }
 
-    // Add method to get contract configuration
     getContractConfig() {
         return {
             address: this.contractAddress,
@@ -606,12 +749,11 @@ export class WalletManager {
 
     getFallbackProviders() {
         const config = getNetworkConfig();
-        return config.fallbackRpcUrls.map(url => 
+        return config.fallbackRpcUrls.map(url =>
             new ethers.providers.JsonRpcProvider(url)
         );
     }
 
-    // Add this new method
     async getCurrentAddress() {
         if (!this.signer) {
             throw new Error('No signer available');
@@ -627,10 +769,10 @@ export class WalletManager {
         const disconnected = localStorage.getItem(this.STORAGE_KEY);
         if (disconnected === 'true') {
             this.userDisconnected = true;
-            this.debug('User has manually disconnected from MetaMask.');
+            this.debug('User has manually disconnected from the wallet.');
         } else {
             this.userDisconnected = false;
-            this.debug('User has not manually disconnected from MetaMask.');
+            this.debug('User has not manually disconnected from the wallet.');
         }
     }
 
@@ -640,17 +782,10 @@ export class WalletManager {
         this.debug(`User disconnect preference saved: ${disconnected}`);
     }
 
-    /**
-     * Check if the user has manually disconnected
-     * @returns {boolean} True if user has manually disconnected
-     */
     hasUserDisconnected() {
         return this.userDisconnected;
     }
 
-    /**
-     * Clear the user's disconnect preference (useful for testing or admin actions)
-     */
     clearDisconnectPreference() {
         localStorage.removeItem(this.STORAGE_KEY);
         this.userDisconnected = false;

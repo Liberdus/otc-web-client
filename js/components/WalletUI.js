@@ -1,6 +1,7 @@
 import { BaseComponent } from './BaseComponent.js';
 import { walletManager, getNetworkConfig, getNetworkById } from '../config.js';
 import { createLogger } from '../services/LogService.js';
+import { createWalletConnectButton } from '../../vendor/liberdus-wallet-module/index.js';
 
 export class WalletUI extends BaseComponent {
     constructor() {
@@ -39,14 +40,27 @@ export class WalletUI extends BaseComponent {
                 throw new Error('Required wallet UI elements not found');
             }
 
-            // Add click listener with explicit binding
-            const handleClick = (e) => {
-                this.debug('Connect button clicked!', e);
-                this.handleConnectClick(e);
-            };
-
-            this.connectButton.addEventListener('click', handleClick);
-            this.debug('Click listener added to connect button');
+            this.connectButton.classList.add('hidden');
+            this.walletModuleContainer = document.createElement('div');
+            this.walletModuleContainer.className = 'wallet-module-connect';
+            this.connectButton.after(this.walletModuleContainer);
+            this.walletControl = createWalletConnectButton({
+                target: this.walletModuleContainer,
+                walletCore: walletManager.getWalletCore(),
+                buttonLabel: 'Connect Wallet',
+                onConnect: async ({ account }) => {
+                    const result = await walletManager.completeWalletModuleConnection(account);
+                    this.updateUI(result.account);
+                },
+                onDisconnect: () => {
+                    walletManager.disconnect();
+                },
+                onError: (error) => {
+                    this.error('Wallet module error:', error);
+                    this.showError('Failed to connect wallet: ' + error.message);
+                }
+            });
+            this.debug('Wallet module connect control mounted');
 
         } catch (error) {
             this.error('Error in initializeElements:', error);
@@ -106,8 +120,8 @@ export class WalletUI extends BaseComponent {
         try {
             this.debug('Starting init...');
             
-            if (typeof window.ethereum === 'undefined') {
-                this.debug('MetaMask is not installed, initializing in read-only mode');
+            if (!walletManager.getProvider()) {
+                this.debug('No wallet provider is available, initializing in read-only mode');
                 return true;
             }
 
@@ -123,10 +137,10 @@ export class WalletUI extends BaseComponent {
             
             // Check if already connected, but only if not already connecting and user hasn't manually disconnected
             if (!walletManager.isConnecting) {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                if (accounts && accounts.length > 0) {
+                const isConnected = await walletManager.checkConnection();
+                if (isConnected) {
                     this.debug('Found existing connection, connecting...');
-                    await this.connectWallet();
+                    this.updateUI(walletManager.getAccount());
                 }
             }
             
@@ -215,6 +229,7 @@ export class WalletUI extends BaseComponent {
             this.debug('Setting short address:', shortAddress);
             
             this.connectButton.classList.add('hidden');
+            this.walletControl?.element?.classList.add('hidden');
             this.walletInfo.classList.remove('hidden');
             this.accountAddress.textContent = shortAddress;
             
@@ -234,7 +249,7 @@ export class WalletUI extends BaseComponent {
     showConnectButton() {
         try {
             this.debug('Showing connect button');
-            this.connectButton.classList.remove('hidden');
+            this.walletControl?.element?.classList.remove('hidden');
             this.walletInfo.classList.add('hidden');
             // Remove wallet-connected class
             document.querySelector('.swap-section')?.classList.remove('wallet-connected');
@@ -269,4 +284,4 @@ export class WalletUI extends BaseComponent {
             console.error('[WalletUI] Error updating network badge:', error);
         }
     }
-} 
+}
