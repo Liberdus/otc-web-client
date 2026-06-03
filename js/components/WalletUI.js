@@ -119,15 +119,14 @@ export class WalletUI extends BaseComponent {
     async init() {
         try {
             this.debug('Starting init...');
-            
+
+            this.setupEventListeners();
+
             if (!walletManager.getProvider()) {
                 this.debug('No wallet provider is available, initializing in read-only mode');
                 return true;
             }
 
-            // Setup event listeners
-            this.setupEventListeners();
-            
             // Check if user has manually disconnected
             if (walletManager.hasUserDisconnected()) {
                 this.debug('User has manually disconnected, showing connect button');
@@ -152,6 +151,11 @@ export class WalletUI extends BaseComponent {
     }
 
     setupEventListeners() {
+        if (this.eventsBound) {
+            return;
+        }
+        this.eventsBound = true;
+
         // Update disconnect button handler
         this.disconnectButton.addEventListener('click', async (e) => {
             e.preventDefault();
