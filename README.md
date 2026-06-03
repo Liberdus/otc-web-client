@@ -44,6 +44,18 @@ The application currently runs on Polygon Amoy Testnet. Network configuration is
 
 ## Getting Started (locally)
 
+Clone with the shared wallet module submodule initialized:
+
+```bash
+git clone --recurse-submodules https://github.com/Liberdus/otc-web-client.git
+```
+
+For an existing clone, initialize submodules before running the app:
+
+```bash
+git submodule update --init --recursive
+```
+
 1. Install dependencies:
 ```bash
 npm install
