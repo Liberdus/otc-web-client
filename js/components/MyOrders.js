@@ -645,8 +645,9 @@ export class MyOrders extends ViewOrders {
                 
                 cancelButton.addEventListener('click', async () => {
                     try {
-                        if (!this.provider) {
-                            throw new Error('MetaMask is not installed. Please install MetaMask to cancel orders.');
+                        const signer = window.walletManager?.getSigner?.();
+                        if (!signer) {
+                            throw new Error('Connect a browser wallet to cancel orders.');
                         }
 
                         cancelButton.disabled = true;
@@ -659,7 +660,6 @@ export class MyOrders extends ViewOrders {
                             throw new Error('Contract not available');
                         }
 
-                        const signer = this.provider.getSigner();
                         const contractWithSigner = contract.connect(signer);
                         
                         // Add gas buffer
@@ -812,8 +812,9 @@ export class MyOrders extends ViewOrders {
                     
                     cancelButton.addEventListener('click', async () => {
                         try {
-                            if (!this.provider) {
-                                throw new Error('MetaMask is not installed. Please install MetaMask to cancel orders.');
+                            const signer = window.walletManager?.getSigner?.();
+                            if (!signer) {
+                                throw new Error('Connect a browser wallet to cancel orders.');
                             }
 
                             cancelButton.disabled = true;
@@ -825,7 +826,6 @@ export class MyOrders extends ViewOrders {
                                 throw new Error('Contract not available');
                             }
 
-                            const signer = this.provider.getSigner();
                             const contractWithSigner = contract.connect(signer);
                             
                             const gasEstimate = await contractWithSigner.estimateGas.cancelOrder(order.id);

@@ -129,12 +129,6 @@ class App {
         const isInitiallyConnected = !!window.walletManager?.getSigner?.();
         this.currentTab = isInitiallyConnected ? 'create-order' : 'view-orders';
 
-		// Add wallet connect button handler
-		const walletConnectBtn = document.getElementById('walletConnect');
-		if (walletConnectBtn) {
-			walletConnectBtn.addEventListener('click', this.handleConnectWallet);
-		}
-
 		// Add wallet connection state handler
 		walletManager.addListener(async (event, data) => {
 			switch (event) {
@@ -790,10 +784,7 @@ const populateNetworkOptions = () => {
 				
 				if (window.walletManager && window.walletManager.isConnected()) {
 					const chainId = option.dataset.chainId;
-					await window.ethereum.request({
-						method: 'wallet_switchEthereumChain',
-						params: [{ chainId }],
-					});
+					await window.walletManager.switchToNetwork(chainId);
 				}
 			} catch (error) {
 				console.error('Failed to switch network:', error);
@@ -850,4 +841,3 @@ function showAppParametersPopup() {
 	
 	document.body.appendChild(popup);
 }
-
