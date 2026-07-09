@@ -177,11 +177,25 @@ export const TOKEN_ICON_CONFIG = {
 export const getAllNetworks = () => Object.values(networkConfig);
 
 export const isDebugEnabled = (component) => {
-    // Check if debug mode is forced via localStorage
-    const localDebug = localStorage.getItem('debug');
+    let localDebug;
+    try {
+        localDebug = localStorage.getItem('debug');
+    } catch {
+        return DEBUG_CONFIG[component];
+    }
     if (localDebug) {
-        const debugSettings = JSON.parse(localDebug);
-        return debugSettings[component] ?? DEBUG_CONFIG[component];
+        try {
+            const debugSettings = JSON.parse(localDebug);
+            if (debugSettings && typeof debugSettings === 'object') {
+                return debugSettings[component] ?? DEBUG_CONFIG[component];
+            }
+        } catch {
+            try {
+                localStorage.removeItem('debug');
+            } catch {
+                // Ignore storage cleanup failures and fall back to defaults.
+            }
+        }
     }
     return DEBUG_CONFIG[component];
 };
