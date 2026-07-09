@@ -147,3 +147,16 @@ test('keeps app disconnect wired when a wallet appears after read-only startup',
     await expect(page.locator('.liberdus-wallet-connect__button')).toBeVisible();
     await expect.poll(() => page.evaluate(() => window.walletManager?.getAccount?.())).toBeNull();
 });
+
+test('ignores invalid debug settings stored in localStorage', async ({ page }) => {
+    await installWalletBeforeLoad(page);
+    await page.addInitScript(() => {
+        window.localStorage.setItem('debug', '{invalid-json');
+    });
+
+    await page.goto('/');
+
+    await waitForWalletUi(page);
+    await expect(page.locator('.liberdus-wallet-connect__button')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.localStorage.getItem('debug'))).toBeNull();
+});
