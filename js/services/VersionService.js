@@ -64,6 +64,11 @@ export class VersionService {
 			}
 			
 			newVersion = (await response.text()).trim();
+			// A successful HTTP response may still be empty or a host error page.
+			// Accept only the numeric, dot-separated format used by version.html.
+			if (!/^\d+(?:\.\d+)*$/.test(newVersion)) {
+				throw new Error('Version response has an invalid format');
+			}
 			this.debug('Server version:', newVersion);
 			
 		} catch (error) {
