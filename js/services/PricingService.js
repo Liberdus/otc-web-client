@@ -149,10 +149,11 @@ export class PricingService {
                 
                 // Calculate and set quote token price if we don't have it yet
                 if (!prices.has(quoteAddr)) {
-                    const basePrice = prices.get(baseAddr).price;
                     const priceNative = parseFloat(pair.priceNative);
                     if (!isNaN(priceNative) && priceNative > 0) {
-                        const quotePrice = basePrice / priceNative;
+                        // Both values must come from this pair; the cached base
+                        // price may have been selected from a different pool.
+                        const quotePrice = priceUsd / priceNative;
                         if (this.validatePrice(quotePrice, quoteAddr)) {
                             prices.set(quoteAddr, {
                                 price: quotePrice,
