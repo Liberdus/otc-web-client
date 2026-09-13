@@ -276,7 +276,13 @@ export class PricingService {
         
         try {
             const newPrices = await this.fetchTokenPrices(addressesToFetch);
-            addressesToFetch.forEach(addr => this.lastPriceFetch.set(addr, Date.now()));
+            // A partial or failed fetch must not make an old price look fresh.
+            const fetchedAt = Date.now();
+            addressesToFetch.forEach(addr => {
+                if (newPrices.has(addr)) {
+                    this.lastPriceFetch.set(addr, fetchedAt);
+                }
+            });
             return newPrices;
         } finally {
             addressesToFetch.forEach(addr => this.pendingRequests.delete(addr));
