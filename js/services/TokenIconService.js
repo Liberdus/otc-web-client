@@ -270,21 +270,24 @@ export class TokenIconService {
             return null;
         }
 
-        try {
-            const response = await fetch(`https://api.coingecko.com/api/v3/coins/${coinId}?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false`);
-            
-            if (response.ok) {
-                const data = await response.json();
-                if (data.image && data.image.small) {
-                    debug('Found CoinGecko icon URL:', data.image.small);
-                    return data.image.small;
-                }
-            }
-        } catch (error) {
-            debug('CoinGecko API call failed:', error.message);
+        const response = await fetch(`https://api.coingecko.com/api/v3/coins/${coinId}?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false`);
+
+        // Only a confirmed missing coin may populate the unknown-token cache.
+        // Let temporary failures reach loadIconUrl's bounded retry handler.
+        if (response.status === 404) {
+            return null;
+        }
+        if (!response.ok) {
+            throw new Error(`CoinGecko API request failed: ${response.status}`);
         }
 
-        return null;
+        const data = await response.json();
+        if (typeof data.image?.small !== 'string' || !data.image.small.trim()) {
+            throw new Error('CoinGecko response is missing a usable icon URL');
+        }
+
+        debug('Found CoinGecko icon URL:', data.image.small);
+        return data.image.small;
     }
 
 
